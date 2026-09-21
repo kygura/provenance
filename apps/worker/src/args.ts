@@ -79,11 +79,14 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       const name = long ? rawName : (SHORT[rawName] ?? rawName);
 
       if ((VALUE_FLAGS as readonly string[]).includes(name)) {
-        const value = inline ?? argv[++i];
-        if (value === undefined || value.startsWith('-')) {
+        // Peek, do not consume: `--limit --verbose` must not eat the next flag.
+        const next = argv[i + 1];
+        const value = inline ?? (next !== undefined && !next.startsWith('-') ? next : undefined);
+        if (value === undefined) {
           parsed.errors.push(`--${name} expects a value`);
           continue;
         }
+        if (inline === undefined) i += 1;
         parsed.flags[name] = value;
         continue;
       }
