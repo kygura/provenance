@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": false,
+    "skipLibCheck": true,
+    "allowJs": false,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": false,
+    "noEmit": true,
+    "types": ["bun"],
+    "paths": {
+      "@provenance/core": ["./packages/core/src/index.ts"],
+      "@provenance/core/*": ["./packages/core/src/*"],
+      "@provenance/sources": ["./packages/sources/src/index.ts"],
+      "@provenance/chain": ["./packages/chain/src/index.ts"],
+      "@provenance/research": ["./packages/research/src/index.ts"],
+      "@provenance/store": ["./packages/store/src/index.ts"],
+      "@provenance/alerts": ["./packages/alerts/src/index.ts"]
+    }
+  },
+  "exclude": ["node_modules", "apps/dashboard/.next", "**/node_modules"]
+}
