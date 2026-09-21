@@ -1,0 +1,29 @@
+{
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/pairaddr",
+  "pairAddress": "PAIR1111111111111111111111111111111111111111",
+  "baseToken": {
+    "address": "TOKEN111111111111111111111111111111111111111",
+    "name": "Pepe 2.0",
+    "symbol": "PEPE2"
+  },
+  "quoteToken": {"address": "So11111111111111111111111111111111111111112", "symbol": "SOL"},
+  "priceUsd": "0.00042",
+  "txns": {"h24": {"buys": 4210, "sells": 3980}, "h6": {"buys": 900, "sells": 850}},
+  "volume": {"h24": 1850000, "h6": 620000, "h1": 95000},
+  "priceChange": {"h24": 84.2, "h6": 12.1, "h1": -3.4},
+  "liquidity": {"usd": 310000, "base": 1000000, "quote": 900},
+  "fdv": 4200000,
+  "marketCap": 4200000,
+  "pairCreatedAt": 1758326400000,
+  "info": {
+    "websites": [{"label": "Website", "url": "https://example.invalid"}],
+    "socials": [
+      {"type": "twitter", "url": "https://x.com/example"},
+      {"type": "telegram", "url": "https://t.me/example"},
+      {"type": "github", "url": "https://github.com/example"}
+    ],
+    "description": "The reborn frog. PEPE 2.0 is back."
+  }
+}

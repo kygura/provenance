@@ -1,0 +1,20 @@
+{
+  "id": "solana_PAIR222",
+  "type": "pool",
+  "attributes": {
+    "name": "WIF2 / SOL",
+    "address": "PAIR222",
+    "base_token_price_usd": "0.0175",
+    "fdv_usd": "17500000",
+    "market_cap_usd": null,
+    "reserve_in_usd": "890000.12",
+    "pool_created_at": "2026-09-18T12:00:00Z",
+    "volume_usd": {"h24": "2400000.5", "h6": "700000", "h1": "110000"},
+    "price_change_percentage": {"h24": "31.2", "h6": "-4.1", "h1": "0.9"},
+    "transactions": {"h24": {"buys": 8800, "sells": 8100}}
+  },
+  "relationships": {
+    "base_token": {"data": {"id": "solana_TOKEN222", "type": "token"}},
+    "dex": {"data": {"id": "meteora", "type": "dex"}}
+  }
+}

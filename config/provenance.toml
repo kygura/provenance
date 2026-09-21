@@ -1,0 +1,44 @@
+# Tunables for a scheduled run. Secrets never go here - see .env.example.
+
+state_path = "state/provenance.sqlite3"
+
+[sources]
+# Chains to sweep, in priority order.
+chains = ["solana", "ethereum", "base", "bsc"]
+# DEXTools plan slug: trial | standard | advanced | pro. Only used when
+# DEXTOOLS_API_KEY is set; the free sources cover the same ground without it.
+dextools_plan = "trial"
+dextools_enabled = true
+dexscreener_enabled = true
+geckoterminal_enabled = true
+per_source_limit = 30
+
+[filters]
+# Floors that cut the obvious noise before anything costs money.
+min_liquidity_usd = 25000
+min_volume_24h_usd = 50000
+# Skip anything older than three weeks - it is no longer "trending", it is a chart.
+max_age_hours = 504
+# And anything under an hour old, where every metric is still meaningless.
+min_age_hours = 1.0
+# Let near-total insider concentration through only if you want to see the carnage.
+max_top10_pct = 92.0
+require_socials = false
+
+[research]
+model = "claude-opus-5"
+effort = "high"
+max_tokens = 16000
+max_web_searches = 8
+# Hard ceiling on LLM calls per run. This is the cost dial.
+max_tokens_per_run = 6
+max_pause_turn_restarts = 4
+
+[alerts]
+# Below this the verdict is filed to the report but not pushed anywhere.
+min_recycle_confidence = 55
+novelty_allowlist = ["pure-rerun", "remix", "novel"]
+# Don't re-alert the same token inside this window.
+realert_after_hours = 72.0
+write_markdown_report = true
+reports_dir = "reports"

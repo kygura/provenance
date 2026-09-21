@@ -1,0 +1,22 @@
+{
+  "holder_count": "4821",
+  "creator_percent": "0.031",
+  "is_honeypot": "0",
+  "is_open_source": "1",
+  "is_mintable": "0",
+  "transfer_pausable": "0",
+  "hidden_owner": "1",
+  "buy_tax": "0.03",
+  "sell_tax": "0.05",
+  "holders": [
+    {"address": "0xaaa", "percent": "0.21", "is_locked": 0, "tag": ""},
+    {"address": "0xbbb", "percent": "0.09", "is_locked": 0, "tag": ""},
+    {"address": "0xccc", "percent": "0.40", "is_locked": 1, "tag": "lock"},
+    {"address": "0xddd", "percent": "0.05", "is_locked": 0, "tag": ""},
+    {"address": "0x000", "percent": "0.12", "is_locked": 0, "tag": "Burn Address"}
+  ],
+  "lp_holders": [
+    {"address": "0x000", "percent": "0.95", "is_locked": 0, "tag": "Null Address"},
+    {"address": "0xeee", "percent": "0.05", "is_locked": 0, "tag": ""}
+  ]
+}

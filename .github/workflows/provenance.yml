@@ -1,0 +1,103 @@
+name: provenance
+
+on:
+  schedule:
+    # Twice a day. 06:00 UTC lands before the European session, 18:00 UTC after
+    # the US open — the two points where a narrative that moved overnight is
+    # visible but not yet finished.
+    - cron: "0 6 * * *"
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Scrape and rank only — no LLM calls, no alerts"
+        type: boolean
+        default: false
+      limit:
+        description: "Override how many tokens get researched"
+        type: string
+        default: ""
+
+concurrency:
+  group: provenance-run
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --extra dev
+
+      # Dedupe history. Losing this to cache eviction costs a repeated alert,
+      # nothing more — the committed reports and the issues are the real record.
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: provenance-state-${{ github.run_id }}
+          restore-keys: provenance-state-
+
+      - name: Run
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEXTOOLS_API_KEY: ${{ secrets.DEXTOOLS_API_KEY }}
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          BIRDEYE_API_KEY: ${{ secrets.BIRDEYE_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          args="run"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then args="$args --dry-run"; fi
+          if [ -n "${{ inputs.limit }}" ]; then args="$args --limit ${{ inputs.limit }}"; fi
+          uv run provenance -v $args | tee "$GITHUB_STEP_SUMMARY"
+
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: provenance-state-${{ github.run_id }}
+
+      - name: Commit reports
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git config user.name "provenance-bot"
+          git config user.email "provenance-bot@users.noreply.github.com"
+          git add reports
+          if git diff --cached --quiet; then
+            echo "No new report to commit."
+            exit 0
+          fi
+          git commit -m "reports: sweep $(date -u '+%Y-%m-%d %H:%M UTC')"
+          # The schedule can overlap a human push; rebase rather than fail the run.
+          for i in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep $((i * 5))
+          done
+          echo "::warning::could not push the report; it is in the run artifacts"
+          exit 0
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provenance-report
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 30

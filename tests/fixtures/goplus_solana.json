@@ -1,0 +1,16 @@
+{
+  "holder_count": 1290,
+  "total_supply": "1000000000",
+  "mintable": {"status": "0"},
+  "freezable": {"status": "1"},
+  "closable": {"status": "0"},
+  "metadata_mutable": {"status": "1"},
+  "transfer_fee": {},
+  "creators": [{"address": "Creator111", "share": "0.02"}],
+  "holders": [
+    {"account": "acc1", "percent": "0.18", "is_locked": 0},
+    {"account": "acc2", "percent": "0.11", "is_locked": 0},
+    {"account": "acc3", "percent": "0.30", "is_locked": 1},
+    {"account": "acc4", "percent": "0.04", "is_locked": 0}
+  ]
+}
