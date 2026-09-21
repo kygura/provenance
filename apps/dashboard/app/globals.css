@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens.
+ *
+ * Dark is the only mode: this is an instrument that gets read at 03:00 next to a
+ * chart, and the data-viz method asks for a dark palette that is *selected* for a
+ * dark surface rather than flipped from a light one. The surfaces below are the
+ * ones the palette's dark steps were validated against, so the steps stay valid.
+ *
+ * Every colour slot here was run through the palette validator before it was
+ * written down (see the report): the categorical pair, the ordinal blue ramp used
+ * for tiers and the concentration bar, and the reserved status palette.
+ */
+@theme {
+  /* Surfaces & ink */
+  --color-plane: #0d0d0d;
+  --color-surface: #1a1a19;
+  --color-raise: #222220;
+  --color-ink: #ffffff;
+  --color-ink-2: #c3c2b7;
+  --color-ink-muted: #898781;
+  --color-grid: #2c2c2a;
+  --color-axis: #383835;
+  --color-line: #2c2c2a;
+
+  /*
+   * Categorical slots 1 and 2, dark steps. Only two carry identity anywhere in
+   * this UI: the recycle verdict uses emphasis (revival = accent, copycat =
+   * slot 2, everything else neutral), which keeps every pair clear of the
+   * all-pairs CVD and normal-vision floors.
+   */
+  --color-series-1: #3987e5;
+  --color-series-2: #d95926;
+
+  /* Single-hue blue ramp: sequential fills, ordinal tiers, concentration bands. */
+  --color-blue-150: #b7d3f6;
+  --color-blue-250: #86b6ef;
+  --color-blue-300: #6da7ec;
+  --color-blue-350: #5598e7;
+  --color-blue-400: #3987e5;
+  --color-blue-450: #2a78d6;
+  --color-blue-500: #256abf;
+  --color-blue-600: #184f95;
+  --color-blue-650: #104281;
+  --color-blue-700: #0d366b;
+
+  /* Reserved status palette. Never reused as a series colour. */
+  --color-good: #0ca30c;
+  --color-warning: #fab219;
+  --color-serious: #ec835a;
+  --color-critical: #d03b3b;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    background-color: var(--color-plane);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-plane);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.45;
+    /* The table is wide; never let it drag the whole page sideways. */
+    overflow-x: hidden;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  /* Native controls inherit the terminal treatment rather than the OS chrome. */
+  input,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-series-1);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* One hairline rule, used for every panel edge and table row divider. */
+  .hair {
+    border-color: color-mix(in srgb, #ffffff 10%, transparent);
+  }
+
+  .panel {
+    background-color: var(--color-surface);
+    border: 1px solid color-mix(in srgb, #ffffff 10%, transparent);
+    border-radius: 4px;
+  }
+
+  /* Numbers and addresses are monospace and column-aligned. */
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
