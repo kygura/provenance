@@ -1,0 +1,337 @@
+{
+  "schemaVersion": "1.0.0",
+  "pairs": [
+    {
+      "chainId": "solana",
+      "dexId": "raydium",
+      "url": "https://dexscreener.com/solana/9xQeWvG8wBzL4rTnYc2MdKpF7sHjR3VaUu5NbXqE1mTz",
+      "pairAddress": "9xQeWvG8wBzL4rTnYc2MdKpF7sHjR3VaUu5NbXqE1mTz",
+      "baseToken": {
+        "address": "BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx",
+        "name": "Bongo Cat",
+        "symbol": "BONGO"
+      },
+      "quoteToken": {
+        "address": "So11111111111111111111111111111111111111112",
+        "name": "Wrapped SOL",
+        "symbol": "SOL"
+      },
+      "priceNative": "0.00002410",
+      "priceUsd": "0.004174",
+      "txns": {
+        "m5": {
+          "buys": 41,
+          "sells": 27
+        },
+        "h1": {
+          "buys": 612,
+          "sells": 480
+        },
+        "h6": {
+          "buys": 3104,
+          "sells": 2711
+        },
+        "h24": {
+          "buys": 9124,
+          "sells": 7788
+        }
+      },
+      "volume": {
+        "m5": 18422.3,
+        "h1": 204118.7,
+        "h6": 918233.4,
+        "h24": 3142880.12
+      },
+      "priceChange": {
+        "m5": 1.42,
+        "h1": 8.77,
+        "h6": -3.15,
+        "h24": 42.68
+      },
+      "liquidity": {
+        "usd": 612443.71,
+        "base": 73400000.0,
+        "quote": 1768.4
+      },
+      "fdv": 4173820,
+      "marketCap": 3921044,
+      "pairCreatedAt": 1789373564000,
+      "info": {
+        "imageUrl": "https://dd.dexscreener.com/ds-data/tokens/solana/bongo.png",
+        "websites": [
+          {
+            "url": "https://bongocat.fun"
+          }
+        ],
+        "socials": [
+          {
+            "type": "twitter",
+            "url": "https://twitter.com/bongocatsol"
+          },
+          {
+            "type": "telegram",
+            "url": "https://t.me/bongocatsol"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "solana",
+      "dexId": "meteora",
+      "url": "https://dexscreener.com/solana/4kPzRwN7dGvT2mXsCq9hLb3YeF5aJ8UuZnQ1rVtK6xWd",
+      "pairAddress": "4kPzRwN7dGvT2mXsCq9hLb3YeF5aJ8UuZnQ1rVtK6xWd",
+      "baseToken": {
+        "address": "BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx",
+        "name": "Bongo Cat",
+        "symbol": "BONGO"
+      },
+      "quoteToken": {
+        "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "name": "USD Coin",
+        "symbol": "USDC"
+      },
+      "priceNative": "0.004180",
+      "priceUsd": "0.004180",
+      "txns": {
+        "m5": {
+          "buys": 4,
+          "sells": 2
+        },
+        "h1": {
+          "buys": 61,
+          "sells": 55
+        },
+        "h6": {
+          "buys": 288,
+          "sells": 240
+        },
+        "h24": {
+          "buys": 902,
+          "sells": 811
+        }
+      },
+      "volume": {
+        "m5": 1204.0,
+        "h1": 20411.0,
+        "h6": 88221.0,
+        "h24": 302118.0
+      },
+      "priceChange": {
+        "m5": 1.1,
+        "h1": 8.2,
+        "h6": -2.9,
+        "h24": 41.1
+      },
+      "liquidity": {
+        "usd": 98221.44,
+        "base": 11750000.0,
+        "quote": 49110.0
+      },
+      "fdv": 4180000,
+      "marketCap": 3928000,
+      "pairCreatedAt": 1789567330000,
+      "info": {
+        "imageUrl": "https://dd.dexscreener.com/ds-data/tokens/solana/bongo.png"
+      }
+    },
+    {
+      "chainId": "base",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/base/0x3Fd9AB12CC45E67890123456789ABCDEF0123456",
+      "pairAddress": "0x3Fd9AB12CC45E67890123456789ABCDEF0123456",
+      "baseToken": {
+        "address": "0x7A2B19CD4E5F60781B9C3AD2E4F5061728394AB0",
+        "name": "Pepe With A Hat",
+        "symbol": "PEPEWIF"
+      },
+      "quoteToken": {
+        "address": "0x4200000000000000000000000000000000000006",
+        "name": "Wrapped Ether",
+        "symbol": "WETH"
+      },
+      "priceNative": "0.0000000211",
+      "priceUsd": "0.00009118",
+      "txns": {
+        "m5": {
+          "buys": 22,
+          "sells": 14
+        },
+        "h1": {
+          "buys": 301,
+          "sells": 188
+        },
+        "h6": {
+          "buys": 1420,
+          "sells": 980
+        },
+        "h24": {
+          "buys": 4102,
+          "sells": 2988
+        }
+      },
+      "volume": {
+        "m5": 9120.11,
+        "h1": 88211.9,
+        "h6": 402118.3,
+        "h24": 1288402.77
+      },
+      "priceChange": {
+        "m5": -0.81,
+        "h1": 12.04,
+        "h6": 31.77,
+        "h24": 118.42
+      },
+      "liquidity": {
+        "usd": 391044.2,
+        "base": 2144000000.0,
+        "quote": 45.2
+      },
+      "fdv": 9118000,
+      "marketCap": 9118000,
+      "pairCreatedAt": 1789854002000,
+      "info": {
+        "imageUrl": "https://dd.dexscreener.com/ds-data/tokens/base/pepewif.png",
+        "websites": [
+          {
+            "url": "https://pepewif.xyz"
+          }
+        ],
+        "socials": [
+          {
+            "type": "twitter",
+            "url": "https://x.com/pepewifbase"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "bsc",
+      "dexId": "pancakeswap",
+      "url": "https://dexscreener.com/bsc/0x5c6D7e8F9012345678aBcDeF0123456789AbCdEf",
+      "pairAddress": "0x5c6D7e8F9012345678aBcDeF0123456789AbCdEf",
+      "baseToken": {
+        "address": "0xB9e8D7c6A5f4321098765432109876543210FeDc",
+        "name": "Skibidi Toilet",
+        "symbol": "SKIBIDI"
+      },
+      "quoteToken": {
+        "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+        "name": "Wrapped BNB",
+        "symbol": "WBNB"
+      },
+      "priceNative": "0.0000021",
+      "priceUsd": "0.00184",
+      "txns": {
+        "m5": {
+          "buys": 3,
+          "sells": 5
+        },
+        "h1": {
+          "buys": 44,
+          "sells": 61
+        },
+        "h6": {
+          "buys": 210,
+          "sells": 288
+        },
+        "h24": {
+          "buys": 880,
+          "sells": 1104
+        }
+      },
+      "volume": {
+        "m5": 402.0,
+        "h1": 8221.0,
+        "h6": 41022.0,
+        "h24": 188402.0
+      },
+      "priceChange": {
+        "m5": -1.2,
+        "h1": -4.4,
+        "h6": -8.1,
+        "h24": -22.4
+      },
+      "liquidity": {
+        "usd": 144022.8,
+        "base": 39100000.0,
+        "quote": 122.4
+      },
+      "fdv": 1840000,
+      "marketCap": 1655000,
+      "pairCreatedAt": 1789010520000,
+      "info": {
+        "imageUrl": "https://dd.dexscreener.com/ds-data/tokens/bsc/skibidi.png",
+        "websites": [
+          {
+            "url": "https://skibidi.bnb"
+          }
+        ],
+        "socials": [
+          {
+            "type": "telegram",
+            "url": "https://t.me/skibidibnb"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "solana",
+      "dexId": "meteora",
+      "url": "https://dexscreener.com/solana/7hTqVmX2sLpR9dNcJw4Ub6ZyG3kAe5MfQ1nBtH8rYxKD",
+      "pairAddress": "7hTqVmX2sLpR9dNcJw4Ub6ZyG3kAe5MfQ1nBtH8rYxKD",
+      "baseToken": {
+        "address": "GrumPYcat9xKdWqR2sTv5mNhJ7bZuE3fA6yLpQ8nXeVd",
+        "name": "Grumpy Cat Reborn",
+        "symbol": "GRUMPY"
+      },
+      "quoteToken": {
+        "address": "So11111111111111111111111111111111111111112",
+        "name": "Wrapped SOL",
+        "symbol": "SOL"
+      },
+      "priceNative": "0.00000121",
+      "priceUsd": "0.00021044",
+      "txns": {
+        "m5": {
+          "buys": 12,
+          "sells": 9
+        },
+        "h1": {
+          "buys": 144,
+          "sells": 121
+        },
+        "h6": {
+          "buys": 402,
+          "sells": 388
+        },
+        "h24": {
+          "buys": 811,
+          "sells": 702
+        }
+      },
+      "volume": {
+        "m5": 1204.0,
+        "h1": 12044.5,
+        "h6": 38211.0,
+        "h24": 61022.4
+      },
+      "priceChange": {
+        "m5": -2.1,
+        "h1": 9.44,
+        "h6": 18.02,
+        "h24": 74.11
+      },
+      "liquidity": {
+        "usd": 18402.11,
+        "base": 87400000.0,
+        "quote": 53.1
+      },
+      "fdv": 210440,
+      "marketCap": 210440,
+      "pairCreatedAt": 1789983000000,
+      "info": {
+        "imageUrl": "https://dd.dexscreener.com/ds-data/tokens/solana/grumpy.png"
+      }
+    }
+  ]
+}

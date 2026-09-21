@@ -1,0 +1,54 @@
+[
+  {
+    "url": "https://dexscreener.com/bsc/0xB9e8D7c6A5f4321098765432109876543210FeDc",
+    "chainId": "bsc",
+    "tokenAddress": "0xB9e8D7c6A5f4321098765432109876543210FeDc",
+    "icon": "https://dd.dexscreener.com/ds-data/tokens/bsc/skibidi.png",
+    "header": "https://dd.dexscreener.com/ds-data/tokens/bsc/skibidi/header.png",
+    "description": "Skibidi Toilet started as a 2023 YouTube Shorts series by DaFuq!?Boom! and became the defining brainrot meme of that year. This is its third tokenisation and the first on BNB Chain; the previous two were on Ethereum in 2023 and Solana in 2024.",
+    "links": [
+      {
+        "type": "telegram",
+        "url": "https://t.me/skibidibnb"
+      },
+      {
+        "type": "twitter",
+        "url": "https://twitter.com/skibidibnb"
+      },
+      {
+        "label": "Website",
+        "url": "https://skibidi.bnb"
+      },
+      {
+        "label": "Docs",
+        "url": "https://docs.skibidi.bnb"
+      }
+    ]
+  },
+  {
+    "url": "https://dexscreener.com/solana/GrumPYcat9xKdWqR2sTv5mNhJ7bZuE3fA6yLpQ8nXeVd",
+    "chainId": "solana",
+    "tokenAddress": "GrumPYcat9xKdWqR2sTv5mNhJ7bZuE3fA6yLpQ8nXeVd",
+    "icon": "https://dd.dexscreener.com/ds-data/tokens/solana/grumpy.png",
+    "description": "Grumpy Cat (Tardar Sauce, 2012-2019) reborn on Solana.",
+    "links": [
+      {
+        "type": "twitter",
+        "url": "https://twitter.com/grumpysolana"
+      }
+    ]
+  },
+  {
+    "url": "https://dexscreener.com/solana/TurB2nQx8vKdMz5rLpY9wHcJ3sGf7aUe6tNqZ1BmXkRv",
+    "chainId": "solana",
+    "tokenAddress": "TurB2nQx8vKdMz5rLpY9wHcJ3sGf7aUe6tNqZ1BmXkRv",
+    "icon": "https://dd.dexscreener.com/ds-data/tokens/solana/turbo2.png",
+    "description": "TURBO2 - profile published before the pool went live.",
+    "links": [
+      {
+        "type": "twitter",
+        "url": "https://twitter.com/turbo2sol"
+      }
+    ]
+  }
+]
