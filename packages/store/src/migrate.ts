@@ -271,11 +271,16 @@ export function buildSchemaSql(migrations: readonly Migration[] = MIGRATIONS): s
 }
 
 // `bun run packages/store/src/migrate.ts` (wired up as `bun run db:migrate`).
+//
+// Node APIs rather than Bun globals throughout: this module is imported by the
+// Next.js dashboard, which runs on Node under Vercel, so a Bun-only global here
+// would break that build even though this block never executes there.
 if (import.meta.main) {
   const { loadConfig } = await import('@provenance/core');
   if (process.argv.includes('--emit-schema')) {
+    const { writeFile } = await import('node:fs/promises');
     const target = new URL('./schema.sql', import.meta.url);
-    await Bun.write(target, buildSchemaSql());
+    await writeFile(target, buildSchemaSql(), 'utf8');
     console.log(`wrote ${target.pathname}`);
   } else {
     const { createStore } = await import('./libsql-store');
