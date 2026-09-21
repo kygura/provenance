@@ -187,13 +187,15 @@ export function applyFlags(app: AppConfig, parsed: ParsedArgs): AppliedArgs {
 }
 
 /**
- * True when the model must not be called at all for this invocation. `--fixtures`
- * only disables it when there is no key: with a key present, a fixtures run is a
- * useful end-to-end rehearsal of the research stage over offline market data.
+ * True when the research stage must be skipped entirely.
+ *
+ * Only `--no-llm` does that. A keyless fixtures run still goes through the
+ * research stage: `createResearcher` hands back the offline stub, which costs
+ * nothing and makes `--fixtures` a real end-to-end rehearsal that produces
+ * provenance rows instead of silently skipping the stage the project exists for.
  */
-export function llmDisabled(app: AppConfig, parsed: ParsedArgs): boolean {
-  if (flagBool(parsed.flags, 'no-llm')) return true;
-  return app.pipeline.useFixtures && !app.anthropicApiKey;
+export function llmDisabled(_app: AppConfig, parsed: ParsedArgs): boolean {
+  return flagBool(parsed.flags, 'no-llm');
 }
 
 /**
@@ -202,7 +204,10 @@ export function llmDisabled(app: AppConfig, parsed: ParsedArgs): boolean {
  */
 export function validateEnv(command: CommandName, app: AppConfig, parsed: ParsedArgs): string[] {
   const errors: string[] = [];
-  const needsLlm = (command === 'run' || command === 'analyze') && !llmDisabled(app, parsed);
+  // Fixtures mode never reaches the API, so it needs no key even though the
+  // research stage still runs.
+  const needsLlm =
+    (command === 'run' || command === 'analyze') && !llmDisabled(app, parsed) && !app.pipeline.useFixtures;
 
   if (needsLlm && !app.anthropicApiKey) {
     errors.push(

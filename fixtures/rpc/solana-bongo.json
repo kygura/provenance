@@ -1,0 +1,79 @@
+{
+  "chain": "solana",
+  "note": "Synthetic Solana RPC responses for the BONGO mint in the DexTools/GeckoTerminal fixtures. Shapes follow the documented JSON-RPC responses; values are invented. Params match structurally, so only the distinguishing fields are listed.",
+  "entries": [
+    {
+      "method": "getAccountInfo",
+      "params": ["BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx"],
+      "result": {
+        "context": { "slot": 301844221 },
+        "value": {
+          "lamports": 1461600,
+          "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "executable": false,
+          "rentEpoch": 0,
+          "space": 82,
+          "data": {
+            "program": "spl-token",
+            "space": 82,
+            "parsed": {
+              "type": "mint",
+              "info": {
+                "decimals": 6,
+                "supply": "10000000000000000",
+                "isInitialized": true,
+                "mintAuthority": null,
+                "freezeAuthority": null
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "method": "getTokenSupply",
+      "params": ["BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx"],
+      "result": {
+        "context": { "slot": 301844221 },
+        "value": { "amount": "10000000000000000", "decimals": 6, "uiAmount": 10000000000.0, "uiAmountString": "10000000000" }
+      }
+    },
+    {
+      "method": "getTokenLargestAccounts",
+      "params": ["BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx"],
+      "result": {
+        "context": { "slot": 301844221 },
+        "value": [
+          { "address": "TokAcc1BonGPoo1VauLtRayd1umAmmV4xQw8sKd3mNc", "amount": "2140000000000000", "decimals": 6, "uiAmount": 2140000000.0, "uiAmountString": "2140000000" },
+          { "address": "TokAcc2BonGBurn1nc1neratorHo1d3rAccountXyZq", "amount": "1500000000000000", "decimals": 6, "uiAmount": 1500000000.0, "uiAmountString": "1500000000" },
+          { "address": "TokAcc3BonGWha1e1HoLd1ngAccountAbCdEfGhIjKl", "amount": "410000000000000", "decimals": 6, "uiAmount": 410000000.0, "uiAmountString": "410000000" },
+          { "address": "TokAcc4BonGWha1e2HoLd1ngAccountMnOpQrStUvWx", "amount": "295000000000000", "decimals": 6, "uiAmount": 295000000.0, "uiAmountString": "295000000" },
+          { "address": "TokAcc5BonGRetai1Ho1derAccountYzAbCdEfGhIjK", "amount": "88000000000000", "decimals": 6, "uiAmount": 88000000.0, "uiAmountString": "88000000" }
+        ]
+      }
+    },
+    {
+      "method": "getMultipleAccounts",
+      "result": {
+        "context": { "slot": 301844221 },
+        "value": [
+          { "lamports": 2039280, "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "executable": false, "rentEpoch": 0, "space": 165,
+            "data": { "program": "spl-token", "space": 165, "parsed": { "type": "account", "info": { "mint": "BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx", "owner": "8XqPoolBonG1vYw5rKd2mNc7tZs3fLa9eQu6HxJbTgRp", "state": "initialized", "tokenAmount": { "amount": "2140000000000000", "decimals": 6, "uiAmount": 2140000000.0, "uiAmountString": "2140000000" } } } } },
+          { "lamports": 2039280, "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "executable": false, "rentEpoch": 0, "space": 165,
+            "data": { "program": "spl-token", "space": 165, "parsed": { "type": "account", "info": { "mint": "BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx", "owner": "1nc1nerator11111111111111111111111111111111", "state": "initialized", "tokenAmount": { "amount": "1500000000000000", "decimals": 6, "uiAmount": 1500000000.0, "uiAmountString": "1500000000" } } } } },
+          { "lamports": 2039280, "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "executable": false, "rentEpoch": 0, "space": 165,
+            "data": { "program": "spl-token", "space": 165, "parsed": { "type": "account", "info": { "mint": "BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx", "owner": "Wha1e1OwnerWa11etAddressAbCdEfGhIjKlMnOpQr", "state": "initialized", "tokenAmount": { "amount": "410000000000000", "decimals": 6, "uiAmount": 410000000.0, "uiAmountString": "410000000" } } } } },
+          { "lamports": 2039280, "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "executable": false, "rentEpoch": 0, "space": 165,
+            "data": { "program": "spl-token", "space": 165, "parsed": { "type": "account", "info": { "mint": "BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx", "owner": "Wha1e2OwnerWa11etAddressMnOpQrStUvWxYzAbCd", "state": "initialized", "tokenAmount": { "amount": "295000000000000", "decimals": 6, "uiAmount": 295000000.0, "uiAmountString": "295000000" } } } } },
+          { "lamports": 2039280, "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "executable": false, "rentEpoch": 0, "space": 165,
+            "data": { "program": "spl-token", "space": 165, "parsed": { "type": "account", "info": { "mint": "BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx", "owner": "Retai1Ho1derWa11etAddressYzAbCdEfGhIjKlMnO", "state": "initialized", "tokenAmount": { "amount": "88000000000000", "decimals": 6, "uiAmount": 88000000.0, "uiAmountString": "88000000" } } } } }
+        ]
+      }
+    },
+    {
+      "method": "getProgramAccounts",
+      "note": "Public endpoints commonly refuse this; the fixture records the refusal so the graceful-degradation path is exercised offline.",
+      "error": { "code": -32601, "message": "Method not found" }
+    }
+  ]
+}

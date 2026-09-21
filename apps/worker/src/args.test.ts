@@ -104,7 +104,10 @@ describe('validateEnv', () => {
     const base = makeConfig();
     const fixtures = makeConfig({ pipeline: { ...base.pipeline, useFixtures: true } });
     expect(validateEnv('run', fixtures, parseArgs(['run', '--fixtures']))).toEqual([]);
-    expect(llmDisabled(fixtures, parseArgs(['run', '--fixtures']))).toBe(true);
+    // A fixtures run still runs the research stage; it just gets the offline
+    // stub researcher rather than the API.
+    expect(llmDisabled(fixtures, parseArgs(['run', '--fixtures']))).toBe(false);
+    expect(llmDisabled(fixtures, parseArgs(['run', '--fixtures', '--no-llm']))).toBe(true);
   });
 
   test('a remote database needs its auth token', () => {
