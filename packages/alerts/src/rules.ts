@@ -7,8 +7,6 @@
  */
 
 import {
-  formatPct,
-  formatUsd,
   hashKey,
   hoursBetween,
   nowIso,
@@ -153,7 +151,7 @@ function result(
     severity,
     title,
     body: `${title}\n\n${body}`,
-    markdown: `*${title}*\n\n${markdown}`.replace(/^\*/, '**').replace(/\*\n\n/, '**\n\n'),
+    markdown: `**${title}**\n\n${markdown}`,
     payload: {
       symbol: input.snapshot.symbol,
       chain: input.snapshot.chain,
@@ -426,6 +424,3 @@ export function createAlerts(
   }
   return alerts;
 }
-
-/** Re-exported so callers can format numbers the same way the bodies do. */
-export { formatPct, formatUsd };
