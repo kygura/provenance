@@ -284,9 +284,11 @@ export async function main(
   const style = createStyle({ noColor: flagBool(parsed.flags, 'no-color'), env });
 
   if (parsed.errors.length > 0) return fail(style, [...parsed.errors, 'run `help` for usage']);
-  if (flagBool(parsed.flags, 'help') || !parsed.command || parsed.command === 'help') {
+  const wantsHelp = flagBool(parsed.flags, 'help') || parsed.command === 'help';
+  if (wantsHelp || !parsed.command) {
     print(HELP);
-    return parsed.command || flagBool(parsed.flags, 'help') ? EXIT_OK : EXIT_CONFIG;
+    // No command at all is a usage error; asking for help is not.
+    return wantsHelp ? EXIT_OK : EXIT_CONFIG;
   }
   if (flagBool(parsed.flags, 'version') || parsed.command === 'version') {
     print('provenance-worker 0.1.0');
