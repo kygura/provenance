@@ -48,6 +48,13 @@ export interface RpcTransport {
   send(request: TransportRequest): Promise<JsonRpcResult[]>;
 }
 
+/**
+ * Lazily supplies the transport. Fixture mode reads files, so construction is
+ * async; analysers take the provider rather than the transport so nothing is
+ * loaded for a chain that never gets analysed.
+ */
+export type TransportProvider = () => Promise<RpcTransport>;
+
 export class RpcError extends Error {
   constructor(
     message: string,

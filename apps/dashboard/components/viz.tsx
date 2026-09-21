@@ -1,4 +1,4 @@
-import type { ProvenanceScore } from '@provenance/core';
+import type { ProvenanceScore, ScoreComponents } from '@provenance/core';
 import { SCORE_COMPONENTS } from '@/lib/vocab';
 import { formatPctPlain, formatScore, num } from '@/lib/format';
 import { EmptyState, Mark } from './ui';
@@ -76,7 +76,8 @@ export function ScoreBreakdown({ score }: { score?: ProvenanceScore }) {
     );
   }
 
-  const components = score.components as unknown as Record<string, unknown> | undefined;
+  // The store can hand back a partially-populated row; treat every component as optional.
+  const components = (score.components ?? {}) as Partial<ScoreComponents>;
 
   return (
     <div>
@@ -94,7 +95,7 @@ export function ScoreBreakdown({ score }: { score?: ProvenanceScore }) {
             key={component.key}
             label={component.label}
             hint={component.hint}
-            value={num(components?.[component.key])}
+            value={num(components[component.key])}
           />
         ))}
       </div>
