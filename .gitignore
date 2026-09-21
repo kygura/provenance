@@ -14,3 +14,4 @@ data/*.db-*
 coverage/
 .DS_Store
 artifacts/
+tmp/

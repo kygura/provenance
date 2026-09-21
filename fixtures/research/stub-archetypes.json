@@ -1,0 +1,74 @@
+{
+  "note": "Deterministic offline archetypes used by the stub researcher when no ANTHROPIC_API_KEY is set or pipeline.useFixtures is true. {{MEME}} is replaced with the derived meme subject, {{TICKER}} with the token symbol. These are plausible shapes, not researched claims - confidence is deliberately capped low.",
+  "archetypes": [
+    {
+      "id": "proven-revival",
+      "narrativeCluster": "nostalgia",
+      "originYear": 2013,
+      "originSummary": "{{MEME}} entered internet culture around 2013 and had a long first life on image boards and early social platforms before fading. Offline fixture mode cannot verify this: no live sources were consulted, so the dating below is illustrative rather than researched.",
+      "lineage": [
+        { "label": "{{MEME}} enters circulation", "year": 2013, "kind": "origin", "note": "Fixture lineage - not researched." },
+        { "label": "First tokenisation wave", "year": 2021, "kind": "revival", "note": "Fixture lineage - not researched." },
+        { "label": "{{TICKER}} relaunch", "kind": "revival", "note": "The token under analysis." }
+      ],
+      "priorCycles": [
+        { "name": "{{MEME}} (first token cycle)", "year": 2021, "outcome": "faded", "note": "Fixture placeholder prior cycle." }
+      ],
+      "recycleVerdict": "revival",
+      "recycleGeneration": 1,
+      "memeticDurability": 62,
+      "culturalReach": 55,
+      "authenticityScore": 50,
+      "speculativeSetup": "Structurally this is a dormant meme returning with a new cohort of participants: the meme carries prior evidence of having worked, and most of the current audience did not witness the earlier cycle. That is a description of the structure, not a recommendation.",
+      "risks": [
+        "Offline fixture report: no external evidence was gathered, so every claim here is unverified.",
+        "Meme origin year and token launch date may be conflated in this placeholder.",
+        "Canonical-carrier status is unknown; a competing token may hold the name."
+      ],
+      "confidence": 0.15
+    },
+    {
+      "id": "novel-or-first-tokenisation",
+      "narrativeCluster": "unclassified",
+      "originSummary": "No offline evidence ties {{MEME}} to an earlier cultural moment. It may be genuinely new, or it may be an older meme this fixture cannot see. Treat the lineage as unresolved.",
+      "lineage": [
+        { "label": "{{TICKER}} launch", "kind": "origin", "note": "Only the token itself is observable offline." }
+      ],
+      "priorCycles": [],
+      "recycleVerdict": "unclear",
+      "recycleGeneration": 0,
+      "memeticDurability": 30,
+      "culturalReach": 20,
+      "authenticityScore": 40,
+      "speculativeSetup": "Nothing offline distinguishes this from a first tokenisation of an unproven meme. Without prior evidence of the narrative working, the recycled-narrative thesis does not apply. Description only, not a recommendation.",
+      "risks": [
+        "Offline fixture report: no external evidence was gathered.",
+        "An unproven meme has no prior cycle to borrow credibility from.",
+        "Lineage stated as unclear rather than invented."
+      ],
+      "confidence": 0.12
+    },
+    {
+      "id": "live-meme-copycat",
+      "narrativeCluster": "derivative",
+      "originSummary": "{{MEME}} appears to ride a narrative that is currently live rather than one being revived. Offline mode cannot distinguish a differentiated derivative from a pure copycat, so this is recorded as low confidence.",
+      "lineage": [
+        { "label": "Parent narrative in circulation", "kind": "origin", "note": "Fixture lineage - not researched." },
+        { "label": "{{TICKER}} derivative", "kind": "derivative", "note": "The token under analysis." }
+      ],
+      "priorCycles": [],
+      "recycleVerdict": "copycat",
+      "recycleGeneration": 0,
+      "memeticDurability": 25,
+      "culturalReach": 18,
+      "authenticityScore": 22,
+      "speculativeSetup": "The structure here is a token attached to a narrative that is already being traded elsewhere, with no clear claim to being the canonical carrier. Description only, not a recommendation.",
+      "risks": [
+        "Offline fixture report: no external evidence was gathered.",
+        "Copycats compete with an incumbent that already holds the meme's audience.",
+        "Authenticity score is a placeholder, not a researched judgement."
+      ],
+      "confidence": 0.1
+    }
+  ]
+}
