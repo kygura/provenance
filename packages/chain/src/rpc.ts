@@ -82,14 +82,15 @@ function isBatchUnsupported(error: unknown): boolean {
 
 /** Wall-clock allowance shared by every step of one token's analysis. */
 export class Budget {
+  readonly totalMs: number;
+  private readonly now: () => number;
   private readonly startedAt: number;
 
-  constructor(readonly totalMs: number, now: () => number = Date.now) {
+  constructor(totalMs: number, now: () => number = Date.now) {
+    this.totalMs = totalMs;
     this.now = now;
     this.startedAt = now();
   }
-
-  private readonly now: () => number;
 
   elapsedMs(): number {
     return this.now() - this.startedAt;
