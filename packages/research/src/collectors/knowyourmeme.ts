@@ -30,10 +30,13 @@ export const KYM_SELECTORS = {
   detailList: ['dl.info', 'aside dl', 'dl'],
 } as const;
 
-function firstMatch($: cheerio.CheerioAPI, selectors: readonly string[]): cheerio.Cheerio<never> | null {
+/**
+ * Returns the first selector in the list that actually matches, so callers stay
+ * clear of cheerio's node generics. Selector-rot fixes happen in KYM_SELECTORS.
+ */
+function firstMatching($: cheerio.CheerioAPI, selectors: readonly string[]): string | null {
   for (const selector of selectors) {
-    const found = $(selector);
-    if (found.length > 0) return found as unknown as cheerio.Cheerio<never>;
+    if ($(selector).length > 0) return selector;
   }
   return null;
 }
@@ -76,10 +79,9 @@ export interface KymArticle {
 /** The `<dt>Year</dt><dd>2010</dd>` detail block is the highest-value field on the page. */
 function parseDetails($: cheerio.CheerioAPI): { year?: number; originSite?: string } {
   const details: { year?: number; originSite?: string } = {};
-  const list = firstMatch($, KYM_SELECTORS.detailList);
-  if (!list) return details;
-  const terms = (list as unknown as cheerio.Cheerio<never>).find('dt');
-  terms.each((_, element) => {
+  const list = firstMatching($, KYM_SELECTORS.detailList);
+  if (list === null) return details;
+  $(list).find('dt').each((_, element) => {
     const label = $(element).text().trim().toLowerCase();
     const value = cleanSnippet($(element).next('dd').text(), 120);
     if (label === 'year') {
@@ -97,18 +99,16 @@ const WANTED_SECTIONS = ['origin', 'about', 'spread', 'history', 'background', '
 
 export function parseKymArticle(html: string): KymArticle | null {
   const $ = cheerio.load(html);
-  const titleNode = firstMatch($, KYM_SELECTORS.articleTitle);
-  const rawTitle =
-    (titleNode ? (titleNode as unknown as cheerio.Cheerio<never>).first().attr('content') : undefined) ??
-    (titleNode ? (titleNode as unknown as cheerio.Cheerio<never>).first().text() : '');
-  const title = cleanSnippet(rawTitle ?? '', 160).replace(/\s*\|\s*Know Your Meme\s*$/i, '');
+  const titleSelector = firstMatching($, KYM_SELECTORS.articleTitle);
+  const titleNode = titleSelector === null ? null : $(titleSelector).first();
+  const rawTitle = titleNode === null ? '' : titleNode.attr('content') ?? titleNode.text();
+  const title = cleanSnippet(rawTitle, 160).replace(/\s*\|\s*Know Your Meme\s*$/i, '');
   if (title.length === 0) return null;
 
-  const body = firstMatch($, KYM_SELECTORS.articleBody);
+  const bodySelector = firstMatching($, KYM_SELECTORS.articleBody);
   const sections: { heading: string; body: string }[] = [];
-  if (body) {
-    const scope = body as unknown as cheerio.Cheerio<never>;
-    scope.find('h2, h3').each((_, element) => {
+  if (bodySelector !== null) {
+    $(bodySelector).find('h2, h3').each((_, element) => {
       const heading = cleanSnippet($(element).text(), 80);
       const key = heading.toLowerCase();
       if (!WANTED_SECTIONS.some((wanted) => key.includes(wanted))) return;
