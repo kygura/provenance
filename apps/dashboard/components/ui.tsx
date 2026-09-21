@@ -36,7 +36,7 @@ export function Panel({
   return (
     <section className={`panel ${className}`}>
       {title !== undefined && (
-        <header className="hair flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b px-3 py-2">
+        <header className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-hair px-3 py-2">
           <div>
             <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-2">
               {title}
@@ -116,7 +116,7 @@ export function RunStatusChip({ status }: { status?: string }) {
 export function ChainBadge({ chain }: { chain?: string }) {
   return (
     <span
-      className="num hair inline-block rounded-[3px] border px-1 py-[1px] text-[10px] uppercase leading-[14px] text-ink-2"
+      className="num inline-block rounded-[3px] border border-hair px-1 py-[1px] text-[10px] uppercase leading-[14px] text-ink-2"
       title={chain === undefined ? 'Unknown chain' : `Chain: ${chain}`}
     >
       {chainLabel(chain)}
@@ -221,7 +221,7 @@ export function SiteNav({ current }: { current: 'run' | 'alerts' | 'runs' }) {
     { key: 'runs', href: '/runs', label: 'History' },
   ];
   return (
-    <nav className="hair flex items-center gap-1 border-b bg-surface px-3 py-2">
+    <nav className="flex items-center gap-1 border-b border-hair bg-surface px-3 py-2">
       <Link href="/" className="mr-3 flex items-baseline gap-2">
         <span className="num text-[13px] font-semibold tracking-tight text-ink">provenance</span>
         <span className="hidden text-[11px] text-ink-muted sm:inline">
@@ -267,7 +267,7 @@ export function SetupScreen({
         <h1 className="mt-2 text-[18px] font-semibold text-ink">{clean(title, 160)}</h1>
         <p className="mt-2 text-[13px] leading-relaxed text-ink-2">{clean(hint, 400)}</p>
 
-        <div className="hair mt-4 border-t pt-3">
+        <div className="mt-4 border-t border-hair pt-3">
           <p className="text-[11px] uppercase tracking-[0.12em] text-ink-muted">
             Environment the dashboard reads
           </p>
@@ -284,7 +284,7 @@ export function SetupScreen({
         </div>
 
         {detail !== undefined && detail !== '' && (
-          <details className="hair mt-4 border-t pt-3">
+          <details className="mt-4 border-t border-hair pt-3">
             <summary className="cursor-pointer text-[12px] text-ink-muted">
               Underlying error
             </summary>

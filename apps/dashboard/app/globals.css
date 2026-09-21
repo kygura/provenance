@@ -22,7 +22,8 @@
   --color-ink-muted: #898781;
   --color-grid: #2c2c2a;
   --color-axis: #383835;
-  --color-line: #2c2c2a;
+  /* One hairline colour for every panel edge and row divider. */
+  --color-hair: rgba(255, 255, 255, 0.1);
 
   /*
    * Categorical slots 1 and 2, dark steps. Only two carry identity anywhere in
@@ -95,14 +96,9 @@
 }
 
 @layer components {
-  /* One hairline rule, used for every panel edge and table row divider. */
-  .hair {
-    border-color: color-mix(in srgb, #ffffff 10%, transparent);
-  }
-
   .panel {
     background-color: var(--color-surface);
-    border: 1px solid color-mix(in srgb, #ffffff 10%, transparent);
+    border: 1px solid var(--color-hair);
     border-radius: 4px;
   }
 
