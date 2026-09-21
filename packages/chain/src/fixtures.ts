@@ -14,6 +14,7 @@
  */
 
 import { readdir, readFile } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import type { Logger } from '@provenance/core';
@@ -122,9 +123,9 @@ export async function loadRpcFixtures(dir = defaultFixtureDir()): Promise<RpcFix
 
 async function collectJson(dir: string): Promise<string[]> {
   const out: string[] = [];
-  let listing: Awaited<ReturnType<typeof readdir>>;
+  let listing: Dirent[];
   try {
-    listing = await readdir(dir, { withFileTypes: true });
+    listing = await readdir(dir, { withFileTypes: true, encoding: 'utf8' });
   } catch {
     return out; // a missing fixture directory is an empty one
   }
