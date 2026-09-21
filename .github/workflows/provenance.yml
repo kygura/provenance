@@ -33,12 +33,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
         with:
-          enable-cache: true
+          # node:sqlite needs 22.5+; the lockfile pins everything else.
+          node-version: "22"
+          cache: npm
 
       - name: Install
-        run: uv sync --extra dev
+        run: npm ci
+
+      - name: Build
+        run: npm run build
 
       # Dedupe history. Losing this to cache eviction costs a repeated alert,
       # nothing more — the committed reports and the issues are the real record.
@@ -61,11 +66,14 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          RESEARCH_LIMIT: ${{ inputs.limit }}
         run: |
-          args="run"
-          if [ "${{ inputs.dry_run }}" = "true" ]; then args="$args --dry-run"; fi
-          if [ -n "${{ inputs.limit }}" ]; then args="$args --limit ${{ inputs.limit }}"; fi
-          uv run provenance -v $args | tee "$GITHUB_STEP_SUMMARY"
+          args=(run)
+          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          [ -n "$RESEARCH_LIMIT" ] && args+=(--limit "$RESEARCH_LIMIT")
+          node --disable-warning=ExperimentalWarning dist/cli.js -v "${args[@]}" \
+            | tee "$GITHUB_STEP_SUMMARY"
 
       - name: Save state
         if: always()
@@ -87,7 +95,8 @@ jobs:
           git commit -m "reports: sweep $(date -u '+%Y-%m-%d %H:%M UTC')"
           # The schedule can overlap a human push; rebase rather than fail the run.
           for i in 1 2 3; do
-            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            git pull --rebase origin "${GITHUB_REF_NAME}" \
+              && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
             sleep $((i * 5))
           done
           echo "::warning::could not push the report; it is in the run artifacts"

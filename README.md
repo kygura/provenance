@@ -33,10 +33,13 @@ state, volume-to-liquidity — stated plainly rather than softened.
 
 ## Setup
 
+Node 22.5 or newer — the state store uses the built-in `node:sqlite`, so there
+is no native module to compile.
+
 ```bash
-uv sync --extra dev
+npm install
 cp .env.example .env    # fill in ANTHROPIC_API_KEY at minimum
-uv run provenance run --dry-run
+npm run dev -- run --dry-run
 ```
 
 `--dry-run` scrapes, filters and ranks without calling the model or sending
@@ -46,11 +49,14 @@ way to tune `config/provenance.toml`.
 A real run:
 
 ```bash
-uv run provenance run              # markdown report to stdout, alerts sent
-uv run provenance run --limit 2    # cap the LLM calls
-uv run provenance history          # what has been alerted before
-uv run provenance lexicon          # the archetype table
+npm run dev -- run              # markdown report to stdout, alerts sent
+npm run dev -- run --limit 2    # cap the LLM calls
+npm run dev -- history          # what has been alerted before
+npm run dev -- lexicon          # the archetype table
 ```
+
+`npm run dev` is `tsx` against the sources. For the scheduled run, `npm run
+build` compiles to `dist/` and `node dist/cli.js` takes the same arguments.
 
 ## Data sources
 
@@ -100,7 +106,7 @@ evicted you get one repeated alert, nothing worse.
   cut noise; `max_age_hours` is what stops the report filling up with things that
   are no longer narratives, just charts.
 
-`src/provenance/lexicon.py` is the seed table of archetypes and their known
+`src/lexicon.ts` is the seed table of archetypes and their known
 ancestors — dog coins back to 2013, yield mechanisms back to SafeMoon, the AI
 pitch back to 2017. It is a cheap first pass that runs over every token for free
 and gives the model a hypothesis to confirm or reject instead of a blank page.
@@ -119,24 +125,36 @@ to address the model through that channel is reported as a finding.
 ## Layout
 
 ```
-src/provenance/
-  sources/     trending feeds, one adapter each, merged by aggregate.py
-  enrich/      holders and contract risk (GoPlus, Helius)
-  research/    the prompt (prompts.py) and the two-phase LLM call (analyst.py)
-  alerts/      rendering and delivery
-  lexicon.py   archetypes and their ancestors
-  scoring.py   filters and ranking
-  pipeline.py  the run
+src/
+  sources/      trending feeds, one adapter each, merged by sources/index.ts
+  enrich/       holders and contract risk (GoPlus, Helius)
+  research/     the prompt (prompts.ts) and the two-phase LLM call (analyst.ts)
+  alerts/       rendering and delivery
+  lexicon.ts    archetypes and their ancestors
+  scoring.ts    filters and ranking
+  pipeline.ts   the run
+  http.ts       one fetch wrapper: retries, per-host rate limit, tolerant parsing
+  models.ts     snapshot types, and the Zod schema the model fills in
 ```
 
-`research/prompts.py` is where the thesis lives. Everything else moves data.
+`research/prompts.ts` is where the thesis lives. Everything else moves data.
+
+Third-party payloads are read through the tolerant accessors in `http.ts`
+(`dig`, `asFloat`, `asObjectList`) rather than cast to an interface. The APIs
+drop and rename fields without notice, and a wrong cast turns that into a
+crash mid-sweep instead of one blank field.
 
 ## Tests
 
 ```bash
-uv run pytest -q
-uv run ruff check src tests
+npm test          # vitest
+npm run typecheck # tsc --noEmit, strict
+npm run lint      # oxlint
+npm run check     # all three
 ```
 
 The pipeline tests run the real adapters, enrichment, scoring, state and
 rendering against recorded fixtures, stubbing only the network and the model.
+Fixtures with absolute timestamps are rewritten to a fixed relative age before
+the age filters see them, so the suite does not quietly narrow as they get
+older.
