@@ -70,13 +70,6 @@ function domainQuality(url: string): number {
   return 0.42;
 }
 
-function firstMatching($: cheerio.CheerioAPI, scope: string, selectors: readonly string[]): string | null {
-  for (const selector of selectors) {
-    if ($(scope).find(selector).length > 0) return selector;
-  }
-  return null;
-}
-
 /** Parse a DDG HTML results page. Tolerates missing snippets and ad rows. */
 export function parseDdgResults(html: string, retrievedAt = nowIso()): EvidenceItem[] {
   const $ = cheerio.load(html);
