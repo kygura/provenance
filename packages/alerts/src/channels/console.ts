@@ -3,7 +3,7 @@
  * when every remote channel is unconfigured, which is the normal state in local dev and CI.
  */
 
-import { nowIso, type Alert, type Logger } from '@provenance/core';
+import type { Alert, Logger } from '@provenance/core';
 
 import { errorMessage, fail, ok, type SinkDeliveryResult } from './types';
 
@@ -45,10 +45,7 @@ export class ConsoleSink {
       return ok('console');
     } catch (error) {
       this.options.logger?.warn('console sink failed', { error: errorMessage(error) });
-      return { channel: 'console', ok: false, error: errorMessage(error), at: nowIso() };
+      return fail('console', errorMessage(error));
     }
   }
 }
-
-/** Kept so `fail` stays referenced if the sink is ever made conditional. */
-export const consoleSinkFailure = fail;
