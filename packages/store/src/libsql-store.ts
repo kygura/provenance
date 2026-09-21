@@ -15,7 +15,7 @@ import type {
   TokenDossier,
   TokenSnapshot,
 } from '@provenance/core';
-import { silentLogger } from '@provenance/core';
+import { createLogger, silentLogger } from '@provenance/core';
 import {
   alertRowArgs,
   chainRowArgs,
@@ -422,7 +422,9 @@ export class LibsqlStore implements ProvenanceStore {
       args.push(term, term, term);
     }
 
-    const order = ORDER_BY[query.orderBy ?? 'score'] ?? ORDER_BY.score;
+    // Whitelist lookup, never interpolation: an unknown key falls back silently.
+    const orderKey = query.orderBy && query.orderBy in ORDER_BY ? query.orderBy : 'score';
+    const order = ORDER_BY[orderKey];
     const limit = Math.min(MAX_LIST_LIMIT, Math.max(1, Math.trunc(query.limit ?? DEFAULT_LIST_LIMIT)));
     const offset = Math.max(0, Math.trunc(query.offset ?? 0));
 
@@ -611,5 +613,6 @@ export function createStore(app: AppConfig): ProvenanceStore {
   return new LibsqlStore({
     url: app.databaseUrl,
     authToken: app.databaseAuthToken,
+    logger: createLogger(app.logLevel, 'store'),
   });
 }
