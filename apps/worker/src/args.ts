@@ -183,9 +183,14 @@ export function applyFlags(app: AppConfig, parsed: ParsedArgs): AppliedArgs {
   return { app: next, errors };
 }
 
-/** True when the model should not be called at all for this invocation. */
+/**
+ * True when the model must not be called at all for this invocation. `--fixtures`
+ * only disables it when there is no key: with a key present, a fixtures run is a
+ * useful end-to-end rehearsal of the research stage over offline market data.
+ */
 export function llmDisabled(app: AppConfig, parsed: ParsedArgs): boolean {
-  return flagBool(parsed.flags, 'no-llm') || app.pipeline.useFixtures;
+  if (flagBool(parsed.flags, 'no-llm')) return true;
+  return app.pipeline.useFixtures && !app.anthropicApiKey;
 }
 
 /**
