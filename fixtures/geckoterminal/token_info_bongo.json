@@ -1,0 +1,20 @@
+{
+  "data": {
+    "id": "solana_BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx",
+    "type": "token",
+    "attributes": {
+      "address": "BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx",
+      "name": "Bongo Cat",
+      "symbol": "BONGO",
+      "decimals": 6,
+      "image_url": "https://assets.geckoterminal.com/tokens/solana/bongo.png",
+      "coingecko_coin_id": null,
+      "websites": ["https://bongocat.fun"],
+      "description": "Bongo Cat is the 2011 drumming-cat meme, revived on Solana in 2026 by the community that ran the original Twitch emote. Supply is fixed and the mint authority was burned at launch.",
+      "gt_score": 61.46788990825688,
+      "discord_url": "https://discord.gg/bongocat",
+      "telegram_handle": "bongocatsol",
+      "twitter_handle": "@bongocatsol"
+    }
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "chain": "ethereum",
+  "note": "Synthetic EVM JSON-RPC responses for the NYAN token in the DexTools/DexScreener fixtures. Hex words are generated, not hand-typed, so the ABI decoders are genuinely exercised. Params match structurally, so only the calldata selector distinguishes the eth_call entries.",
+  "entries": [
+    {
+      "method": "eth_call",
+      "params": [
+        {
+          "data": "0x313ce567"
+        }
+      ],
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000012",
+      "note": "decimals()"
+    },
+    {
+      "method": "eth_call",
+      "params": [
+        {
+          "data": "0x18160ddd"
+        }
+      ],
+      "result": "0x0000000000000000000000000000000000000000033b2e3c9fd0803ce8000000",
+      "note": "totalSupply()"
+    },
+    {
+      "method": "eth_call",
+      "params": [
+        {
+          "data": "0x8da5cb5b"
+        }
+      ],
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "note": "owner() returning the zero address: ownership renounced"
+    },
+    {
+      "method": "eth_blockNumber",
+      "result": "0x1481060"
+    },
+    {
+      "method": "eth_getLogs",
+      "result": [
+        {
+          "address": "0x9f2c4b1ea7d0ab3e6c5f81d2a94b7e03cd15a8fe",
+          "topics": [
+            "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+            "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "0x000000000000000000000000a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          ],
+          "data": "0x0000000000000000000000000000000000000000033b2e3c9fd0803ce8000000",
+          "blockNumber": "0x14689c0"
+        },
+        {
+          "address": "0x9f2c4b1ea7d0ab3e6c5f81d2a94b7e03cd15a8fe",
+          "topics": [
+            "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+            "0x000000000000000000000000a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "0x00000000000000000000000031d8a77bc4e2059f6a0c8d17b3e94f2051ca7d60"
+          ],
+          "data": "0x0000000000000000000000000000000000000000014adf4b7320334b90000000",
+          "blockNumber": "0x14689ca"
+        },
+        {
+          "address": "0x9f2c4b1ea7d0ab3e6c5f81d2a94b7e03cd15a8fe",
+          "topics": [
+            "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+            "0x000000000000000000000000a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "0x000000000000000000000000000000000000000000000000000000000000dead"
+          ],
+          "data": "0x00000000000000000000000000000000000000000052b7d2dcc80cd2e4000000",
+          "blockNumber": "0x14689d4"
+        },
+        {
+          "address": "0x9f2c4b1ea7d0ab3e6c5f81d2a94b7e03cd15a8fe",
+          "topics": [
+            "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+            "0x000000000000000000000000a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "0x000000000000000000000000fedcba98765432100123456789abcdef01234567"
+          ],
+          "data": "0x0000000000000000000000000000000000000000006342fd08f00f6378000000",
+          "blockNumber": "0x1468a24"
+        },
+        {
+          "address": "0x9f2c4b1ea7d0ab3e6c5f81d2a94b7e03cd15a8fe",
+          "topics": [
+            "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+            "0x000000000000000000000000a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "0x0000000000000000000000001122334455667788990011223344556677889900"
+          ],
+          "data": "0x000000000000000000000000000000000000000000422ca8b0a00a4250000000",
+          "blockNumber": "0x1468a88"
+        },
+        {
+          "address": "0x9f2c4b1ea7d0ab3e6c5f81d2a94b7e03cd15a8fe",
+          "topics": [
+            "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+            "0x000000000000000000000000fedcba98765432100123456789abcdef01234567",
+            "0x0000000000000000000000001122334455667788990011223344556677889900"
+          ],
+          "data": "0x000000000000000000000000000000000000000000108b2a2c28029094000000",
+          "blockNumber": "0x1474d10"
+        },
+        {
+          "address": "0x9f2c4b1ea7d0ab3e6c5f81d2a94b7e03cd15a8fe",
+          "topics": [
+            "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+            "0x000000000000000000000000a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "0x000000000000000000000000fedcba98765432100123456789abcdef01234567",
+            "0x0000000000000000000000000000000000000000000000000000000000000007"
+          ],
+          "data": "0x",
+          "blockNumber": "0x1477420"
+        }
+      ],
+      "note": "Includes a 4-topic ERC-721-shaped log that the parser must skip; counting it would treat tokenId 7 as a balance."
+    }
+  ]
+}

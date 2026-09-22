@@ -1,0 +1,21 @@
+{
+  "name": "provenance",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*", "apps/worker", "apps/dashboard"],
+  "scripts": {
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun test packages apps",
+    "lint": "bunx tsc --noEmit -p tsconfig.json",
+    "run:pipeline": "bun run apps/worker/src/cli.ts run",
+    "run:dry": "bun run apps/worker/src/cli.ts run --dry-run --fixtures",
+    "db:migrate": "bun run packages/store/src/migrate.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  }
+}

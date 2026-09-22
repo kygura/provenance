@@ -1,0 +1,176 @@
+import { type Chain, normalizeChain } from './chains';
+import type { SourceId } from './market';
+
+export interface SourceConfig {
+  id: SourceId;
+  enabled: boolean;
+  /** Max rows to take from this source per run. */
+  limit: number;
+  /** Milliseconds between requests to this source. */
+  rateLimitMs: number;
+}
+
+export interface PipelineConfig {
+  /** Chains to keep. Empty array means keep everything. */
+  chains: Chain[];
+  sources: SourceConfig[];
+  /** Tokens surviving triage that get the full chain + LLM treatment. */
+  maxTokensPerRun: number;
+  /** Minimum USD liquidity to bother analysing. */
+  minLiquidityUsd: number;
+  /** Minimum 24h USD volume to bother analysing. */
+  minVolume24hUsd: number;
+  /** Skip tokens whose pool is younger than this; nothing to research yet. */
+  minPoolAgeHours: number;
+  /** Skip re-running the LLM on a token analysed within this window. */
+  reanalyseAfterHours: number;
+  /** Alert when the composite score is at or above this. */
+  alertScoreThreshold: number;
+  dryRun: boolean;
+  /** Read from fixtures instead of the network. Used by tests and offline dev. */
+  useFixtures: boolean;
+}
+
+export interface LlmConfig {
+  /** Model used for the deep provenance synthesis. */
+  model: string;
+  /** Cheaper model for triage/classification passes. */
+  triageModel: string;
+  maxOutputTokens: number;
+  /** Hard ceiling on spend per run; the pipeline stops analysing past it. */
+  maxCostUsdPerRun: number;
+  temperature: number;
+  /**
+   * Ceiling on server-side web searches in one token's research pass. The
+   * single biggest lever on both cost and research depth — six is enough to
+   * date a meme and find two prior cycles without wandering.
+   */
+  maxWebSearches: number;
+}
+
+export interface ChainRpcConfig {
+  solana: string[];
+  ethereum: string[];
+  base: string[];
+  bsc: string[];
+  arbitrum: string[];
+  polygon: string[];
+  avalanche: string[];
+}
+
+export interface AlertConfig {
+  telegramBotToken?: string;
+  telegramChatId?: string;
+  discordWebhookUrl?: string;
+  genericWebhookUrl?: string;
+  /** Write every alert to disk regardless of remote channels. */
+  fileSink?: string;
+}
+
+export interface AppConfig {
+  databaseUrl: string;
+  databaseAuthToken?: string;
+  anthropicApiKey?: string;
+  pipeline: PipelineConfig;
+  llm: LlmConfig;
+  rpc: ChainRpcConfig;
+  alerts: AlertConfig;
+  /** Root for fixtures, artifacts and the local sqlite file. */
+  dataDir: string;
+  logLevel: 'debug' | 'info' | 'warn' | 'error';
+}
+
+function num(value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === '') return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function bool(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value.trim() === '') return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
+function list(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Every knob is an env var so the same build runs locally, in GitHub Actions and
+ * on Vercel without code changes. Defaults are tuned to be conservative: a run
+ * with no configuration does something sensible and cheap.
+ */
+export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
+  const chains = list(env.PROVENANCE_CHAINS).map(normalizeChain);
+  const rpcOr = (key: string, fallback: string[]): string[] => {
+    const configured = list(env[key]);
+    return configured.length > 0 ? configured : fallback;
+  };
+
+  return {
+    databaseUrl: env.DATABASE_URL ?? 'file:./data/provenance.db',
+    databaseAuthToken: env.DATABASE_AUTH_TOKEN,
+    anthropicApiKey: env.ANTHROPIC_API_KEY,
+    dataDir: env.PROVENANCE_DATA_DIR ?? './data',
+    logLevel: (env.LOG_LEVEL as AppConfig['logLevel']) ?? 'info',
+    pipeline: {
+      chains,
+      sources: [
+        {
+          id: 'dextools',
+          enabled: bool(env.SOURCE_DEXTOOLS, true),
+          limit: num(env.SOURCE_DEXTOOLS_LIMIT, 30),
+          rateLimitMs: num(env.SOURCE_DEXTOOLS_RATE_MS, 2500),
+        },
+        {
+          id: 'dexscreener',
+          enabled: bool(env.SOURCE_DEXSCREENER, true),
+          limit: num(env.SOURCE_DEXSCREENER_LIMIT, 30),
+          rateLimitMs: num(env.SOURCE_DEXSCREENER_RATE_MS, 1200),
+        },
+        {
+          id: 'geckoterminal',
+          enabled: bool(env.SOURCE_GECKOTERMINAL, true),
+          limit: num(env.SOURCE_GECKOTERMINAL_LIMIT, 30),
+          rateLimitMs: num(env.SOURCE_GECKOTERMINAL_RATE_MS, 2200),
+        },
+      ],
+      maxTokensPerRun: num(env.MAX_TOKENS_PER_RUN, 15),
+      minLiquidityUsd: num(env.MIN_LIQUIDITY_USD, 25_000),
+      minVolume24hUsd: num(env.MIN_VOLUME_24H_USD, 100_000),
+      minPoolAgeHours: num(env.MIN_POOL_AGE_HOURS, 2),
+      reanalyseAfterHours: num(env.REANALYSE_AFTER_HOURS, 72),
+      alertScoreThreshold: num(env.ALERT_SCORE_THRESHOLD, 70),
+      dryRun: bool(env.DRY_RUN, false),
+      useFixtures: bool(env.USE_FIXTURES, false),
+    },
+    llm: {
+      model: env.LLM_MODEL ?? 'claude-opus-5',
+      triageModel: env.LLM_TRIAGE_MODEL ?? 'claude-sonnet-5',
+      maxOutputTokens: num(env.LLM_MAX_OUTPUT_TOKENS, 4096),
+      maxCostUsdPerRun: num(env.LLM_MAX_COST_USD_PER_RUN, 5),
+      temperature: num(env.LLM_TEMPERATURE, 0.2),
+      maxWebSearches: num(env.LLM_MAX_WEB_SEARCHES, 6),
+    },
+    rpc: {
+      solana: rpcOr('RPC_SOLANA', ['https://api.mainnet-beta.solana.com']),
+      ethereum: rpcOr('RPC_ETHEREUM', ['https://eth.llamarpc.com', 'https://rpc.ankr.com/eth']),
+      base: rpcOr('RPC_BASE', ['https://mainnet.base.org']),
+      bsc: rpcOr('RPC_BSC', ['https://bsc-dataseed.binance.org']),
+      arbitrum: rpcOr('RPC_ARBITRUM', ['https://arb1.arbitrum.io/rpc']),
+      polygon: rpcOr('RPC_POLYGON', ['https://polygon-rpc.com']),
+      avalanche: rpcOr('RPC_AVALANCHE', ['https://api.avax.network/ext/bc/C/rpc']),
+    },
+    alerts: {
+      telegramBotToken: env.TELEGRAM_BOT_TOKEN,
+      telegramChatId: env.TELEGRAM_CHAT_ID,
+      discordWebhookUrl: env.DISCORD_WEBHOOK_URL,
+      genericWebhookUrl: env.ALERT_WEBHOOK_URL,
+      fileSink: env.ALERT_FILE_SINK,
+    },
+  };
+}

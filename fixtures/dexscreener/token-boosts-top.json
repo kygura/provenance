@@ -1,0 +1,60 @@
+[
+  {
+    "url": "https://dexscreener.com/solana/BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx",
+    "chainId": "solana",
+    "tokenAddress": "BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx",
+    "amount": 500,
+    "totalAmount": 1750,
+    "icon": "https://dd.dexscreener.com/ds-data/tokens/solana/bongo.png",
+    "header": "https://dd.dexscreener.com/ds-data/tokens/solana/bongo/header.png",
+    "description": "Bongo Cat. The 2011 drumming cat is back, this time on Solana. Mint burned, LP locked, community-run since day one.",
+    "links": [
+      {
+        "type": "twitter",
+        "url": "https://twitter.com/bongocatsol"
+      },
+      {
+        "type": "telegram",
+        "url": "https://t.me/bongocatsol"
+      },
+      {
+        "label": "Website",
+        "url": "https://bongocat.fun"
+      }
+    ]
+  },
+  {
+    "url": "https://dexscreener.com/base/0x7A2B19CD4E5F60781B9C3AD2E4F5061728394AB0",
+    "chainId": "base",
+    "tokenAddress": "0x7A2B19CD4E5F60781B9C3AD2E4F5061728394AB0",
+    "amount": 300,
+    "totalAmount": 800,
+    "icon": "https://dd.dexscreener.com/ds-data/tokens/base/pepewif.png",
+    "description": "PEPEWIF - pepe with a hat, on Base.",
+    "links": [
+      {
+        "type": "twitter",
+        "url": "https://x.com/pepewifbase"
+      },
+      {
+        "label": "Website",
+        "url": "https://pepewif.xyz"
+      }
+    ]
+  },
+  {
+    "url": "https://dexscreener.com/bsc/0xB9e8D7c6A5f4321098765432109876543210FeDc",
+    "chainId": "bsc",
+    "tokenAddress": "0xB9e8D7c6A5f4321098765432109876543210FeDc",
+    "amount": 100,
+    "totalAmount": 100,
+    "icon": "https://dd.dexscreener.com/ds-data/tokens/bsc/skibidi.png",
+    "description": "SKIBIDI on BNB Chain.",
+    "links": [
+      {
+        "type": "telegram",
+        "url": "https://t.me/skibidibnb"
+      }
+    ]
+  }
+]

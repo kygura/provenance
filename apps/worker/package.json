@@ -1,0 +1,15 @@
+{
+  "name": "@provenance/worker",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": { "typecheck": "bunx tsc --noEmit -p ../../tsconfig.json" },
+  "dependencies": {
+    "@provenance/core": "workspace:*",
+    "@provenance/sources": "workspace:*",
+    "@provenance/chain": "workspace:*",
+    "@provenance/research": "workspace:*",
+    "@provenance/store": "workspace:*",
+    "@provenance/alerts": "workspace:*"
+  }
+}

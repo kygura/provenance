@@ -1,0 +1,122 @@
+/**
+ * Known-address table.
+ *
+ * Every entry here changes how a balance is interpreted, so the table is kept
+ * deliberately small and deliberately separate: adding a row is a one-line
+ * change, and a wrong row silently launders a real concentration risk into
+ * "that's just the pool".
+ *
+ * Confidence note: these are widely published program IDs and pool authorities,
+ * not values fetched at runtime. They were not verifiable against a live RPC in
+ * the build sandbox — see the package README notes. Anything uncertain was left
+ * out; the analysers fall back to labelling pool addresses from
+ * `TokenSnapshot.pairs`, which comes from the market sources and is the
+ * authoritative per-token source of LP addresses.
+ */
+
+import type { Chain } from '@provenance/core';
+
+/** Label prefixes that remove an address from concentration maths. */
+export const EXCLUDED_LABEL_PREFIXES: readonly string[] = [
+  'liquidity-pool',
+  'burn',
+  'protocol:',
+  'bonding-curve',
+];
+
+export interface KnownAddress {
+  address: string;
+  label: string;
+  /** Why this address holds tokens; shown in notes, not persisted. */
+  note?: string;
+}
+
+/** True when a label means "not a real holder" for concentration purposes. */
+export function labelIsExcluded(label: string | undefined): boolean {
+  if (!label) return false;
+  return EXCLUDED_LABEL_PREFIXES.some((prefix) => label === prefix || label.startsWith(prefix));
+}
+
+// ---------------------------------------------------------------- Solana
+
+/** The SPL incinerator. Tokens sent here are unrecoverable. */
+export const SOLANA_INCINERATOR = '1nc1nerator11111111111111111111111111111111';
+
+/**
+ * Pool authorities, AMM program IDs and launchpad programs. On Solana a pool's
+ * token vault is owned either by a fixed program authority (Raydium AMM v4) or
+ * by a pool PDA (Orca Whirlpools, Meteora), so both the token-account address
+ * and its resolved owner are checked against this table *and* against the
+ * token's own `pairs` list.
+ */
+export const SOLANA_KNOWN_ADDRESSES: readonly KnownAddress[] = [
+  { address: SOLANA_INCINERATOR, label: 'burn', note: 'SPL incinerator' },
+  { address: '11111111111111111111111111111111', label: 'burn', note: 'System program / null owner' },
+
+  {
+    address: '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1',
+    label: 'protocol:raydium',
+    note: 'Raydium AMM v4 pool authority — owns every v4 pool vault',
+  },
+  { address: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', label: 'protocol:raydium', note: 'Raydium Liquidity Pool v4 program' },
+  { address: 'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', label: 'protocol:raydium', note: 'Raydium CLMM program' },
+  { address: 'GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL', label: 'protocol:raydium', note: 'Raydium CPMM pool authority' },
+
+  { address: 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', label: 'protocol:orca', note: 'Orca Whirlpools program' },
+
+  { address: 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo', label: 'protocol:meteora', note: 'Meteora DLMM program' },
+  { address: 'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB', label: 'protocol:meteora', note: 'Meteora dynamic AMM pools program' },
+  { address: '24Uqj9JCLxUeoC3hGfh5W3s9FM9uCHDS2SG3LYwBpyTi', label: 'protocol:meteora', note: 'Meteora vault program' },
+
+  {
+    address: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',
+    label: 'bonding-curve',
+    note: 'Pump.fun bonding-curve program — pre-migration supply sits here',
+  },
+  { address: 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA', label: 'protocol:pumpswap', note: 'PumpSwap AMM program' },
+
+  // Custodial venues. Labelled but NOT excluded: a CEX wallet is a real
+  // concentration of float even though it is not one person's bag.
+  { address: '5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9', label: 'cex:binance' },
+  { address: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM', label: 'cex:binance' },
+  { address: 'H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS', label: 'cex:coinbase' },
+  { address: 'GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE', label: 'cex:coinbase' },
+];
+
+const SOLANA_INDEX = new Map(SOLANA_KNOWN_ADDRESSES.map((entry) => [entry.address, entry]));
+
+export function lookupSolanaAddress(address: string): KnownAddress | undefined {
+  return SOLANA_INDEX.get(address.trim());
+}
+
+// ---------------------------------------------------------------- EVM
+
+/** Checked lowercase. `0x…dEaD` is the EIP-55 spelling of the second one. */
+export const EVM_BURN_ADDRESSES: readonly string[] = [
+  '0x0000000000000000000000000000000000000000',
+  '0x000000000000000000000000000000000000dead',
+];
+
+export const EVM_KNOWN_ADDRESSES: readonly KnownAddress[] = [
+  { address: '0x0000000000000000000000000000000000000000', label: 'burn', note: 'Null address / mint source' },
+  { address: '0x000000000000000000000000000000000000dead', label: 'burn', note: 'Conventional dead address' },
+  { address: '0x7a250d5630b4cf539739df2c5dacb4c659f2488d', label: 'protocol:uniswap', note: 'Uniswap V2 router 02' },
+  { address: '0xe592427a0aece92de3edee1f18e0157c05861564', label: 'protocol:uniswap', note: 'Uniswap V3 router' },
+  { address: '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45', label: 'protocol:uniswap', note: 'Uniswap V3 router 02' },
+  { address: '0x10ed43c718714eb63d5aa57b78b54704e256024e', label: 'protocol:pancakeswap', note: 'PancakeSwap V2 router' },
+];
+
+const EVM_INDEX = new Map(EVM_KNOWN_ADDRESSES.map((entry) => [entry.address, entry]));
+
+export function lookupEvmAddress(address: string): KnownAddress | undefined {
+  return EVM_INDEX.get(address.trim().toLowerCase());
+}
+
+export function isEvmBurnAddress(address: string): boolean {
+  return EVM_BURN_ADDRESSES.includes(address.trim().toLowerCase());
+}
+
+/** Chain-aware lookup used by both analysers. */
+export function lookupAddress(chain: Chain, address: string): KnownAddress | undefined {
+  return chain === 'solana' ? lookupSolanaAddress(address) : lookupEvmAddress(address);
+}

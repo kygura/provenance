@@ -1,0 +1,24 @@
+# GitGuardian configuration.
+#
+# The entries below are public, immutable Solana program addresses — the
+# on-chain equivalent of a well-known contract address. Every Solana client
+# hardcodes them; they grant nothing and there is nothing to rotate. The
+# entropy detector cannot distinguish base58 program IDs from credentials, so
+# they are ignored by exact value rather than by path: a real secret committed
+# to the same file must still be caught.
+#
+# SCOPE, because this file does less than it looks like it does: it is the
+# ggshield CLI's config. It is honoured by a local `ggshield secret scan`, by
+# the pre-commit hook, and by ggshield running in CI. It is NOT read by the
+# GitGuardian GitHub App, so it cannot turn the App's pull-request check green.
+# Suppressing these two in that check means marking the incidents as false
+# positives in the GitGuardian dashboard, or running ggshield in CI instead of
+# the App so that this file becomes the single reviewable source of truth.
+version: 2
+
+secret:
+  ignored-matches:
+    - name: SPL Token program ID (public Solana program address)
+      match: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
+    - name: SPL Token-2022 program ID (public Solana program address)
+      match: TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb
