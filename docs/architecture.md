@@ -30,11 +30,23 @@ over `fetch` — because every wallet SDK that would make this convenient also
 wants an API key or a paid endpoint. It never throws: an unsupported chain
 returns `method: 'unavailable'` with a note.
 
-**research** owns "where the meme came from". Split in two: collectors gather
-public evidence with no model involved, then one LLM call reasons over that
-evidence into a `ProvenanceReport`. The split matters because evidence is
-cacheable and cheap while the model call is neither, and because a report whose
-claims trace back to collected sources can be audited.
+**research** owns "where the meme came from". Two model calls: a research pass
+with the web search server tool and no output constraint, then an extraction
+pass with no tools and a forced tool call over its own notes. The split is the
+point — a model filling a twelve-field schema starts optimising for the schema
+partway through the search.
+
+Search is server-side. An earlier version scraped Wikipedia, Know Your Meme,
+Reddit and DuckDuckGo's HTML; those parsers broke whenever a site reflowed and
+returned nothing rather than reporting that they had failed. What remains of the
+collector layer is the zero-network one, which turns what the pipeline already
+measured into evidence rows. `EvidenceCollector` is still injectable, so a
+private corpus or a paid search API plugs in without touching the analyst.
+
+Everything the deployer wrote, and everything a web page returned, reaches the
+model inside a nonce-delimited block that the system prompt marks as evidence
+and never as instruction. A token description is attacker-controlled text, and
+it feeds the field the score weighs most.
 
 **alerts** owns judgement — scoring and rules. Separated from delivery so the
 scoring model can be tuned and tested without touching a network, and so rules
@@ -54,6 +66,8 @@ Every stage is allowed to return less, never to fail the run:
 | A public RPC refuses a heavy call | `holderCount` stays undefined, a note explains why |
 | EVM log scan hits its bound | `method: 'partial'`, concentration from what was scanned |
 | Every evidence collector fails | on-chain-only evidence, low model confidence |
+| Web search unavailable or exhausted | notes from model recall alone, confidence scaled to 0.7x |
+| A research turn stops with `pause_turn` | resumed up to 3 times, notes accumulate across resumes |
 | No `ANTHROPIC_API_KEY` | market + chain score only, no provenance report |
 | LLM cost ceiling hit mid-run | remaining tokens get a market-only score, recorded in run stats |
 | One token throws | isolated, recorded, run continues |
@@ -87,8 +101,14 @@ fixture and a parser test.
 **A new chain**: implement `ChainAnalyzer`, add the chain to `CHAINS` and
 `CHAIN_ALIASES`, add its RPC list to `ChainRpcConfig`.
 
-**A new evidence source**: implement `EvidenceCollector`. Give it an honest
-`sourceQuality` — it directly weights how much the model trusts it.
+**A new evidence source**: implement `EvidenceCollector` and add it in
+`defaultCollectors`. Give it an honest `sourceQuality` — it directly weights how
+much the model trusts it. Whatever it returns is fenced as untrusted before it
+reaches a prompt.
+
+**A new archetype**: add a row to `packages/research/src/lexicon.ts`. It is a
+cheap prior handed to the research pass as a hypothesis, never as a source —
+patterns must not carry `/g`, which would make `classify()` order-dependent.
 
 **A new alert**: implement `AlertRule` and add it to `defaultRules`. Rules get
 `history`, so deltas across runs are available.

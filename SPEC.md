@@ -20,9 +20,10 @@ Twice a day, in the cloud:
    cross-source agreement, filter on liquidity / volume / pool age.
 3. **Analyse on-chain** — holder distribution, concentration, supply, mint and freeze
    authorities, LP burn/lock, creator holdings, risk flags. Free public RPCs only.
-4. **Research provenance** — gather public evidence about the meme, then have Claude
-   produce a structured `ProvenanceReport`: origin, lineage, prior cycles, recycle
-   verdict and generation, durability, cultural reach, authenticity.
+4. **Research provenance** — hand Claude the measured facts and let it search the
+   web itself, then have a second pass structure its own notes into a
+   `ProvenanceReport`: origin, lineage, prior cycles, recycle verdict and
+   generation, durability, cultural reach, authenticity.
 5. **Score** — composite 0-100 from recycling strength, memetic durability,
    distribution health, liquidity depth, momentum and authenticity.
 6. **Alert** — rules fire into Telegram / Discord / webhook.
@@ -51,7 +52,7 @@ Twice a day, in the cloud:
 packages/core       contracts, types, config, logging, utilities   [DONE — do not edit]
 packages/sources    trending discovery + normalization
 packages/chain      holder distribution, supply, risk flags
-packages/research   evidence collection + LLM provenance synthesis
+packages/research   web-search research pass + structured extraction pass
 packages/store      libSQL/SQLite persistence implementing ProvenanceStore
 packages/alerts     scoring, alert rules, delivery channels
 apps/worker         pipeline orchestration + CLI + GitHub Actions cron

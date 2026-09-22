@@ -58,9 +58,13 @@ discover ─┬─ dextools      (playwright, XHR interception w/ DOM fallback)
                 │
           chain analysis      holders, concentration, supply, authorities, LP,
                 │             risk flags — free RPCs only
-          evidence            wikipedia · knowyourmeme · reddit · web · on-chain
+          evidence            on-chain + listing metadata, no network
                 │
-          LLM synthesis       structured ProvenanceReport via tool-use
+          research pass       Claude with the web search server tool, no output
+                │             constraint — prose notes and citations
+                │
+          extraction pass     the same notes, no tools, forced tool call →
+                │             a schema-validated ProvenanceReport
                 │
           scoring             recycling · memetic · distribution · liquidity ·
                 │             momentum · authenticity, with penalties and
@@ -69,6 +73,12 @@ discover ─┬─ dextools      (playwright, XHR interception w/ DOM fallback)
                 │
           store               libSQL  →  dashboard
 ```
+
+Research is two calls on purpose. The first searches with no schema in front of
+it, so the model can follow a lead and find it wrong; the second structures
+those notes with no tools and nothing new to look up. Asked to do both at once,
+a model starts writing to the schema partway through the search, and the
+lineage — the field the score weighs most — is the first thing to suffer.
 
 Every stage degrades rather than fails. A dead source, an RPC that refuses
 `getProgramAccounts`, a scraper whose selectors moved, a missing API key — each

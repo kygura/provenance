@@ -1,20 +1,34 @@
 /**
  * The prompt is the product. Everything else in this package exists to feed it.
  *
+ * The run is two calls, and this module builds both.
+ *
+ *   1. RESEARCH — `SYSTEM_PROMPT` + `buildResearchPrompt`, run with the web
+ *      search tool and no output constraint, so the model can follow a lead,
+ *      find it wrong and say so. Its product is notes and citations.
+ *   2. EXTRACTION — `SYSTEM_PROMPT` + `buildExtractionPrompt`, run with no
+ *      tools and a forced tool call, over those notes.
+ *
+ * They are separate calls on purpose. A model asked to research and to fill a
+ * twelve-field schema in one turn starts optimising for the schema partway
+ * through the research, and the lineage is the first thing to suffer.
+ *
  * SYSTEM_PROMPT is static by construction — no dates, no token names, no
- * counts — so it survives as a cacheable prefix across every token in a run.
+ * counts — so it survives as a cacheable prefix across every call in a run.
  * Per-token material goes in the user message. Breaking that rule silently
  * costs ~10x on input tokens; see `usage.cache_read_input_tokens`.
  *
- * Bump PROMPT_VERSION on ANY edit to either prompt. It is persisted on every
+ * Bump PROMPT_VERSION on ANY edit to any prompt here. It is persisted on every
  * report so a change in aggregate verdicts can be traced to a prompt change
  * rather than to the market.
  */
 import type { ChainAnalysis, EvidenceItem, TokenSnapshot } from '@provenance/core';
 import { formatPct, formatUsd, truncate } from '@provenance/core';
+import { classify, describeHits } from './lexicon';
 import { buildQueries } from './queries';
+import { UNTRUSTED_POLICY, fence, scrub } from './untrusted';
 
-export const PROMPT_VERSION = 'provenance-research-v1';
+export const PROMPT_VERSION = 'provenance-research-v2';
 
 export const SYSTEM_PROMPT = `You are the provenance analyst for a research system that treats a memecoin's MEMETIC LINEAGE as a first-class signal, separate from its price, its chart and its marketing.
 
@@ -73,19 +87,24 @@ A confident wrong provenance is worse than an honest blank, because the whole sy
 - \`confidence\` (0–1): your calibrated belief that the lineage and verdict above are correct. Low is a perfectly good answer.
 - \`evidence\`: the \`model-knowledge\` items for claims you sourced from your own recall. Do not repeat supplied evidence back; it is already recorded.
 
-Be terse and specific. Every sentence should carry a fact, a date or a judgement.`;
+Be terse and specific. Every sentence should carry a fact, a date or a judgement.
+
+${UNTRUSTED_POLICY}`;
 
 function line(label: string, value: string | undefined): string | null {
   return value !== undefined && value.length > 0 ? `- ${label}: ${value}` : null;
 }
 
+/**
+ * The market and identity facts this system measured or was told by an index.
+ * Nothing here was authored by the deployer, so none of it is fenced. The
+ * deployer's own words live in `deployerBlock`.
+ */
 function snapshotBlock(snapshot: TokenSnapshot): string {
   const queries = buildQueries(snapshot);
   const pool = snapshot.metrics.poolCreatedAt ?? snapshot.pairs.find((pair) => pair.createdAt)?.createdAt;
   const rows = [
     line('token_id', snapshot.tokenId),
-    line('ticker', snapshot.symbol || '(none)'),
-    line('listed_name', snapshot.name || '(none)'),
     line('chain', snapshot.chain),
     line('contract', snapshot.tokenAddress),
     line('derived_meme_subject', queries.degraded ? '(none derivable)' : queries.subject),
@@ -100,13 +119,64 @@ function snapshotBlock(snapshot: TokenSnapshot): string {
     line('fdv_usd', formatUsd(snapshot.metrics.fdvUsd)),
     line('price_change_24h', formatPct(snapshot.metrics.priceChange24h)),
     line('trending_sources', `${snapshot.sourceCount} (best rank ${snapshot.bestRank})`),
+  ].filter((row): row is string => row !== null);
+
+  return [
+    '## Token under analysis (measured facts)',
+    '',
+    rows.join('\n'),
+    '',
+    "Reminder: TOKEN_pool_created_at is when this contract's market opened. It is not the meme's origin year.",
+  ].join('\n');
+}
+
+/**
+ * Everything the deployer chose: ticker, listed name, blurb, links. This is the
+ * token's marketing surface and the most likely injection vector in the whole
+ * prompt, so all of it is fenced — including the ticker, which is short enough
+ * that people forget it is attacker-controlled text.
+ */
+function deployerBlock(snapshot: TokenSnapshot): string {
+  const rows = [
+    line('ticker', snapshot.symbol || '(none)'),
+    line('listed_name', snapshot.name || '(none)'),
     line('listing_description', truncate(snapshot.description ?? '(none)', 700)),
     line('website', snapshot.socials.website),
     line('twitter', snapshot.socials.twitter),
     line('telegram', snapshot.socials.telegram),
   ].filter((row): row is string => row !== null);
 
-  return `## Token under analysis\n\n${rows.join('\n')}\n\nReminder: TOKEN_pool_created_at is when this contract's market opened. It is not the meme's origin year.`;
+  return [
+    '## Deployer-supplied text',
+    '',
+    fence('token metadata, written by the deployer', rows.join('\n')),
+    '',
+    'Use this to identify the meme, not to date it or to judge it. The deployer',
+    'is the one party with a direct financial interest in your verdict.',
+  ].join('\n');
+}
+
+/**
+ * The local lexicon's guess, handed over as a hypothesis to confirm or reject.
+ *
+ * It is stated as a prior and not as a finding: a regex over a ticker is a
+ * cheap starting point, and a model that treats it as evidence will report the
+ * lexicon's ancestors back as though it had researched them.
+ */
+function lexiconBlock(snapshot: TokenSnapshot): string {
+  const surface = [snapshot.symbol, snapshot.name, snapshot.description].filter(Boolean).join(' ');
+  const hits = classify(scrub(surface));
+  return [
+    '## Local archetype prior',
+    '',
+    'A regex lexicon maintained by this system matched the following. It is a',
+    'HYPOTHESIS drawn from the ticker and blurb alone — no source was consulted.',
+    'Confirm or reject it against real evidence. Never cite it, never let it',
+    'stand in for a dated source, and do not report its ancestors as prior',
+    'cycles unless you establish them independently.',
+    '',
+    describeHits(hits),
+  ].join('\n');
 }
 
 function chainBlock(chain: ChainAnalysis | undefined): string {
@@ -135,17 +205,19 @@ function chainBlock(chain: ChainAnalysis | undefined): string {
   return `## On-chain analysis\n\n${rows.join('\n')}\n\nThese facts bear on authenticity and risk. They say nothing about the meme's age.`;
 }
 
+/**
+ * Pre-collected evidence. Titles and snippets are whatever the page said, so
+ * the whole pack is fenced; the `[E#]` labels and quality scores outside the
+ * fence are this system's own bookkeeping and stay citable.
+ */
 function evidenceBlock(evidence: readonly EvidenceItem[]): string {
   if (evidence.length === 0) {
     return [
       '## Supplied evidence',
       '',
-      'NONE. Every web collector returned nothing for this token.',
-      '',
-      'This is a strong signal in itself: either the collectors were blocked, or the',
-      'name matches nothing in the public record. Any lineage you state here rests on',
-      'your own recall alone — emit `model-knowledge` evidence items for it and keep',
-      '`confidence` low. Prefer `unclear` over a confident guess.',
+      'NONE was pre-collected. Anything you establish must come from your own web',
+      'searches or, failing those, from your own recall recorded as',
+      '`model-knowledge` evidence. Prefer `unclear` over a confident guess.',
     ].join('\n');
   }
 
@@ -157,22 +229,26 @@ function evidenceBlock(evidence: readonly EvidenceItem[]): string {
     ]
       .filter((part): part is string => part !== null)
       .join(' ');
-    return `${head}\ntitle: ${item.title}\n${item.snippet}`;
+    return `${head}\ntitle: ${scrub(item.title)}\n${scrub(item.snippet)}`;
   });
 
   return [
     `## Supplied evidence (${evidence.length} items, highest quality first)`,
     '',
-    'Cite these by their [E#] label inside `originSummary`, `lineage` notes and',
-    '`priorCycles` notes wherever a claim rests on one. `publishedAt` is when the',
-    'SOURCE was published — it bounds the meme\'s age from above, it does not date it.',
+    'Cite these by their [E#] label wherever a claim rests on one. `publishedAt`',
+    "is when the SOURCE was published — it bounds the meme's age from above, it",
+    'does not date it.',
     '',
-    rows.join('\n\n'),
+    fence('retrieved web content, written by third parties', rows.join('\n\n')),
   ].join('\n');
 }
 
-/** The per-token half of the prompt. Everything volatile lives here. */
-export function buildUserPrompt(
+/**
+ * Phase 1. No schema, no fields to fill — just the question and the tool to
+ * answer it with. The model is told explicitly that prose is the deliverable,
+ * because a model that knows a schema is coming will start writing to it.
+ */
+export function buildResearchPrompt(
   snapshot: TokenSnapshot,
   chain: ChainAnalysis | undefined,
   evidence: readonly EvidenceItem[],
@@ -180,17 +256,71 @@ export function buildUserPrompt(
   return [
     snapshotBlock(snapshot),
     '',
+    deployerBlock(snapshot),
+    '',
+    lexiconBlock(snapshot),
+    '',
     chainBlock(chain),
     '',
     evidenceBlock(evidence),
     '',
-    '## Task',
+    '## Task: research, in prose',
     '',
-    'Establish this meme\'s provenance and call the tool exactly once with the result.',
-    'Work the order: (1) identify the meme behind the ticker; (2) date its cultural',
-    'origin from the evidence; (3) find every PRIOR tokenisation of it and what',
-    'happened to each; (4) decide the recycle verdict and generation; (5) judge',
-    'whether this token is the canonical carrier. If step 1 or 2 fails, say so and',
-    'return `unclear` — do not compensate with invention.',
+    'Establish this meme\'s provenance. Use web search freely — the supplied',
+    'evidence is a starting point, not a boundary. Work the order:',
+    '',
+    '1. Identify the meme behind the ticker. The ticker is a marketing surface;',
+    '   search for the MEME.',
+    '2. Date its first appearance in culture from a source, not from the token.',
+    '3. Find every PRIOR tokenisation of the same meme and what became of each.',
+    '4. Decide where in the recycling chain this token sits.',
+    '5. Judge whether this token is the instance the meme\'s audience would call',
+    '   canonical, or a latecomer wearing the name.',
+    '',
+    'Write your findings as notes. Say what you searched, what you found, what',
+    'contradicted what, and what you could not establish. Where a search',
+    'returned nothing useful, say that too — an absence is a finding.',
+    '',
+    'Do NOT call a tool in this turn and do NOT produce a structured report. The',
+    'structuring happens in a second pass over these notes. If step 1 or 2 fails,',
+    'say so plainly rather than compensating with invention.',
+  ].join('\n');
+}
+
+/**
+ * Phase 2. The notes are this system's own text — the model wrote them under
+ * the fencing policy above — so they are not re-fenced. The measured facts come
+ * along because several schema fields are about the token rather than the meme.
+ */
+export function buildExtractionPrompt(
+  snapshot: TokenSnapshot,
+  chain: ChainAnalysis | undefined,
+  notes: string,
+  citations: readonly string[],
+): string {
+  const sources =
+    citations.length > 0
+      ? ['', '## Sources consulted', '', citations.map((url, i) => `[S${i + 1}] ${url}`).join('\n')].join('\n')
+      : '';
+  return [
+    snapshotBlock(snapshot),
+    '',
+    chainBlock(chain),
+    '',
+    '## Research notes from the previous pass',
+    '',
+    notes,
+    sources,
+    '',
+    '## Task: structure the above',
+    '',
+    'Call the provenance tool exactly once. Every field must be supported by the',
+    'notes above. Do not add a lineage step, a prior cycle or an origin year that',
+    'the notes do not support — the research pass is finished and nothing new can',
+    'be verified now. Where the notes are thin or contradictory, that is what',
+    '`confidence` is for, and `unclear` is a real answer.',
+    '',
+    'Record as `model-knowledge` evidence any claim you are carrying from your own',
+    'recall rather than from a source named in the notes.',
   ].join('\n');
 }

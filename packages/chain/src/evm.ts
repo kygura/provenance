@@ -282,6 +282,7 @@ export async function analyzeEvm(
     top10Pct: conc.top10Pct,
     top20Pct: conc.top20Pct,
     top50Pct: conc.top50Pct,
+    ...(conc.largestHolderPct !== undefined ? { largestHolderPct: conc.largestHolderPct } : {}),
     herfindahl: conc.herfindahl,
     gini: conc.gini,
     ownerRenounced,
@@ -291,11 +292,10 @@ export async function analyzeEvm(
     durationMs: Date.now() - started,
   };
 
-  const largest = rows.find((row) => row.excludedFromConcentration !== true);
   analysis.flags = evaluateFlags({
     analysis,
     metrics: snapshot.metrics,
-    ...(largest ? { largestHolderPct: largest.pct } : {}),
+    ...(analysis.largestHolderPct !== undefined ? { largestHolderPct: analysis.largestHolderPct } : {}),
   });
 
   return analysis;

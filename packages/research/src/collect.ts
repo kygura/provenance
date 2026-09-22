@@ -1,8 +1,15 @@
 /**
- * Fan out across every collector, then reduce to an evidence pack that fits in
- * a prompt. Concurrency is bounded because each collector already has its own
- * per-host rate limiter — the limit here is about not opening five sockets at
- * once, not about politeness to any single host.
+ * Assemble the evidence pack the research pass starts from.
+ *
+ * This used to fan out across scrapers for Wikipedia, Know Your Meme, Reddit
+ * and DuckDuckGo's HTML. Search is now the model's own server-side tool, which
+ * does that job without breaking every time one of those sites reflows its
+ * markup — so what is left here is the zero-network collector, which turns what
+ * the pipeline already measured into evidence rows.
+ *
+ * The fan-out shape is kept because `collectors` is injectable: a deployment
+ * that wants a private corpus, an internal index or a paid search API adds a
+ * collector here without touching the analyst.
  */
 import type {
   ChainAnalysis,
@@ -13,11 +20,7 @@ import type {
 } from '@provenance/core';
 import { mapLimit } from '@provenance/core';
 import { MAX_EVIDENCE_CHARS, MAX_EVIDENCE_ITEMS, normalizeEvidence, type TrimOptions } from './evidence';
-import { KnowYourMemeCollector } from './collectors/knowyourmeme';
-import { RedditCollector } from './collectors/reddit';
 import { TokenMetaCollector } from './collectors/tokenmeta';
-import { WebSearchCollector } from './collectors/websearch';
-import { WikipediaCollector } from './collectors/wikipedia';
 
 export interface CollectOptions extends TrimOptions {
   /** Feeds the zero-network collector; omitted when chain analysis failed. */
@@ -30,24 +33,19 @@ export interface CollectOptions extends TrimOptions {
 
 /**
  * Collector order matters only for logs; quality ordering happens at trim time.
- * tokenmeta is last because it is the one that cannot fail.
+ * tokenmeta is the one that cannot fail, which is why it is the whole default
+ * set: the research pass must always have something to open on.
  */
 export function defaultCollectors(chain?: ChainAnalysis): EvidenceCollector[] {
-  return [
-    new WikipediaCollector(),
-    new KnowYourMemeCollector(),
-    new RedditCollector(),
-    new WebSearchCollector(),
-    new TokenMetaCollector(chain),
-  ];
+  return [new TokenMetaCollector(chain)];
 }
 
 /**
- * Gather public evidence about a token's meme.
+ * Gather starting evidence about a token's meme.
  *
  * Contract: never throws. A collector that fails contributes nothing and is
- * logged; a run where every web collector fails still returns the zero-network
- * evidence, so the LLM step always has something to reason over.
+ * logged; a run where every collector fails still returns an empty pack, and
+ * the research pass treats that as a signal rather than an error.
  */
 export async function collectEvidence(
   snapshot: TokenSnapshot,

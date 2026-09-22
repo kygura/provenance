@@ -346,7 +346,10 @@ export default async function TokenPage({ params }: { params: Promise<{ id: stri
                         <th scope="col" className="py-1 pr-3">Address</th>
                         <th scope="col" className="py-1 pr-3">Label</th>
                         <th scope="col" className="py-1 pr-3 text-right">Balance</th>
-                        <th scope="col" className="py-1 text-right">Share</th>
+                        {/* Named for its basis: the bar above is ex-LP, this column is not. */}
+                        <th scope="col" className="py-1 text-right" title="Share of total supply. The concentration bar above excludes LP and burn addresses, so the two use different denominators.">
+                          Share of supply
+                        </th>
                       </tr>
                     </thead>
                     <tbody>

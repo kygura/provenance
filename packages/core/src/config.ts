@@ -40,6 +40,12 @@ export interface LlmConfig {
   /** Hard ceiling on spend per run; the pipeline stops analysing past it. */
   maxCostUsdPerRun: number;
   temperature: number;
+  /**
+   * Ceiling on server-side web searches in one token's research pass. The
+   * single biggest lever on both cost and research depth — six is enough to
+   * date a meme and find two prior cycles without wandering.
+   */
+  maxWebSearches: number;
 }
 
 export interface ChainRpcConfig {
@@ -148,6 +154,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       maxOutputTokens: num(env.LLM_MAX_OUTPUT_TOKENS, 4096),
       maxCostUsdPerRun: num(env.LLM_MAX_COST_USD_PER_RUN, 5),
       temperature: num(env.LLM_TEMPERATURE, 0.2),
+      maxWebSearches: num(env.LLM_MAX_WEB_SEARCHES, 6),
     },
     rpc: {
       solana: rpcOr('RPC_SOLANA', ['https://api.mainnet-beta.solana.com']),

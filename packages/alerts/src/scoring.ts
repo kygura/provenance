@@ -493,12 +493,22 @@ export function assessRisk(chain?: ChainAnalysis): RiskAssessment {
   const mintAuthorityActive = chain?.mintAuthorityActive === true;
   const freezeAuthorityActive = chain?.freezeAuthorityActive === true;
 
-  let singleHolderPct: number | undefined;
-  for (const holder of chain?.topHolders ?? []) {
-    if (!holder || holder.excludedFromConcentration) continue;
-    const share = finite(holder.pct);
-    if (share === undefined) continue;
-    if (singleHolderPct === undefined || share > singleHolderPct) singleHolderPct = share;
+  // The analyser's own ex-LP figure, which is clamped and uses the same basis
+  // as `top10Pct`. Scanning `topHolders` for the biggest `pct` instead mixed
+  // bases — `HolderRow.pct` is a share of TOTAL supply — and on EVM, where
+  // balances are reconstructed from a bounded log window, printed penalties
+  // like "Single holder controls 210.0% of supply".
+  let singleHolderPct = finite(chain?.largestHolderPct);
+  if (singleHolderPct === undefined) {
+    // Pre-`largestHolderPct` rows, and analysers that resolved holders without
+    // a supply figure. Same mixed-basis caveat, so it is clamped here.
+    for (const holder of chain?.topHolders ?? []) {
+      if (!holder || holder.excludedFromConcentration) continue;
+      const share = finite(holder.pct);
+      if (share === undefined) continue;
+      if (singleHolderPct === undefined || share > singleHolderPct) singleHolderPct = share;
+    }
+    if (singleHolderPct !== undefined) singleHolderPct = Math.min(100, singleHolderPct);
   }
 
   const top10 = finite(chain?.top10Pct);

@@ -15,3 +15,6 @@ coverage/
 .DS_Store
 artifacts/
 tmp/
+
+# TypeScript incremental build state
+*.tsbuildinfo

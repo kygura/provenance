@@ -5,7 +5,7 @@
   "workspaces": ["packages/*", "apps/worker", "apps/dashboard"],
   "scripts": {
     "typecheck": "bun run --filter '*' typecheck",
-    "test": "bun test packages",
+    "test": "bun test packages apps",
     "lint": "bunx tsc --noEmit -p tsconfig.json",
     "run:pipeline": "bun run apps/worker/src/cli.ts run",
     "run:dry": "bun run apps/worker/src/cli.ts run --dry-run --fixtures",

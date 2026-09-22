@@ -42,6 +42,16 @@ export interface ChainAnalysis {
   top10Pct?: number;
   top20Pct?: number;
   top50Pct?: number;
+  /**
+   * Largest single non-excluded holder as a share of that same ex-LP basis,
+   * clamped to 100.
+   *
+   * On the contract, not derived per consumer: `HolderRow.pct` is a share of
+   * TOTAL supply and is not clamped — EVM balances reconstructed from a bounded
+   * window of Transfer logs can overshoot supply when the window misses the
+   * offsetting burns. Anything reading the largest holder must read this.
+   */
+  largestHolderPct?: number;
   /** Herfindahl-Hirschman index over holder shares, 0..1. Higher = tighter. */
   herfindahl?: number;
   /** Gini coefficient over the sampled holder set, 0..1. */
