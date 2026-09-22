@@ -174,6 +174,33 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_evidence_cache_fetched_at ON evidence_cache (fetched_at DESC)`,
     ],
   },
+  {
+    version: 2,
+    name: 'meme-identity',
+    statements: [
+      // ---- memes ------------------------------------------------------------
+      // The canonical meme, so "have I seen this before" is a join rather than
+      // a web search. `id` is a slug computed by `memeSlug()` in
+      // packages/research; the store never normalizes text itself.
+      `CREATE TABLE IF NOT EXISTS memes (
+  id TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  narrative_cluster TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL
+)`,
+      `CREATE INDEX IF NOT EXISTS idx_memes_cluster ON memes (narrative_cluster)`,
+      `CREATE INDEX IF NOT EXISTS idx_memes_last_seen_at ON memes (last_seen_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_memes_display_lower ON memes (lower(display_name))`,
+
+      // Nullable on purpose: a report whose meme could not be identified links
+      // to nothing rather than to a shared "unknown" row, which would
+      // manufacture precedent out of ignorance. The default has to be NULL for
+      // SQLite to accept a REFERENCES clause on ADD COLUMN.
+      `ALTER TABLE provenance ADD COLUMN meme_id TEXT REFERENCES memes (id)`,
+      `CREATE INDEX IF NOT EXISTS idx_provenance_meme ON provenance (meme_id, created_at DESC)`,
+    ],
+  },
 ];
 
 const BOOKKEEPING = `CREATE TABLE IF NOT EXISTS schema_migrations (

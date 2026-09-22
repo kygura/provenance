@@ -52,6 +52,19 @@ it feeds the field the score weighs most.
 scoring model can be tuned and tested without touching a network, and so rules
 can be added without touching the pipeline.
 
+**store** also holds the system's memory of memes. `memes` is a canonical row
+per meme, keyed by a slug, and `provenance.meme_id` points at it. Without that
+key `memeName` is free text — "Nyan Cat", "nyan cat", "NyanCat" are one meme and
+three strings — and the system cannot answer its own most valuable question,
+"have I watched this meme run before?", so it re-asks the web on every token and
+discards what it saw last time.
+
+The slug is deliberately conservative: it collapses case, spacing, emoji and
+confusables, and drops parentheticals and leading articles, but stems nothing
+and drops no word. "Baby Doge" and "Doge" stay separate memes. Missing precedent
+costs a prompt line; fabricating it corrupts `recycleGeneration`, which is the
+field the scoring model leans on hardest.
+
 **store** is the only thing that knows SQL. Both the worker and the dashboard go
 through the `ProvenanceStore` interface, so swapping libSQL for something else is
 one new implementation.
@@ -66,6 +79,8 @@ Every stage is allowed to return less, never to fail the run:
 | A public RPC refuses a heavy call | `holderCount` stays undefined, a note explains why |
 | EVM log scan hits its bound | `method: 'partial'`, concentration from what was scanned |
 | Every evidence collector fails | on-chain-only evidence, low model confidence |
+| A meme name that resolves to nothing | report stored unlinked; never joined to a shared "unknown" row |
+| Precedent lookup fails | the token is researched without it, exactly as before |
 | Web search unavailable or exhausted | notes from model recall alone, confidence scaled to 0.7x |
 | A research turn stops with `pause_turn` | resumed up to 3 times, notes accumulate across resumes |
 | No `ANTHROPIC_API_KEY` | market + chain score only, no provenance report |
@@ -105,6 +120,11 @@ fixture and a parser test.
 `defaultCollectors`. Give it an honest `sourceQuality` — it directly weights how
 much the model trusts it. Whatever it returns is fenced as untrusted before it
 reaches a prompt.
+
+**A schema change**: add a `Migration` to `MIGRATIONS` in
+`packages/store/src/migrate.ts`, then regenerate the readable artefact with
+`bun run packages/store/src/migrate.ts --emit-schema`. `schema.test.ts` fails if
+the two drift.
 
 **A new archetype**: add a row to `packages/research/src/lexicon.ts`. It is a
 cheap prior handed to the research pass as a hypothesis, never as a source —

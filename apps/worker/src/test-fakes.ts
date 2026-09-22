@@ -24,6 +24,8 @@ import {
   type TokenSnapshot,
   loadConfig,
   nowIso,
+  type MemeRecord,
+  type MemeSighting,
 } from '@provenance/core';
 import type { DiscoveryResult, FilterResult, PipelineDeps } from './deps';
 
@@ -139,6 +141,11 @@ export class FakeStore implements ProvenanceStore {
   readonly runs = new Map<string, RunRecord>();
   readonly priorReports = new Map<string, ProvenanceReport>();
   readonly priorScores = new Map<string, ProvenanceScore[]>();
+  readonly memes = new Map<string, MemeRecord>();
+  /** Seeded by a test to give a meme observed precedent. */
+  readonly memeSightings = new Map<string, MemeSighting[]>();
+  /** Every meme id the pipeline resolved, in order. */
+  readonly resolvedMemes: string[] = [];
   readonly evidenceCache = new Map<string, string>();
   closed = false;
   /** Set to make a specific method reject, for failure-isolation tests. */
@@ -230,6 +237,33 @@ export class FakeStore implements ProvenanceStore {
     this.alerts.push({ alert, deliveries });
   }
 
+  async resolveMeme(input: {
+    id: string;
+    displayName: string;
+    narrativeCluster: string;
+  }): Promise<MemeRecord> {
+    this.guard('resolveMeme');
+    const existing = this.memes.get(input.id);
+    const now = nowIso();
+    // Mirrors the real upsert: first resolution wins on name and cluster.
+    const record: MemeRecord = existing
+      ? { ...existing, lastSeenAt: now }
+      : { ...input, firstSeenAt: now, lastSeenAt: now };
+    this.memes.set(input.id, record);
+    this.resolvedMemes.push(input.id);
+    return record;
+  }
+
+  async memeHistory(
+    memeId: string,
+    options: { excludeTokenId?: string; limit?: number } = {},
+  ): Promise<MemeSighting[]> {
+    this.guard('memeHistory');
+    const sightings = this.memeSightings.get(memeId) ?? [];
+    const kept = sightings.filter((s) => s.tokenId !== options.excludeTokenId);
+    return kept.slice(0, options.limit ?? 10);
+  }
+
   async latestProvenance(tokenId: string): Promise<ProvenanceReport | null> {
     this.guard('latestProvenance');
     return this.priorReports.get(tokenId) ?? null;
@@ -280,6 +314,8 @@ export class FakeStore implements ProvenanceStore {
 }
 
 export interface HarnessOptions {
+  /** Overrides the provisional meme subject used for the precedent lookup. */
+  provisionalSubject?: (snapshot: TokenSnapshot) => string;
   snapshots?: TokenSnapshot[];
   discoveryErrors?: { source: string; error: string }[];
   dropped?: { tokenId: string; reason: string }[];
@@ -300,6 +336,8 @@ export interface Harness {
   stages: string[];
   researchCalls: string[];
   evidenceCalls: string[];
+  /** `observedPrecedent` as each research call received it, in order. */
+  precedentSeen: MemeSighting[][];
   dispatched: Alert[][];
   sinkFilter: string[][];
 }
@@ -326,6 +364,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   const stages: string[] = [];
   const researchCalls: string[] = [];
   const evidenceCalls: string[] = [];
+  const precedentSeen: MemeSighting[][] = [];
   const dispatched: Alert[][] = [];
   const sinkFilter: string[][] = [];
 
@@ -336,6 +375,18 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   };
 
   const deps: PipelineDeps = {
+    // Slug rule mirrors the real one closely enough for the pipeline's purposes:
+    // lowercase, non-alphanumerics to hyphens. The real implementation and its
+    // unicode handling are covered in packages/research/src/meme-id.test.ts.
+    resolveMemeIdentity(name: string) {
+      const id = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      if (id.length < 2 || id === 'unknown') return null;
+      return { id, displayName: name.trim() };
+    },
+    provisionalMemeSubject(snapshot: TokenSnapshot): string {
+      stages.push(`precedent:${snapshot.tokenId}`);
+      return options.provisionalSubject?.(snapshot) ?? snapshot.name ?? '';
+    },
     async discoverTrending(): Promise<DiscoveryResult> {
       stages.push('discover');
       return { entries: [], errors: options.discoveryErrors ?? [] };
@@ -368,9 +419,10 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       stages.push('createResearcher');
       if (options.createResearcher) return options.createResearcher();
       return {
-        async research(snapshot) {
+        async research(snapshot, _chain, _evidence, ctx) {
           stages.push(`research:${snapshot.tokenId}`);
           researchCalls.push(snapshot.tokenId);
+          precedentSeen.push([...(ctx.observedPrecedent ?? [])]);
           if (options.research) return options.research(snapshot);
           return makeReport(snapshot.tokenId, {
             usage: { inputTokens: 100, outputTokens: 100, costUsd: options.costPerReport ?? 0.1 },
@@ -416,5 +468,5 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     },
   };
 
-  return { deps, store, stages, researchCalls, evidenceCalls, dispatched, sinkFilter };
+  return { deps, store, stages, researchCalls, evidenceCalls, precedentSeen, dispatched, sinkFilter };
 }

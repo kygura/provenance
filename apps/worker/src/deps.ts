@@ -58,6 +58,10 @@ export interface PipelineDeps {
   collectEvidence(snapshot: TokenSnapshot, ctx: ResearchContext): Promise<EvidenceItem[]>;
   createResearcher(app: AppConfig, logger: Logger): ProvenanceResearcher;
   promptVersion: string;
+  /** Free-text meme name -> stable slug, or null when nothing identifiable. */
+  resolveMemeIdentity(name: string): { id: string; displayName: string } | null;
+  /** Provisional meme subject from ticker and name alone, before the model runs. */
+  provisionalMemeSubject(snapshot: TokenSnapshot): string;
 
   // @provenance/store
   createStore(app: AppConfig): ProvenanceStore;
@@ -93,8 +97,12 @@ type SourcesModule = Pick<
   'discoverTrending' | 'mergeToSnapshots' | 'filterSnapshots' | 'triageOrder'
 >;
 type ChainModule = Pick<PipelineDeps, 'analyzeToken'>;
-type ResearchModule = Pick<PipelineDeps, 'collectEvidence' | 'createResearcher'> & {
+type ResearchModule = Pick<
+  PipelineDeps,
+  'collectEvidence' | 'createResearcher' | 'resolveMemeIdentity'
+> & {
   PROMPT_VERSION?: string;
+  buildQueries(input: { symbol?: string | null; name?: string | null }): { subject: string; degraded: boolean };
 };
 type StoreModule = Pick<PipelineDeps, 'createStore' | 'seedDemoData'>;
 type AlertsModule = Pick<
@@ -125,6 +133,11 @@ export async function loadRuntimeDeps(): Promise<PipelineDeps> {
     collectEvidence: research.collectEvidence,
     createResearcher: research.createResearcher,
     promptVersion: research.PROMPT_VERSION ?? 'unknown',
+    resolveMemeIdentity: research.resolveMemeIdentity,
+    provisionalMemeSubject: (snapshot) => {
+      const queries = research.buildQueries({ symbol: snapshot.symbol, name: snapshot.name });
+      return queries.degraded ? '' : queries.subject;
+    },
     createStore: store.createStore,
     seedDemoData: store.seedDemoData,
     scoreToken: alerts.scoreToken,

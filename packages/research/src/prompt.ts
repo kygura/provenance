@@ -22,13 +22,13 @@
  * report so a change in aggregate verdicts can be traced to a prompt change
  * rather than to the market.
  */
-import type { ChainAnalysis, EvidenceItem, TokenSnapshot } from '@provenance/core';
+import type { ChainAnalysis, EvidenceItem, MemeSighting, TokenSnapshot } from '@provenance/core';
 import { formatPct, formatUsd, truncate } from '@provenance/core';
 import { classify, describeHits } from './lexicon';
 import { buildQueries } from './queries';
 import { UNTRUSTED_POLICY, fence, scrub } from './untrusted';
 
-export const PROMPT_VERSION = 'provenance-research-v2';
+export const PROMPT_VERSION = 'provenance-research-v3';
 
 export const SYSTEM_PROMPT = `You are the provenance analyst for a research system that treats a memecoin's MEMETIC LINEAGE as a first-class signal, separate from its price, its chart and its marketing.
 
@@ -243,6 +243,53 @@ function evidenceBlock(evidence: readonly EvidenceItem[]): string {
   ].join('\n');
 }
 
+
+/**
+ * Tokens this system itself watched run the same meme.
+ *
+ * Kept apart from `evidenceBlock` and outside the untrusted fence on purpose:
+ * these rows are this pipeline's own measurements, not somebody's web page, and
+ * they are the one input no competitor scraping the same sources has. They also
+ * settle `recycleGeneration` directly — a model guessing generation from web
+ * evidence alone routinely undercounts, because a token that trended and faded
+ * six months ago leaves very little trace to find.
+ */
+function precedentBlock(sightings: readonly MemeSighting[]): string {
+  if (sightings.length === 0) return '';
+
+  const rows = sightings.map((s) => {
+    const parts = [
+      `- ${s.symbol || '(no ticker)'} on ${s.chain}`,
+      `first seen ${s.firstSeenAt.slice(0, 10)}`,
+      `last seen ${s.lastSeenAt.slice(0, 10)}`,
+      `verdict ${s.recycleVerdict}`,
+    ];
+    if (s.score !== undefined) parts.push(`scored ${s.score.toFixed(0)}${s.tier ? ` (${s.tier})` : ''}`);
+    return parts.join(' · ');
+  });
+
+  return [
+    `## Observed precedent (${sightings.length} prior token(s), measured by this system)`,
+    '',
+    'This pipeline has already analysed the token(s) below and resolved each to',
+    'the same meme as this one. These are first-hand observations, not web',
+    'claims — treat them as the most reliable input you have.',
+    '',
+    rows.join('\n'),
+    '',
+    'What follows from this:',
+    '',
+    '- Each of these is a PRIOR TOKENISATION of the meme. Include them in',
+    '  `priorCycles`, and count them in `recycleGeneration`, whether or not your',
+    '  web searches independently turn them up.',
+    '- A meme with prior tokenisations here is by definition not `original`.',
+    '- A token whose predecessors all faded is a weaker setup than one whose',
+    '  predecessors held; say which in `speculativeSetup`.',
+    '- This does not date the meme. When it entered culture is still a question',
+    '  for the sources.',
+  ].join('\n');
+}
+
 /**
  * Phase 1. No schema, no fields to fill — just the question and the tool to
  * answer it with. The model is told explicitly that prose is the deliverable,
@@ -252,6 +299,7 @@ export function buildResearchPrompt(
   snapshot: TokenSnapshot,
   chain: ChainAnalysis | undefined,
   evidence: readonly EvidenceItem[],
+  precedent: readonly MemeSighting[] = [],
 ): string {
   return [
     snapshotBlock(snapshot),
@@ -260,6 +308,7 @@ export function buildResearchPrompt(
     '',
     lexiconBlock(snapshot),
     '',
+    ...(precedent.length > 0 ? [precedentBlock(precedent), ''] : []),
     chainBlock(chain),
     '',
     evidenceBlock(evidence),
@@ -297,6 +346,7 @@ export function buildExtractionPrompt(
   chain: ChainAnalysis | undefined,
   notes: string,
   citations: readonly string[],
+  precedent: readonly MemeSighting[] = [],
 ): string {
   const sources =
     citations.length > 0
@@ -307,6 +357,7 @@ export function buildExtractionPrompt(
     '',
     chainBlock(chain),
     '',
+    ...(precedent.length > 0 ? [precedentBlock(precedent), ''] : []),
     '## Research notes from the previous pass',
     '',
     notes,

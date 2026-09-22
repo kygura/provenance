@@ -151,11 +151,64 @@ export async function runPipeline(
     }
 
     const analyzerCtx: AnalyzerContext = { app, logger: log.child('chain') };
-    const researchCtx: ResearchContext = {
+    const baseResearchCtx: ResearchContext = {
       app,
       logger: log.child('research'),
       cacheGet: (key) => store.getCachedEvidence(key, app.pipeline.reanalyseAfterHours),
       cachePut: (key, url, content) => store.putCachedEvidence(key, url, content),
+    };
+
+    /**
+     * Prior tokens this system watched run the same meme.
+     *
+     * Looked up from a provisional slug derived from the ticker and name alone,
+     * because the authoritative meme name is an output of the research we are
+     * about to do. A provisional miss costs nothing — the model simply works
+     * without precedent, exactly as it did before this existed — while a hit
+     * hands it evidence no web search can produce.
+     */
+    const lookUpPrecedent = async (snapshot: TokenSnapshot, tokenLog: Logger) => {
+      const subject = resolved.provisionalMemeSubject(snapshot);
+      if (subject === '') return [];
+      const identity = resolved.resolveMemeIdentity(subject);
+      if (!identity) return [];
+      try {
+        const sightings = await store.memeHistory(identity.id, { excludeTokenId: snapshot.tokenId });
+        if (sightings.length > 0) {
+          tokenLog.info('observed precedent found', { memeId: identity.id, priorTokens: sightings.length });
+        }
+        return sightings;
+      } catch (error) {
+        tokenLog.warn('precedent lookup failed', { error: errorMessage(error) });
+        return [];
+      }
+    };
+
+    /**
+     * Link a finished report to its canonical meme. Runs after research because
+     * `memeName` is what the model concluded, not what the ticker suggested —
+     * a token called $NYAN2 resolves to "nyan-cat", which is the entire point.
+     */
+    const linkMeme = async (report: ProvenanceReport, tokenLog: Logger): Promise<ProvenanceReport> => {
+      const identity = resolved.resolveMemeIdentity(report.memeName);
+      if (!identity) {
+        // Unidentifiable stays unlinked. A shared "unknown" row would let every
+        // unresolved token become precedent for every other one.
+        tokenLog.debug('meme not resolvable; report left unlinked', { memeName: report.memeName });
+        return report;
+      }
+      try {
+        const meme = await store.resolveMeme({
+          id: identity.id,
+          displayName: identity.displayName,
+          narrativeCluster: report.narrativeCluster,
+        });
+        return { ...report, memeId: meme.id };
+      } catch (error) {
+        // A failed link must not lose the report; it just cannot be precedent.
+        tokenLog.warn('meme link failed', { memeId: identity.id, error: errorMessage(error) });
+        return report;
+      }
     };
 
     outcomes = await mapLimit(selected, concurrency, async (snapshot): Promise<TokenOutcome> => {
@@ -187,7 +240,7 @@ export async function runPipeline(
         } else if (researcherFailed) {
           tokenLog.debug('researcher unavailable; market-only score');
         } else {
-          const evidence = await resolved.collectEvidence(snapshot, researchCtx);
+          const evidence = await resolved.collectEvidence(snapshot, baseResearchCtx);
           if (!researcher) {
             try {
               researcher = resolved.createResearcher(app, log);
@@ -198,7 +251,12 @@ export async function runPipeline(
             }
           }
           if (researcher) {
-            const report = await researcher.research(snapshot, chain, evidence, researchCtx);
+            const observedPrecedent = await lookUpPrecedent(snapshot, tokenLog);
+            const researchCtx: ResearchContext = { ...baseResearchCtx, observedPrecedent };
+            const report = await linkMeme(
+              await researcher.research(snapshot, chain, evidence, researchCtx),
+              tokenLog,
+            );
             await store.saveProvenance(id, report);
             provenance = report;
 

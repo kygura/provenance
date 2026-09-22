@@ -6,6 +6,8 @@ import type {
   DeliveryResult,
   DossierQuery,
   Logger,
+  MemeRecord,
+  MemeSighting,
   ProvenanceReport,
   ProvenanceScore,
   ProvenanceStore,
@@ -15,7 +17,7 @@ import type {
   TokenDossier,
   TokenSnapshot,
 } from '@provenance/core';
-import { createLogger, silentLogger } from '@provenance/core';
+import { createLogger, nowIso, silentLogger } from '@provenance/core';
 import {
   alertRowArgs,
   chainRowArgs,
@@ -23,6 +25,8 @@ import {
   provenanceRowArgs,
   rowToAlert,
   rowToChainAnalysis,
+  rowToMeme,
+  rowToMemeSighting,
   rowToProvenance,
   rowToRun,
   rowToScore,
@@ -118,10 +122,44 @@ const CHAIN_UPSERT = `INSERT INTO chain_analysis
     holder_count = excluded.holder_count,
     data_json = excluded.data_json`;
 
+const MEME_UPSERT = `INSERT INTO memes
+    (id, display_name, narrative_cluster, first_seen_at, last_seen_at)
+  VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT(id) DO UPDATE SET
+    last_seen_at = excluded.last_seen_at,
+    -- The display name and cluster are NOT overwritten. The first resolution
+    -- wins, so a later run that reports "NYAN CAT" or reclassifies the cluster
+    -- cannot rewrite the canonical row underneath every report already
+    -- pointing at it. first_seen_at is likewise left alone.
+    narrative_cluster = memes.narrative_cluster`;
+
+/**
+ * Tokens previously seen running a meme, newest first, with their latest score.
+ *
+ * Joined through `provenance` rather than a token column, because a token's
+ * meme is a finding of the research pass, not a property of the contract — and
+ * the same token can be re-researched into a different meme.
+ */
+const MEME_HISTORY = `SELECT
+    t.id AS token_id, t.chain, t.symbol, t.name,
+    t.first_seen_at, t.last_seen_at,
+    p.recycle_verdict,
+    sc.total AS score, sc.tier AS tier
+  FROM (
+    SELECT token_id, recycle_verdict, MAX(created_at) AS created_at
+    FROM provenance WHERE meme_id = ? GROUP BY token_id
+  ) p
+  JOIN tokens t ON t.id = p.token_id
+  LEFT JOIN (
+    SELECT token_id, total, tier, MAX(computed_at) AS computed_at
+    FROM scores GROUP BY token_id
+  ) sc ON sc.token_id = p.token_id
+  WHERE t.id IS NOT NULL`;
+
 const PROVENANCE_UPSERT = `INSERT INTO provenance
     (id, run_id, token_id, created_at, meme_name, narrative_cluster, recycle_verdict,
-     recycle_generation, confidence, model, prompt_version, report_json)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     recycle_generation, confidence, model, prompt_version, report_json, meme_id)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(run_id, token_id) DO UPDATE SET
     created_at = excluded.created_at,
     meme_name = excluded.meme_name,
@@ -131,7 +169,8 @@ const PROVENANCE_UPSERT = `INSERT INTO provenance
     confidence = excluded.confidence,
     model = excluded.model,
     prompt_version = excluded.prompt_version,
-    report_json = excluded.report_json`;
+    report_json = excluded.report_json,
+    meme_id = excluded.meme_id`;
 
 const SCORE_UPSERT = `INSERT INTO scores
     (id, run_id, token_id, computed_at, total, tier, components_json, penalties_json)
@@ -322,6 +361,42 @@ export class LibsqlStore implements ProvenanceStore {
 
   async saveProvenance(runId: string, report: ProvenanceReport): Promise<void> {
     await this.write([{ sql: PROVENANCE_UPSERT, args: provenanceRowArgs(runId, report) }]);
+  }
+
+  async resolveMeme(input: {
+    id: string;
+    displayName: string;
+    narrativeCluster: string;
+  }): Promise<MemeRecord> {
+    const now = nowIso();
+    await this.write([
+      { sql: MEME_UPSERT, args: [input.id, input.displayName, input.narrativeCluster, now, now] },
+    ]);
+    const rows = await this.all({ sql: 'SELECT * FROM memes WHERE id = ?', args: [input.id] });
+    const row = rows[0];
+    if (row === undefined) {
+      // The upsert just ran; a miss here means the write did not land.
+      throw new Error(`meme "${input.id}" vanished between upsert and read`);
+    }
+    return rowToMeme(row as SqlRow);
+  }
+
+  async memeHistory(
+    memeId: string,
+    options: { excludeTokenId?: string; limit?: number } = {},
+  ): Promise<MemeSighting[]> {
+    if (memeId === '') return [];
+    const limit = Math.min(50, Math.max(1, Math.trunc(options.limit ?? 10)));
+    const args: (string | number)[] = [memeId];
+    let sql = MEME_HISTORY;
+    if (options.excludeTokenId !== undefined) {
+      sql += ' AND t.id != ?';
+      args.push(options.excludeTokenId);
+    }
+    sql += ' ORDER BY t.last_seen_at DESC LIMIT ?';
+    args.push(limit);
+    const rows = await this.all({ sql, args });
+    return rows.map((row) => rowToMemeSighting(row as SqlRow));
   }
 
   async saveScore(runId: string, score: ProvenanceScore): Promise<void> {

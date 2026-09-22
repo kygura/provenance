@@ -36,6 +36,7 @@ describe('runPipeline stage ordering', () => {
       'analyze:solana:aaa',
       'evidence:solana:aaa',
       'createResearcher',
+      'precedent:solana:aaa',
       'research:solana:aaa',
       'score:solana:aaa',
       'alerts:solana:aaa',
@@ -322,5 +323,107 @@ describe('RunStats and status', () => {
     expect(resolveStatus(2, { ...stats, analysed: 1 })).toBe('partial');
     expect(resolveStatus(2, { ...stats, sourceErrors: [], reused: 2 })).toBe('ok');
     expect(resolveStatus(2, stats)).toBe('failed');
+  });
+});
+
+describe('meme identity', () => {
+  test('links a finished report to a canonical meme', async () => {
+    const store = new FakeStore();
+    const harness = makeHarness({
+      store,
+      snapshots: [makeSnapshot('solana:aaa')],
+      research: async () => makeReport('solana:aaa', { memeName: 'Nyan Cat' }),
+    });
+
+    await runPipeline(makeConfig(), silentLogger, harness.deps, { runId: RUN, concurrency: 1 });
+
+    expect(store.resolvedMemes).toEqual(['nyan-cat']);
+    expect(store.memes.get('nyan-cat')?.displayName).toBe('Nyan Cat');
+    expect(store.reports[0]?.memeId).toBe('nyan-cat');
+  });
+
+  test('leaves the report unlinked when the meme is not identifiable', async () => {
+    const store = new FakeStore();
+    const harness = makeHarness({
+      store,
+      snapshots: [makeSnapshot('solana:aaa')],
+      research: async () => makeReport('solana:aaa', { memeName: 'unknown' }),
+    });
+
+    await runPipeline(makeConfig(), silentLogger, harness.deps, { runId: RUN, concurrency: 1 });
+
+    // No shared "unknown" row: that would make every unresolved token
+    // precedent for every other one.
+    expect(store.resolvedMemes).toEqual([]);
+    expect(store.reports[0]?.memeId).toBeUndefined();
+  });
+
+  test('hands observed precedent to the researcher', async () => {
+    const store = new FakeStore();
+    store.memeSightings.set('nyan-cat', [
+      {
+        tokenId: 'solana:old',
+        chain: 'solana',
+        symbol: 'NYAN',
+        name: 'Nyan',
+        firstSeenAt: hoursAgo(5000),
+        lastSeenAt: hoursAgo(4000),
+        recycleVerdict: 'revival',
+        score: 71,
+        tier: 'strong',
+      },
+    ]);
+    const harness = makeHarness({
+      store,
+      snapshots: [makeSnapshot('solana:aaa')],
+      provisionalSubject: () => 'Nyan Cat',
+    });
+
+    await runPipeline(makeConfig(), silentLogger, harness.deps, { runId: RUN, concurrency: 1 });
+
+    expect(harness.precedentSeen).toHaveLength(1);
+    expect(harness.precedentSeen[0]?.[0]?.tokenId).toBe('solana:old');
+  });
+
+  test('a token is never its own precedent', async () => {
+    const store = new FakeStore();
+    store.memeSightings.set('nyan-cat', [
+      {
+        tokenId: 'solana:aaa',
+        chain: 'solana',
+        symbol: 'NYAN',
+        name: 'Nyan',
+        firstSeenAt: hoursAgo(100),
+        lastSeenAt: hoursAgo(50),
+        recycleVerdict: 'revival',
+      },
+    ]);
+    const harness = makeHarness({
+      store,
+      snapshots: [makeSnapshot('solana:aaa')],
+      provisionalSubject: () => 'Nyan Cat',
+    });
+
+    await runPipeline(makeConfig(), silentLogger, harness.deps, { runId: RUN, concurrency: 1 });
+
+    expect(harness.precedentSeen[0]).toEqual([]);
+  });
+
+  test('a precedent lookup failure does not fail the token', async () => {
+    const store = new FakeStore();
+    store.failOn = { method: 'memeHistory' };
+    const harness = makeHarness({
+      store,
+      snapshots: [makeSnapshot('solana:aaa')],
+      provisionalSubject: () => 'Nyan Cat',
+    });
+
+    const record = await runPipeline(makeConfig(), silentLogger, harness.deps, {
+      runId: RUN,
+      concurrency: 1,
+    });
+
+    expect(record.stats.analysed).toBe(1);
+    expect(harness.precedentSeen[0]).toEqual([]);
   });
 });

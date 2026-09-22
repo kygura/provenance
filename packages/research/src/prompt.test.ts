@@ -1,7 +1,22 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
 import { nowIso, type EvidenceItem, type TokenSnapshot } from '@provenance/core';
 import { PROMPT_VERSION, SYSTEM_PROMPT, buildExtractionPrompt, buildResearchPrompt } from './prompt';
 import { UNTRUSTED_CLOSE, UNTRUSTED_OPEN } from './untrusted';
+
+/**
+ * Update this together with PROMPT_VERSION, never on its own — recomputing the
+ * digest to make the test pass is how the rule it guards gets lost.
+ */
+const SYSTEM_PROMPT_DIGEST = 'b1f50e798feee7e7';
+
+/**
+ * The fence markers carry a per-process nonce, so SYSTEM_PROMPT differs between
+ * runs by design. Normalizing them out leaves the part an author actually edits.
+ */
+function stablePrompt(): string {
+  return SYSTEM_PROMPT.replaceAll(UNTRUSTED_OPEN, '<<OPEN>>').replaceAll(UNTRUSTED_CLOSE, '<<CLOSE>>');
+}
 
 function snapshot(overrides: Partial<TokenSnapshot> = {}): TokenSnapshot {
   return {
@@ -54,13 +69,29 @@ describe('system prompt', () => {
     expect(SYSTEM_PROMPT).toContain(UNTRUSTED_OPEN);
   });
 
-  test('stays static, so it can be cached across every call in a run', () => {
+  test('stays static within a process, so it caches across every call in a run', () => {
+    // Stable within a run is what prompt caching needs; the fence nonce is
+    // regenerated per process, so the cached prefix does not survive between
+    // runs. That is the intended trade — a fence marker the untrusted text can
+    // predict is not a fence.
     expect(SYSTEM_PROMPT).toBe(SYSTEM_PROMPT);
     expect(SYSTEM_PROMPT).not.toContain(new Date().getFullYear().toString());
   });
 
-  test('version is bumped past the single-call prompt', () => {
-    expect(PROMPT_VERSION).toBe('provenance-research-v2');
+  /**
+   * prompt.ts says "Bump PROMPT_VERSION on ANY edit to any prompt here",
+   * because the version is persisted on every report and is what lets a shift
+   * in aggregate verdicts be traced to a prompt change rather than to the
+   * market. Pinning the version string alone did not enforce that — it only
+   * broke when someone DID bump it. Pinning the pair does: edit the prompt
+   * without bumping and this fails with both values in hand.
+   */
+  test('the system prompt and its version move together', () => {
+    const digest = createHash('sha256').update(stablePrompt()).digest('hex').slice(0, 16);
+    expect({ version: PROMPT_VERSION, digest }).toEqual({
+      version: 'provenance-research-v3',
+      digest: SYSTEM_PROMPT_DIGEST,
+    });
   });
 });
 

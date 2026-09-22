@@ -60,6 +60,9 @@ discover ─┬─ dextools      (playwright, XHR interception w/ DOM fallback)
                 │             risk flags — free RPCs only
           evidence            on-chain + listing metadata, no network
                 │
+          precedent lookup    prior tokens this system already watched run the
+                │             same meme — first-hand, not scraped
+                │
           research pass       Claude with the web search server tool, no output
                 │             constraint — prose notes and citations
                 │

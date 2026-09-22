@@ -1,7 +1,7 @@
 import type { Alert, DeliveryResult } from './alerts';
 import type { TokenSnapshot } from './market';
 import type { ChainAnalysis } from './onchain';
-import type { ProvenanceReport, ProvenanceScore } from './provenance';
+import type { MemeRecord, MemeSighting, ProvenanceReport, ProvenanceScore } from './provenance';
 
 export type RunStatus = 'running' | 'ok' | 'partial' | 'failed';
 
@@ -67,6 +67,22 @@ export interface ProvenanceStore {
   saveProvenance(runId: string, report: ProvenanceReport): Promise<void>;
   saveScore(runId: string, score: ProvenanceScore): Promise<void>;
   saveAlert(alert: Alert, deliveries: DeliveryResult[]): Promise<void>;
+
+  /**
+   * Upsert the canonical meme row and return it, refreshing `lastSeenAt`.
+   * `id` is a slug the caller computed with `memeSlug()`; the store does not
+   * normalize text itself.
+   */
+  resolveMeme(input: { id: string; displayName: string; narrativeCluster: string }): Promise<MemeRecord>;
+
+  /**
+   * Tokens this system has already watched run a meme, most recent first.
+   * `excludeTokenId` keeps the token under analysis out of its own precedent.
+   */
+  memeHistory(
+    memeId: string,
+    options?: { excludeTokenId?: string; limit?: number },
+  ): Promise<MemeSighting[]>;
 
   /** Most recent report for a token, used to skip re-analysis inside the TTL. */
   latestProvenance(tokenId: string): Promise<ProvenanceReport | null>;

@@ -60,6 +60,15 @@ export interface ProvenanceReport {
   tokenId: string;
   /** Canonical name of the underlying meme/narrative, not the ticker. */
   memeName: string;
+  /**
+   * Slug of the `memes` row this report was resolved to, once persisted.
+   *
+   * `memeName` is free text the model chose and varies run to run ("Nyan Cat",
+   * "nyan cat", "NyanCat"); `memeId` is the stable key that makes "have I seen
+   * this meme before" answerable from this system's own records rather than
+   * from a fresh web search. Absent on a report that has not been stored yet.
+   */
+  memeId?: string;
   /** Broad family: "dog", "frog", "political", "ai-agents", "nostalgia", etc. */
   narrativeCluster: string;
   /** Year the underlying meme first entered culture (not the token launch). */
@@ -116,4 +125,36 @@ export interface ProvenanceScore {
   /** Penalties applied by hard risk flags, with reasons. */
   penalties: { reason: string; points: number }[];
   computedAt: string;
+}
+
+/** A meme this system has resolved and can recognise on sight again. */
+export interface MemeRecord {
+  /** Slug derived from the meme's name; the join key. */
+  id: string;
+  /** Human-readable form, as first reported. */
+  displayName: string;
+  narrativeCluster: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+/**
+ * One token this system previously watched run a meme — first-hand precedent,
+ * as opposed to the prior cycles the model finds on the web.
+ *
+ * The distinction is the point: a `PriorCycle` is a claim sourced from a page
+ * somewhere, while a sighting is something this pipeline measured and scored
+ * itself, and can say how it turned out.
+ */
+export interface MemeSighting {
+  tokenId: string;
+  chain: string;
+  symbol: string;
+  name: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  recycleVerdict: RecycleVerdict;
+  /** Most recent composite score, when one was computed. */
+  score?: number;
+  tier?: string;
 }

@@ -3,7 +3,7 @@ import type { Logger } from './log';
 import type { AppConfig, SourceConfig } from './config';
 import type { TokenSnapshot, TrendingEntry } from './market';
 import type { ChainAnalysis } from './onchain';
-import type { EvidenceItem, ProvenanceReport, ProvenanceScore } from './provenance';
+import type { EvidenceItem, MemeSighting, ProvenanceReport, ProvenanceScore } from './provenance';
 
 /** A trending-list provider. One implementation per upstream site. */
 export interface TrendingSource {
@@ -47,6 +47,12 @@ export interface ResearchContext {
   /** Returns cached page content, or null on a miss. */
   cacheGet?(key: string): Promise<string | null>;
   cachePut?(key: string, url: string, content: string): Promise<void>;
+  /**
+   * Tokens this system already watched run the same meme, looked up before the
+   * research pass from a provisional slug. First-hand precedent: unlike the
+   * prior cycles the model finds on the web, these were measured here.
+   */
+  observedPrecedent?: readonly MemeSighting[];
   signal?: AbortSignal;
 }
 

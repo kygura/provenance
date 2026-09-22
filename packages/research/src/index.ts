@@ -49,7 +49,14 @@ export {
   type ModelPricing,
   type TokenUsage,
 } from './cost';
-export { buildQueries, type QueryInput, type QuerySet } from './queries';
+export {
+  buildQueries,
+  normalizeText,
+  stripTicker,
+  type QueryInput,
+  type QuerySet,
+} from './queries';
+export { memeSlug, isResolvableMeme, resolveMemeIdentity } from './meme-id';
 export {
   dedupeEvidence,
   rankEvidence,

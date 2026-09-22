@@ -9,6 +9,8 @@ import type {
   LineageNode,
   Logger,
   MarketMetrics,
+  MemeRecord,
+  MemeSighting,
   PairInfo,
   PriorCycle,
   ProvenanceReport,
@@ -323,7 +325,7 @@ export function rowToProvenance(row: SqlRow, logger: Logger = silentLogger): Pro
 export function provenanceRowArgs(
   runId: string,
   report: ProvenanceReport,
-): [string, string, string, string, string, string, string, number, number, string, string, string] {
+): [string, string, string, string, string, string, string, number, number, string, string, string, string | null] {
   return [
     snapshotId(runId, report.tokenId),
     runId,
@@ -337,7 +339,41 @@ export function provenanceRowArgs(
     report.model,
     report.promptVersion,
     JSON.stringify(report),
+    // NULL rather than '' when the meme could not be identified, so the column
+    // reads as "no meme resolved" and the foreign key stays satisfiable.
+    report.memeId ?? null,
   ];
+}
+
+/** Row -> `MemeRecord`. */
+export function rowToMeme(row: SqlRow): MemeRecord {
+  return {
+    id: text(row.id),
+    displayName: text(row.display_name),
+    narrativeCluster: text(row.narrative_cluster),
+    firstSeenAt: text(row.first_seen_at),
+    lastSeenAt: text(row.last_seen_at),
+  };
+}
+
+/**
+ * Row -> `MemeSighting`. Score and tier come from a LEFT JOIN and are absent
+ * for a token that was analysed but never scored.
+ */
+export function rowToMemeSighting(row: SqlRow): MemeSighting {
+  const score = asNumber(row.score);
+  const tier = text(row.tier);
+  return {
+    tokenId: text(row.token_id),
+    chain: text(row.chain),
+    symbol: text(row.symbol),
+    name: text(row.name),
+    firstSeenAt: text(row.first_seen_at),
+    lastSeenAt: text(row.last_seen_at),
+    recycleVerdict: asVerdict(row.recycle_verdict),
+    ...(score !== undefined ? { score } : {}),
+    ...(tier !== '' ? { tier } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------

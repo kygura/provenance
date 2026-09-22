@@ -21,6 +21,7 @@ import {
   type ChainAnalysis,
   type EvidenceItem,
   type Logger,
+  type MemeSighting,
   type ProvenanceReport,
   type ProvenanceResearcher,
   type ResearchContext,
@@ -162,14 +163,15 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     snapshot: TokenSnapshot,
     chain: ChainAnalysis | undefined,
     evidence: EvidenceItem[],
-    _ctx: ResearchContext,
+    ctx: ResearchContext,
   ): Promise<ProvenanceReport> {
     const log = this.logger.child('analyst');
     const model = this.app.llm.model;
+    const precedent = ctx.observedPrecedent ?? [];
 
     let found: ResearchNotes;
     try {
-      found = await this.runResearchPass(snapshot, chain, evidence, log);
+      found = await this.runResearchPass(snapshot, chain, evidence, precedent, log);
     } catch (error) {
       const reason = errorMessage(error);
       log.error('research pass failed', { tokenId: snapshot.tokenId, error: reason });
@@ -204,7 +206,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
       });
     }
 
-    return this.runExtractionPass(snapshot, chain, found, allEvidence, log);
+    return this.runExtractionPass(snapshot, chain, found, allEvidence, precedent, log);
   }
 
   // -- phase 1 ---------------------------------------------------------------
@@ -213,11 +215,12 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     snapshot: TokenSnapshot,
     chain: ChainAnalysis | undefined,
     evidence: readonly EvidenceItem[],
+    precedent: readonly MemeSighting[],
     log: Logger,
   ): Promise<ResearchNotes> {
     const model = this.app.llm.model;
     const messages: Anthropic.MessageParam[] = [
-      { role: 'user', content: buildResearchPrompt(snapshot, chain, evidence) },
+      { role: 'user', content: buildResearchPrompt(snapshot, chain, evidence, precedent) },
     ];
     const tools = [
       { type: WEB_SEARCH_TOOL_TYPE, name: 'web_search', max_uses: this.maxWebSearches },
@@ -279,10 +282,11 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     chain: ChainAnalysis | undefined,
     found: ResearchNotes,
     evidence: EvidenceItem[],
+    precedent: readonly MemeSighting[],
     log: Logger,
   ): Promise<ProvenanceReport> {
     const model = this.app.llm.model;
-    const prompt = buildExtractionPrompt(snapshot, chain, found.notes, found.citations);
+    const prompt = buildExtractionPrompt(snapshot, chain, found.notes, found.citations, precedent);
     let lastIssues: string[] = [];
 
     for (let attempt = 1; attempt <= this.attempts; attempt++) {
