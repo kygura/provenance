@@ -13,15 +13,20 @@ function entry(overrides: Partial<WatchEntry> = {}): WatchEntry {
     firstSeenAt: '2026-09-20T08:00:00.000Z',
     launchedAt: '2026-09-19T20:00:00.000Z',
     liquidityUsdAtCatalog: 52_000,
-    referent: {
-      validated: true,
-      referent: 'Nintendo video game character',
+    anchor: {
+      verdict: 'anchored',
+      type: 'cultural-artifact',
+      subject: 'Nintendo video game character',
+      anchorDate: '1981',
+      precedesLaunch: true,
+      earliestSource: { title: 'Mario - Wikipedia', url: 'https://en.wikipedia.org/wiki/Mario' },
       summary: 'Recognised worldwide since 1981.',
       confidence: 'high',
       model: 'test',
       checkedAt: '2026-09-20T08:00:00.000Z',
       citations: ['https://en.wikipedia.org/wiki/Mario'],
     },
+    researched: true,
     gate: { passed: true, reasons: [] },
     updatedAt: '2026-09-20T08:00:00.000Z',
     ...overrides,
@@ -108,8 +113,28 @@ describe('watchlist', () => {
     });
     const got = await store.getWatch(entry().tokenId);
     expect(got?.symbol).toBe('MARIO');
-    expect(got?.referent.referent).toBe('Nintendo video game character');
-    expect(got?.referent.validated).toBe(false);
+    // Promoted columns survive a corrupt blob: the verdict is not lost with it.
+    expect(got?.anchor.subject).toBe('Nintendo video game character');
+    expect(got?.anchor.verdict).toBe('anchored');
+    expect(got?.anchor.type).toBe('cultural-artifact');
+    expect(got?.anchor.anchorDate).toBe('1981');
+    await store.close();
+  });
+
+  test('filters by verdict, and keeps dismissed entries listable', async () => {
+    const store = await freshStore();
+    await store.saveWatch(entry());
+    await store.saveWatch(
+      entry({
+        tokenId: 'ethereum:0x4444444444444444444444444444444444444444',
+        tokenAddress: '0x4444444444444444444444444444444444444444',
+        status: 'dismissed',
+        anchor: { ...entry().anchor, verdict: 'forced', type: 'none', subject: '', anchorDate: undefined },
+      }),
+    );
+    expect((await store.listWatch({ verdict: 'forced' })).map((row) => row.status)).toEqual(['dismissed']);
+    expect(await store.listWatch({ verdict: 'anchored' })).toHaveLength(1);
+    expect(await store.listWatch({ status: 'dismissed' })).toHaveLength(1);
     await store.close();
   });
 });

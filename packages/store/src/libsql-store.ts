@@ -124,8 +124,8 @@ const CHAIN_UPSERT = `INSERT INTO chain_analysis
 
 const PROVENANCE_UPSERT = `INSERT INTO provenance
     (id, run_id, token_id, created_at, meme_name, narrative_cluster, recycle_verdict,
-     recycle_generation, confidence, model, prompt_version, report_json)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     recycle_generation, confidence, model, prompt_version, report_json, anchor_verdict)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(run_id, token_id) DO UPDATE SET
     created_at = excluded.created_at,
     meme_name = excluded.meme_name,
@@ -135,7 +135,8 @@ const PROVENANCE_UPSERT = `INSERT INTO provenance
     confidence = excluded.confidence,
     model = excluded.model,
     prompt_version = excluded.prompt_version,
-    report_json = excluded.report_json`;
+    report_json = excluded.report_json,
+    anchor_verdict = excluded.anchor_verdict`;
 
 const SCORE_UPSERT = `INSERT INTO scores
     (id, run_id, token_id, computed_at, total, tier, components_json, penalties_json)
@@ -412,6 +413,10 @@ export class LibsqlStore implements ProvenanceStore {
       where.push('sc.tier = ?');
       args.push(query.tier);
     }
+    if (query.anchor) {
+      where.push('p.anchor_verdict = ?');
+      args.push(query.anchor);
+    }
     if (query.verdict) {
       where.push('p.recycle_verdict = ?');
       args.push(query.verdict);
@@ -575,8 +580,9 @@ export class LibsqlStore implements ProvenanceStore {
     await this.write([
       {
         sql: `INSERT INTO watchlist (token_id, chain, address, symbol, name, status, first_seen_at,
-                launched_at, expressed_at, lead_hours, referent, referent_confidence, updated_at, entry_json)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                launched_at, expressed_at, lead_hours, referent, referent_confidence, updated_at, entry_json,
+                anchor_verdict, anchor_type, anchor_date)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(token_id) DO UPDATE SET
                 symbol = excluded.symbol,
                 name = excluded.name,
@@ -588,7 +594,10 @@ export class LibsqlStore implements ProvenanceStore {
                 referent = excluded.referent,
                 referent_confidence = excluded.referent_confidence,
                 updated_at = excluded.updated_at,
-                entry_json = excluded.entry_json`,
+                entry_json = excluded.entry_json,
+                anchor_verdict = excluded.anchor_verdict,
+                anchor_type = excluded.anchor_type,
+                anchor_date = excluded.anchor_date`,
         args: watchRowArgs(entry),
       },
     ]);
@@ -609,6 +618,10 @@ export class LibsqlStore implements ProvenanceStore {
     if (query.chain) {
       where.push('chain = ?');
       args.push(query.chain);
+    }
+    if (query.verdict) {
+      where.push('anchor_verdict = ?');
+      args.push(query.verdict);
     }
     args.push(Math.max(1, Math.trunc(query.limit ?? 200)));
     const rows = await this.all({

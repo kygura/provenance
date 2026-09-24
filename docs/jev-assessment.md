@@ -29,8 +29,9 @@ this pipeline needs? Narrative classification is a separate question.
 
 Working out what a name refers to, when the meme started and how many times it
 has already been tokenised means finding facts that aren't in the input. Jev
-can't search, and a lineage is generated text. The two Claude passes stay: the
-referent check at launch and the full provenance research once a token trends.
+can't search, and a lineage is generated text. The anchored/forced verdict is
+the same: it depends on finding and dating an outside source. Claude keeps
+both depths, the fast anchor check and the full research, both at launch.
 
 ## Time-phase classification: yes, with the numbers done in code
 

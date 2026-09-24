@@ -1,4 +1,4 @@
-import type { Chain, RecycleVerdict, RiskSeverity, ScoreTier } from '@provenance/core';
+import type { AnchorVerdict, Chain, RecycleVerdict, RiskSeverity, ScoreTier } from '@provenance/core';
 
 /**
  * The presentational vocabulary: for every categorical value the UI renders,
@@ -106,6 +106,35 @@ export function verdictToken(verdict: RecycleVerdict | undefined): Token {
     };
   }
   return VERDICT_TOKENS[verdict];
+}
+
+/** The headline answer. Series blue for anchored, the critical red for forced. */
+const ANCHOR_TOKENS: Record<AnchorVerdict, Token> = {
+  anchored: {
+    color: 'var(--color-series-1)',
+    glyph: '⚓',
+    label: 'anchored',
+    hint: 'The meme existed before the token and outside it: an old meme, a cultural artifact or an inciting event',
+  },
+  forced: {
+    color: 'var(--color-critical)',
+    glyph: '✕',
+    label: 'forced',
+    hint: 'The meme exists because the token does; no independent source predates it',
+  },
+  unclear: {
+    color: 'var(--color-ink-muted)',
+    glyph: '?',
+    label: 'unclear',
+    hint: 'The evidence does not settle whether the meme is anchored',
+  },
+};
+
+export function anchorToken(verdict: AnchorVerdict | undefined): Token {
+  if (verdict === undefined || !(verdict in ANCHOR_TOKENS)) {
+    return { color: 'var(--color-ink-muted)', glyph: '·', label: 'not judged', hint: 'Report predates the anchor verdict' };
+  }
+  return ANCHOR_TOKENS[verdict];
 }
 
 /** Reserved status palette. Icon + label always ship with the colour. */

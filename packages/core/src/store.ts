@@ -33,10 +33,12 @@ export interface LaunchStats {
   discovered: number;
   /** Rejected by a hard filter, before or after chain analysis. */
   rejected: number;
-  /** Passed the gate but failed the referent check. */
-  unvalidated: number;
-  /** Newly added to the watchlist. */
+  /** Passed the gate, judged forced or unclear. */
+  dismissed: number;
+  /** Passed the gate, judged anchored, added to the watchlist. */
   catalogued: number;
+  /** Anchored launches that also got the full provenance research. */
+  researched: number;
   /** Watchlisted tokens seen trending for the first time this run. */
   expressed: number;
   /** Watchlisted tokens aged out this run. */
@@ -59,6 +61,8 @@ export interface DossierQuery {
   minScore?: number;
   tier?: string;
   verdict?: string;
+  /** Anchor verdict: anchored | forced | unclear. */
+  anchor?: string;
   /** Free-text match against symbol, name and meme name. */
   search?: string;
   limit?: number;

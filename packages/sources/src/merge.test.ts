@@ -90,7 +90,7 @@ describe('fixture discovery', () => {
   ];
 
   test('launch rows do not change how the trending fixtures merge', async () => {
-    const app = loadConfig({ USE_FIXTURES: '1' });
+    const app = loadConfig({ USE_FIXTURES: '1', LAUNCHES_LOOKBACK_HOURS: '24' });
     const { entries, errors } = await discoverTrending(app, silentLogger);
     expect(errors).toEqual([]);
 

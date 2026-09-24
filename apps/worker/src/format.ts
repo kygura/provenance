@@ -102,30 +102,38 @@ export function snapshotTable(snapshots: TokenSnapshot[], style: Style, notes?: 
   return table(['#', 'SYMBOL', 'CHAIN', 'RANK', 'SRC', 'LIQ', 'VOL24H', '24H', 'NOTE'], rows, style);
 }
 
-/** The launch lane's catalogue: what was caught at launch, and what became of it. */
+function verdictColor(style: Style, verdict: string): string {
+  if (verdict === 'anchored') return style.green(verdict);
+  if (verdict === 'forced') return style.red(verdict);
+  return style.yellow(verdict);
+}
+
+/** Every launch the lane judged: the verdict first, then what became of it. */
 export function watchTable(entries: WatchEntry[], style: Style): string {
   const rows = entries.map((entry) => [
     truncate(entry.symbol || '?', 12),
     entry.chain,
-    entry.status === 'expressed'
-      ? style.green(entry.status)
-      : entry.status === 'dormant'
-        ? style.dim(entry.status)
-        : style.cyan(entry.status),
-    truncate(entry.referent.referent || '-', 28),
-    entry.referent.confidence,
+    verdictColor(style, entry.anchor.verdict),
+    entry.anchor.confidence,
+    truncate(entry.anchor.subject || '-', 28),
+    entry.anchor.anchorDate ?? '-',
+    entry.anchor.precedesLaunch === undefined ? '-' : entry.anchor.precedesLaunch ? 'yes' : style.red('NO'),
+    entry.status === 'expressed' ? style.green(entry.status) : style.dim(entry.status),
     entry.firstSeenAt.slice(0, 16).replace('T', ' '),
     entry.leadHours === undefined ? '-' : `${entry.leadHours.toFixed(1)}h`,
-    formatUsd(entry.liquidityUsdAtCatalog),
   ]);
-  return table(['SYMBOL', 'CHAIN', 'STATUS', 'REFERENT', 'CONF', 'CATALOGUED', 'LEAD', 'LIQ@CAT'], rows, style);
+  return table(
+    ['SYMBOL', 'CHAIN', 'VERDICT', 'CONF', 'ANCHOR', 'DATED', 'BEFORE', 'STATUS', 'JUDGED', 'TO TREND'],
+    rows,
+    style,
+  );
 }
 
 /** One line of launch-lane counters, or nothing for runs from before the lane. */
 export function launchSummary(stats: RunStats): string | undefined {
   const l = stats.launches;
   if (!l) return undefined;
-  return `launches: discovered=${l.discovered} rejected=${l.rejected} unvalidated=${l.unvalidated} catalogued=${l.catalogued} expressed=${l.expressed} dormant=${l.dormant}`;
+  return `launches: discovered=${l.discovered} rejected=${l.rejected} anchored=${l.catalogued} researched=${l.researched} dismissed=${l.dismissed} trended=${l.expressed} dormant=${l.dormant}`;
 }
 
 export function dossierTable(dossiers: TokenDossier[], style: Style): string {

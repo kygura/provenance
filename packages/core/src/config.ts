@@ -49,9 +49,11 @@ export interface LlmConfig {
 }
 
 /**
- * The launch lane: dexscanner's supply-side scan, folded in. Thresholds are
- * hard filters, not score inputs — a launch that fails one is not catalogued,
- * because at this stage there is no demand signal to outweigh it.
+ * The launch lane: where tokens are judged, at their first pool rather than
+ * once they trend. Thresholds are hard filters that keep garbage away from the
+ * anchor check, not score inputs. Defaults assume a run every 30 minutes: a
+ * launch that fails a filter early (too few holders yet) is retried on every
+ * run while it is inside `lookbackHours`.
  */
 export interface LaunchConfig {
   enabled: boolean;
@@ -59,7 +61,7 @@ export interface LaunchConfig {
   lookbackHours: number;
   /** New pools hydrated per run, newest first. */
   maxCandidates: number;
-  /** Tokens given chain analysis and a referent check per run. */
+  /** Tokens given chain analysis and an anchor check per run. */
   maxCatalogPerRun: number;
   /** Unlike the trending filter, unknown liquidity is a rejection here. */
   minLiquidityUsd: number;
@@ -72,8 +74,10 @@ export interface LaunchConfig {
   minLpSecuredPct: number;
   /** An active entry that has not expressed after this long goes dormant. */
   dormantAfterHours: number;
-  /** Web searches allowed per referent check. */
-  maxReferentSearches: number;
+  /** Web searches allowed per fast anchor check. */
+  maxAnchorSearches: number;
+  /** Run the full provenance research on anchored launches, at launch. */
+  researchAnchored: boolean;
 }
 
 export interface ChainRpcConfig {
@@ -196,16 +200,17 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     },
     launches: {
       enabled: bool(env.LAUNCHES_ENABLED, true),
-      lookbackHours: num(env.LAUNCHES_LOOKBACK_HOURS, 24),
+      lookbackHours: num(env.LAUNCHES_LOOKBACK_HOURS, 6),
       maxCandidates: num(env.LAUNCHES_MAX_CANDIDATES, 40),
       maxCatalogPerRun: num(env.LAUNCHES_MAX_CATALOG_PER_RUN, 8),
       minLiquidityUsd: num(env.LAUNCHES_MIN_LIQUIDITY_USD, 40_000),
-      minHolderCount: num(env.LAUNCHES_MIN_HOLDERS, 100),
+      minHolderCount: num(env.LAUNCHES_MIN_HOLDERS, 50),
       maxTop10Pct: num(env.LAUNCHES_MAX_TOP10_PCT, 40),
       requireLpSecured: bool(env.LAUNCHES_REQUIRE_LP_SECURED, true),
       minLpSecuredPct: num(env.LAUNCHES_MIN_LP_SECURED_PCT, 90),
       dormantAfterHours: num(env.LAUNCHES_DORMANT_AFTER_HOURS, 168),
-      maxReferentSearches: num(env.LAUNCHES_MAX_REFERENT_SEARCHES, 3),
+      maxAnchorSearches: num(env.LAUNCHES_MAX_ANCHOR_SEARCHES, 3),
+      researchAnchored: bool(env.LAUNCHES_RESEARCH_ANCHORED, true),
     },
     rpc: {
       solana: rpcOr('RPC_SOLANA', ['https://api.mainnet-beta.solana.com']),

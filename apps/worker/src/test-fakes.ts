@@ -16,7 +16,7 @@ import {
   type ProvenanceReport,
   type ProvenanceScore,
   type ProvenanceStore,
-  type ReferentCheck,
+  type AnchorCheck,
   type RunRecord,
   type RunStats,
   type RunStatus,
@@ -326,17 +326,20 @@ export interface HarnessOptions {
   createResearcher?: () => never;
   scoreToken?: (input: ScoringInput) => ProvenanceScore;
   store?: FakeStore;
-  /** Launch lane: referent verdict per token; defaults to a validated high. */
-  referent?: (snapshot: TokenSnapshot) => ReferentCheck;
+  /** Launch lane: fast anchor verdict per token; defaults to anchored, high. */
+  anchor?: (snapshot: TokenSnapshot) => AnchorCheck;
   /** Launch lane: chain-gate verdict; defaults to pass. */
   chainGate?: (chain: ChainAnalysis | undefined) => { passed: boolean; reasons: string[] };
 }
 
-export function makeReferent(overrides: Partial<ReferentCheck> = {}): ReferentCheck {
+export function makeAnchor(overrides: Partial<AnchorCheck> = {}): AnchorCheck {
   return {
-    validated: true,
-    referent: 'a film character',
-    summary: 'Recognised well outside crypto.',
+    verdict: 'anchored',
+    type: 'cultural-artifact',
+    subject: 'a film character',
+    anchorDate: '2001',
+    precedesLaunch: true,
+    summary: 'Recognised well outside crypto, long before the token.',
     confidence: 'high',
     model: 'test',
     checkedAt: nowIso(),
@@ -479,12 +482,12 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
         },
       };
     },
-    createReferentChecker() {
-      stages.push('createReferentChecker');
+    createAnchorChecker() {
+      stages.push('createAnchorChecker');
       return {
         async check(snapshot) {
-          stages.push(`referent:${snapshot.tokenId}`);
-          return options.referent ? options.referent(snapshot) : makeReferent();
+          stages.push(`anchor:${snapshot.tokenId}`);
+          return options.anchor ? options.anchor(snapshot) : makeAnchor();
         },
       };
     },
@@ -516,8 +519,12 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     gateLaunchChain(chain) {
       return options.chainGate ? options.chainGate(chain) : { passed: true, reasons: [] };
     },
-    launchCataloguedAlert(runId, entry) {
-      return { ...makeAlert(runId, entry.tokenId, 'launch-catalogued'), id: `${runId}:${entry.tokenId}:catalogued` };
+    launchAnchoredAlert(runId, entry, _snapshot, _chain, report) {
+      return {
+        ...makeAlert(runId, entry.tokenId, 'launch-anchored'),
+        id: `${runId}:${entry.tokenId}:anchored`,
+        payload: { researched: report !== undefined },
+      };
     },
     launchExpressedAlert(runId, entry) {
       return { ...makeAlert(runId, entry.tokenId, 'launch-expressed'), id: `${runId}:${entry.tokenId}:expressed` };

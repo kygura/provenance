@@ -206,6 +206,22 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_watchlist_expressed_at ON watchlist (expressed_at DESC)`,
     ],
   },
+  {
+    version: 3,
+    name: 'anchor-verdict',
+    statements: [
+      // The anchor verdict is the headline of every report and every watchlist
+      // entry, so it gets a real column on both. Nullable on `provenance`:
+      // reports written before the verdict existed have none, and inventing
+      // `unclear` for them would claim a judgement nobody made.
+      `ALTER TABLE provenance ADD COLUMN anchor_verdict TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_provenance_anchor_verdict ON provenance (anchor_verdict)`,
+      `ALTER TABLE watchlist ADD COLUMN anchor_verdict TEXT NOT NULL DEFAULT 'unclear'`,
+      `ALTER TABLE watchlist ADD COLUMN anchor_type TEXT NOT NULL DEFAULT 'none'`,
+      `ALTER TABLE watchlist ADD COLUMN anchor_date TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_watchlist_anchor_verdict ON watchlist (anchor_verdict, first_seen_at DESC)`,
+    ],
+  },
 ];
 
 const BOOKKEEPING = `CREATE TABLE IF NOT EXISTS schema_migrations (

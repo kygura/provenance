@@ -1,15 +1,26 @@
 # Provenance
 
-Trending tokens, traced back to where their meme came from.
+Is this meme anchored in something real, or is it being forced?
 
-Twice a day Provenance scrapes the trending lists on DexTools, DexScreener and
-GeckoTerminal, pulls holder distribution and token economics off free public
-RPCs, and has Claude research each token's **memetic provenance** — the origin of
-the meme, everything that already monetised it, and whether this particular token
-is the instance the meme's audience would call canonical. It scores the result,
-fires alerts, and renders everything on a dashboard.
+That is the one question Provenance answers, and it answers it at launch.
+Every 30 minutes it reads new Uniswap pools straight off the factory
+contracts, drops anything unsafe, and asks Claude to find the earliest source
+about the thing the token points at that does not mention the token.
 
-## The thesis
+- **anchored**: the thing existed before the token and outside it. An old
+  internet meme, a film or character, a public figure, or an inciting event
+  from the news that the token is reacting to.
+- **forced**: the meme exists because the token does. The earliest mentions are
+  the deployer's own posts, paid shills, or nothing.
+- **unclear**: the evidence doesn't settle it.
+
+The order of events decides it, and the code compares the dates, not the model.
+An anchored launch gets the full research straight away: lineage, prior
+cycles, and whether this token is the one the meme's audience will accept.
+Trending lists (DexTools, DexScreener, GeckoTerminal, twice a day) are the
+outcome, recorded against a verdict that came first. They are not the trigger.
+
+## Why lineage matters to the verdict
 
 Recycled narratives are new participants rediscovering the metas of old.
 
@@ -36,20 +47,23 @@ story on a token whose mint authority is still live gets flagged, not promoted.
 
 ## Two lanes
 
-Provenance also watches supply, not only demand. The launch lane (merged in from
-the `dexscanner` project) reads new Uniswap pools straight off the factory
-contracts and gates them hard: liquidity, burned or locked LP, no live
-mint/blacklist/pause functions in the bytecode, holder spread. Then one cheap
-model call asks whether the name refers to anything outside crypto. Survivors go
-on a watchlist. When a watchlisted token later shows up on a trending list, the
-run marks it `expressed` and records how many hours that took. See
-[`docs/launch-lane.md`](docs/launch-lane.md).
+The **launch lane** is where tokens are judged. It gates new pools on
+liquidity, burned or locked LP, no live mint/blacklist/pause functions in the
+bytecode, and holder spread. Then it runs the fast anchor check (triage model, a
+few searches), and runs the full research on anything anchored. Every verdict is
+stored, forced ones included, so a token is judged once and a forced meme that
+pumps anyway is on record as exactly that.
+
+The **trending lane** is the original twice-daily scan. It still researches
+whatever trends, and it marks a judged token `expressed` when that token shows
+up on a list. See [`docs/launch-lane.md`](docs/launch-lane.md).
 
 ## What runs where
 
 | Piece | Runs on | Cost |
 |---|---|---|
-| Discovery + analysis + LLM + alerts | GitHub Actions cron, twice daily | free tier |
+| Launch lane: new pools, gate, verdict, research | GitHub Actions cron, every 30 min | ~1.5–3k Actions min/month: free on a public repo, over the 2k private quota |
+| Trending lane: lists, analysis, research | GitHub Actions cron, twice daily | free tier |
 | Database | libSQL / Turso (or a local SQLite file) | free tier |
 | Dashboard | Vercel | free tier |
 | LLM | Anthropic API | the only paid credential |

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
+  AnchorChip,
   ChainBadge,
   Delta,
   EmptyState,
@@ -86,7 +87,56 @@ export default async function TokenPage({ params }: { params: Promise<{ id: stri
           </Panel>
         )}
 
-        {/* The provenance story is the point of the page, so it leads. */}
+        {/* The anchor verdict is the question the project answers, so it leads. */}
+        {provenance?.anchor && (
+          <Panel title="Anchor" subtitle="Is there a real anchor, or is the meme being pushed?">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-[16px] text-ink">
+                  {clean(provenance.anchor.subject) || 'No anchor found'}
+                </h2>
+                <p className="mt-0.5 text-[11px] text-ink-muted">
+                  {provenance.anchor.type.replace('-', ' ')}
+                  {provenance.anchor.anchorDate && (
+                    <>
+                      {' · dated '}
+                      <span className="num text-ink-2">{clean(provenance.anchor.anchorDate, 40)}</span>
+                    </>
+                  )}
+                  {provenance.anchor.precedesLaunch === true && ' · before the token launched'}
+                  {provenance.anchor.precedesLaunch === false && (
+                    <span className="text-ink"> · AFTER the token launched</span>
+                  )}
+                  {` · ${provenance.anchor.confidence} confidence`}
+                </p>
+              </div>
+              <AnchorChip verdict={provenance.anchor.verdict} />
+            </div>
+            <p className="mt-3 max-w-[70ch] text-[12px] leading-relaxed text-ink-2">
+              {cleanProse(provenance.anchor.summary)}
+            </p>
+            {provenance.anchor.earliestSource && (
+              <p className="mt-2 text-[11px] text-ink-muted">
+                Earliest independent source:{' '}
+                {safeHref(provenance.anchor.earliestSource.url) ? (
+                  <a
+                    href={safeHref(provenance.anchor.earliestSource.url)}
+                    rel="noopener noreferrer nofollow"
+                    target="_blank"
+                    className="text-ink-2 hover:underline"
+                  >
+                    {clean(provenance.anchor.earliestSource.title)}
+                  </a>
+                ) : (
+                  <span className="text-ink-2">{clean(provenance.anchor.earliestSource.title)}</span>
+                )}
+                {provenance.anchor.earliestSource.date && ` (${clean(provenance.anchor.earliestSource.date, 40)})`}
+              </p>
+            )}
+          </Panel>
+        )}
+
+        {/* The lineage is the supporting detail behind the verdict. */}
         {provenance ? (
           <Panel
             title="Provenance"

@@ -11,6 +11,8 @@
  */
 import type Anthropic from '@anthropic-ai/sdk';
 import type {
+  Anchor,
+  AnchorConfidence,
   EvidenceItem,
   EvidenceKind,
   LineageNode,
@@ -19,6 +21,7 @@ import type {
   RecycleVerdict,
 } from '@provenance/core';
 import { clamp, nowIso, truncate } from '@provenance/core';
+import { anchorSchema, parseAnchor, unresolvedAnchor } from './anchor';
 
 export const PROVENANCE_TOOL_NAME = 'emit_provenance_report';
 
@@ -46,18 +49,20 @@ const EVIDENCE_KINDS: readonly EvidenceKind[] = [
  * The model-authored half of `ProvenanceReport`. `tokenId`, `model`,
  * `promptVersion`, `generatedAt` and `usage` are bookkeeping the caller owns —
  * putting them in the schema would spend tokens inviting the model to invent
- * values we already hold.
+ * values we already hold. `anchor` is optional on stored reports only because
+ * old ones predate it; every new draft carries one.
  */
 export type ReportDraft = Omit<
   ProvenanceReport,
-  'tokenId' | 'model' | 'promptVersion' | 'generatedAt' | 'usage'
->;
+  'tokenId' | 'model' | 'promptVersion' | 'generatedAt' | 'usage' | 'anchor'
+> & { anchor: Anchor };
 
 /** JSON schema mirroring ReportDraft field for field. */
 export const PROVENANCE_TOOL_SCHEMA: Anthropic.Tool.InputSchema = {
   type: 'object',
   additionalProperties: false,
   required: [
+    'anchor',
     'memeName',
     'narrativeCluster',
     'originSummary',
@@ -74,6 +79,9 @@ export const PROVENANCE_TOOL_SCHEMA: Anthropic.Tool.InputSchema = {
     'evidence',
   ],
   properties: {
+    // First, because it is the headline and the model fills fields in order.
+    // `precedesLaunch` is deliberately absent: code computes it.
+    anchor: anchorSchema(),
     memeName: {
       type: 'string',
       description: "Canonical name of the underlying meme, not the ticker. 'dogwifhat', not '$WIF'.",
@@ -172,7 +180,7 @@ export function provenanceTool(cacheable = true): Anthropic.Tool {
   const tool: Anthropic.Tool = {
     name: PROVENANCE_TOOL_NAME,
     description:
-      'Record the provenance analysis for one token. Call exactly once. Every field is required unless marked optional; omit originYear rather than guessing it.',
+      'Record the provenance analysis for one token, leading with the anchor verdict. Call exactly once. Every field is required unless marked optional; omit originYear and anchor dates rather than guessing them.',
     input_schema: PROVENANCE_TOOL_SCHEMA,
   };
   // Tools render before system and messages, so a cache breakpoint here covers
@@ -330,6 +338,28 @@ function validateEvidence(raw: unknown, repairs: string[], retrievedAt: string):
   return out;
 }
 
+const CONFIDENCE_STEPS: readonly AnchorConfidence[] = ['high', 'medium', 'low'];
+
+function lowerOneStep(confidence: AnchorConfidence): AnchorConfidence {
+  return CONFIDENCE_STEPS[Math.min(CONFIDENCE_STEPS.indexOf(confidence) + 1, CONFIDENCE_STEPS.length - 1)] ?? 'low';
+}
+
+/**
+ * The anchor block. Never rejects the report: a lineage worth keeping should
+ * not be thrown away because the headline was malformed, so a missing or
+ * out-of-contract anchor degrades to `unclear` and is recorded as a repair.
+ */
+function validateAnchor(raw: unknown, repairs: string[]): Anchor {
+  if (!isRecord(raw)) {
+    repairs.push('anchor missing; set to unclear');
+    return unresolvedAnchor('The model returned no anchor verdict.');
+  }
+  const anchor = parseAnchor(raw);
+  const coerced = (['verdict', 'type', 'confidence'] as const).filter((key) => raw[key] !== anchor[key]);
+  if (coerced.length > 0) repairs.push(`anchor ${coerced.join(', ')} out of contract; coerced`);
+  return anchor;
+}
+
 /**
  * Confidence after repairs. Deliberately aggressive: a report that needed
  * patching is a report whose author was not paying attention, and the composite
@@ -439,6 +469,24 @@ export function validateReportDraft(raw: unknown, now: string = nowIso()): Valid
   }
   const resolvedGeneration = Math.max(generation ?? 0, priorCycles.length > 0 ? priorCycles.length : 0);
 
+  // An anchor with nothing under it: the model says the meme has a history,
+  // yet traced none and could not place it in the recycling chain. Possible
+  // for an inciting event, so it is kept — but believed one step less.
+  const anchor = validateAnchor(raw.anchor, repairs);
+  const verdictResolved = verdict ?? 'unclear';
+  if (
+    anchor.verdict === 'anchored' &&
+    verdictResolved === 'unclear' &&
+    lineage.length === 0 &&
+    priorCycles.length === 0
+  ) {
+    const lowered = lowerOneStep(anchor.confidence);
+    repairs.push(
+      `anchored with no lineage, no prior cycles and recycleVerdict unclear; anchor confidence ${anchor.confidence} -> ${lowered}`,
+    );
+    anchor.confidence = lowered;
+  }
+
   const rawConfidence = typeof raw.confidence === 'number' ? raw.confidence : undefined;
   if (rawConfidence === undefined) repairs.push('confidence missing or not a number; defaulted low');
   else if (rawConfidence < 0 || rawConfidence > 1) {
@@ -446,12 +494,13 @@ export function validateReportDraft(raw: unknown, now: string = nowIso()): Valid
   }
 
   const draft: ReportDraft = {
+    anchor,
     memeName: truncate(memeName, 160),
     narrativeCluster: truncate(narrativeCluster ?? 'unclassified', 64),
     originSummary: originSummary ?? 'The model returned no origin summary; the meme could not be dated here.',
     lineage,
     priorCycles,
-    recycleVerdict: verdict ?? 'unclear',
+    recycleVerdict: verdictResolved,
     recycleGeneration: resolvedGeneration,
     memeticDurability,
     culturalReach,
@@ -484,6 +533,7 @@ export function buildDegradedReport(params: {
 }): ProvenanceReport {
   return {
     tokenId: params.tokenId,
+    anchor: unresolvedAnchor(`Anchor not established: ${params.reason}`),
     memeName: params.memeName,
     narrativeCluster: 'unclassified',
     originSummary: `Provenance could not be established: ${params.reason}. No lineage is claimed here; treat this token as unresearched rather than as researched-and-clean.`,

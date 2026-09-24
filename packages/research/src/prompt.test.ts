@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { nowIso, type EvidenceItem, type TokenSnapshot } from '@provenance/core';
+import { ANCHOR_RULES } from './anchor';
 import { PROMPT_VERSION, SYSTEM_PROMPT, buildExtractionPrompt, buildResearchPrompt } from './prompt';
 import { UNTRUSTED_CLOSE, UNTRUSTED_OPEN } from './untrusted';
 
@@ -59,8 +60,30 @@ describe('system prompt', () => {
     expect(SYSTEM_PROMPT).not.toContain(new Date().getFullYear().toString());
   });
 
-  test('version is bumped past the single-call prompt', () => {
-    expect(PROMPT_VERSION).toBe('provenance-research-v2');
+  test('version is bumped for the anchor-first restructure', () => {
+    expect(PROMPT_VERSION).toBe('provenance-research-v3');
+  });
+
+  test('leads with the anchor question, quoting the shared rules verbatim', () => {
+    const rulesAt = SYSTEM_PROMPT.indexOf(ANCHOR_RULES);
+    expect(rulesAt).toBeGreaterThan(-1);
+    // The lineage thesis and the field guidance are supporting detail, after it.
+    expect(SYSTEM_PROMPT.indexOf('The thesis behind the lineage')).toBeGreaterThan(rulesAt);
+    expect(SYSTEM_PROMPT.indexOf('# Field guidance')).toBeGreaterThan(rulesAt);
+    expect(SYSTEM_PROMPT).toContain('`anchor`: the headline');
+  });
+
+  test('ties the lineage to the verdict as its evidence', () => {
+    expect(SYSTEM_PROMPT).toContain('prior cycles');
+    expect(SYSTEM_PROMPT).toContain('only sources are its own site');
+    expect(SYSTEM_PROMPT).toContain('the system computes that from the dates');
+  });
+
+  test('keeps the safety rules the anchor restructure must not lose', () => {
+    expect(SYSTEM_PROMPT).toContain("CONFLATING THE MEME'S ORIGIN YEAR WITH THE TOKEN'S LAUNCH DATE");
+    expect(SYSTEM_PROMPT).toContain('Never fabricate a prior cycle');
+    expect(SYSTEM_PROMPT).toContain('Do not give financial advice');
+    expect(SYSTEM_PROMPT).toContain('is never the earliest source');
   });
 });
 
@@ -114,6 +137,15 @@ describe('buildResearchPrompt', () => {
     expect(prompt).toContain('research, in prose');
   });
 
+  test('asks for the earliest independent source and its date, anchor first', () => {
+    const prompt = buildResearchPrompt(snapshot(), undefined, []);
+    expect(prompt).toContain('anchored or forced');
+    expect(prompt).toContain('EARLIEST INDEPENDENT SOURCE');
+    expect(prompt).toContain('does not mention the token');
+    expect(prompt).toContain('publication date');
+    expect(prompt.indexOf('EARLIEST INDEPENDENT SOURCE')).toBeLessThan(prompt.indexOf('PRIOR tokenisation'));
+  });
+
   test('an empty evidence pack is stated as a condition, not hidden', () => {
     const prompt = buildResearchPrompt(snapshot(), undefined, []);
     expect(prompt).toContain('NONE was pre-collected');
@@ -128,6 +160,12 @@ describe('buildExtractionPrompt', () => {
     expect(prompt).toContain('Nyan Cat dates to 2011.');
     expect(prompt).toContain('[S1] https://example.invalid/a');
     expect(prompt).toContain('nothing new can');
+  });
+
+  test('asks for the anchor first and leaves the date comparison to code', () => {
+    const prompt = buildExtractionPrompt(snapshot(), undefined, 'notes', []);
+    expect(prompt).toContain('Fill `anchor` first');
+    expect(prompt).toContain('the system compares');
   });
 
   test('does not re-fence the notes — this system wrote them', () => {

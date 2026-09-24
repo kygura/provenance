@@ -77,6 +77,24 @@ describe('applyFlags', () => {
     expect(enabled).toEqual(['dexscreener']);
   });
 
+  test('--lane launches runs the launch source alone, even when the lane is off in env', () => {
+    const base = makeConfig({ launches: { ...makeConfig().launches, enabled: false } });
+    const { app, errors } = applyFlags(base, parseArgs(['run', '--lane', 'launches']));
+    expect(errors).toEqual([]);
+    expect(app.pipeline.sources.filter((source) => source.enabled).map((source) => source.id)).toEqual(['launches']);
+    expect(app.launches.enabled).toBe(true);
+    expect(base.launches.enabled).toBe(false);
+  });
+
+  test('--lane rejects unknown lanes and does not combine with --sources', () => {
+    expect(applyFlags(makeConfig(), parseArgs(['run', '--lane', 'trending'])).errors).toEqual([
+      '--lane must be "launches", got "trending"',
+    ]);
+    expect(
+      applyFlags(makeConfig(), parseArgs(['run', '--lane', 'launches', '--sources', 'dexscreener'])).errors,
+    ).toEqual(['--lane and --sources cannot be combined']);
+  });
+
   test('bad values are reported, not coerced', () => {
     expect(applyFlags(makeConfig(), parseArgs(['run', '--limit', 'lots'])).errors).toEqual([
       '--limit expects a number, got "lots"',

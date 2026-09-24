@@ -26,7 +26,7 @@ export function isCommand(value: string): value is CommandName {
 }
 
 /** Flags that consume the following argument when not written as `--flag=value`. */
-export const VALUE_FLAGS = ['limit', 'chains', 'sources', 'run', 'format', 'status'] as const;
+export const VALUE_FLAGS = ['limit', 'chains', 'sources', 'run', 'format', 'status', 'verdict', 'lane'] as const;
 
 export const BOOLEAN_FLAGS = [
   'dry-run',
@@ -174,6 +174,18 @@ export function applyFlags(app: AppConfig, parsed: ParsedArgs): AppliedArgs {
       if (!known.includes(id)) errors.push(`--sources contains an unknown source: ${id}`);
     }
     for (const source of pipeline.sources) source.enabled = wanted.includes(source.id);
+  }
+
+  // `--lane launches` is the fast cadence: the launch source alone, so a run
+  // every 30 minutes judges new pools without re-scraping the trending lists.
+  const lane = flagString(parsed.flags, 'lane');
+  if (lane !== undefined) {
+    if (lane !== 'launches') errors.push(`--lane must be "launches", got "${lane}"`);
+    else {
+      if (sources !== undefined) errors.push('--lane and --sources cannot be combined');
+      for (const source of pipeline.sources) source.enabled = source.id === 'launches';
+      next.launches = { ...app.launches, enabled: true };
+    }
   }
 
   if (flagBool(parsed.flags, 'dry-run')) pipeline.dryRun = true;

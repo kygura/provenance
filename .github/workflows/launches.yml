@@ -1,0 +1,94 @@
+name: Launch lane
+
+# The fast cadence. A meme is judged when its token's first pool appears, not
+# twice a day once it may already be trending, so the launch lane runs on its
+# own every 30 minutes: new pools, hard gate, anchor verdict, full research on
+# anchored ones. No browser, no trending scrape, so a run takes a minute or two.
+#
+# GitHub's scheduler is best-effort; under load a */30 schedule can slip or
+# skip. LAUNCHES_LOOKBACK_HOURS (default 6) is sized so a skipped run or two
+# loses nothing.
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Judge but do not deliver alerts'
+        type: boolean
+        default: false
+
+# Shared with the full run on purpose: two runs judging the same new pool at
+# once would both pay for its anchor check and research.
+concurrency:
+  group: provenance-run
+  cancel-in-progress: false
+
+jobs:
+  launches:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Migrate database
+        run: bun run apps/worker/src/cli.ts migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
+
+      # Dispatch inputs reach the shell as env vars, never as `${{ }}` inside
+      # the script; see provenance.yml for why.
+      - name: Run launch lane
+        run: |
+          set -o pipefail
+          args=(run --lane launches)
+          [ "$INPUT_DRY_RUN" = "true" ] && args+=(--dry-run)
+          bun run apps/worker/src/cli.ts "${args[@]}" 2>&1 | tee launches-run.log
+        env:
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_FILE_SINK: alerts.jsonl
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_TRIAGE_MODEL: ${{ vars.LLM_TRIAGE_MODEL }}
+          LLM_MAX_COST_USD_PER_RUN: ${{ vars.LAUNCHES_MAX_COST_USD_PER_RUN || vars.LLM_MAX_COST_USD_PER_RUN }}
+          LLM_MAX_WEB_SEARCHES: ${{ vars.LLM_MAX_WEB_SEARCHES }}
+          LAUNCHES_LOOKBACK_HOURS: ${{ vars.LAUNCHES_LOOKBACK_HOURS }}
+          LAUNCHES_MAX_CATALOG_PER_RUN: ${{ vars.LAUNCHES_MAX_CATALOG_PER_RUN }}
+          LAUNCHES_MIN_LIQUIDITY_USD: ${{ vars.LAUNCHES_MIN_LIQUIDITY_USD }}
+          LAUNCHES_MIN_HOLDERS: ${{ vars.LAUNCHES_MIN_HOLDERS }}
+          LAUNCHES_RESEARCH_ANCHORED: ${{ vars.LAUNCHES_RESEARCH_ANCHORED }}
+          RPC_ETHEREUM: ${{ vars.RPC_ETHEREUM }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL }}
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: launches-run-${{ github.run_id }}
+          path: |
+            launches-run.log
+            alerts.jsonl
+          if-no-files-found: ignore
+          retention-days: 7

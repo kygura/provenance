@@ -29,7 +29,7 @@ import type {
   ProvenanceResearcher,
   ProvenanceScore,
   ProvenanceStore,
-  ReferentChecker,
+  AnchorChecker,
   ResearchContext,
   ScoringInput,
   TokenSnapshot,
@@ -63,7 +63,7 @@ export interface PipelineDeps {
   // @provenance/research
   collectEvidence(snapshot: TokenSnapshot, ctx: ResearchContext): Promise<EvidenceItem[]>;
   createResearcher(app: AppConfig, logger: Logger): ProvenanceResearcher;
-  createReferentChecker(app: AppConfig, logger: Logger): ReferentChecker;
+  createAnchorChecker(app: AppConfig, logger: Logger): AnchorChecker;
   promptVersion: string;
 
   // @provenance/store
@@ -76,11 +76,12 @@ export interface PipelineDeps {
   createAlerts(runId: string, input: AlertRuleInput, rules?: AlertRule[]): Alert[];
   gateLaunchMarket(snapshot: TokenSnapshot, config: LaunchConfig): LaunchGateResult;
   gateLaunchChain(chain: ChainAnalysis | undefined, config: LaunchConfig): LaunchGateResult;
-  launchCataloguedAlert(
+  launchAnchoredAlert(
     runId: string,
     entry: WatchEntry,
     snapshot: TokenSnapshot,
     chain: ChainAnalysis | undefined,
+    report?: ProvenanceReport,
   ): Alert;
   launchExpressedAlert(runId: string, entry: WatchEntry, snapshot: TokenSnapshot): Alert;
   createSinks(app: AppConfig, logger: Logger): AlertChannelSink[];
@@ -109,7 +110,7 @@ type SourcesModule = Pick<
   'discoverTrending' | 'mergeToSnapshots' | 'filterSnapshots' | 'triageOrder' | 'splitLanes'
 >;
 type ChainModule = Pick<PipelineDeps, 'analyzeToken'>;
-type ResearchModule = Pick<PipelineDeps, 'collectEvidence' | 'createResearcher' | 'createReferentChecker'> & {
+type ResearchModule = Pick<PipelineDeps, 'collectEvidence' | 'createResearcher' | 'createAnchorChecker'> & {
   PROMPT_VERSION?: string;
 };
 type StoreModule = Pick<PipelineDeps, 'createStore' | 'seedDemoData'>;
@@ -122,7 +123,7 @@ type AlertsModule = Pick<
   | 'dispatchAlerts'
   | 'gateLaunchMarket'
   | 'gateLaunchChain'
-  | 'launchCataloguedAlert'
+  | 'launchAnchoredAlert'
   | 'launchExpressedAlert'
 >;
 
@@ -149,7 +150,7 @@ export async function loadRuntimeDeps(): Promise<PipelineDeps> {
     analyzeToken: chain.analyzeToken,
     collectEvidence: research.collectEvidence,
     createResearcher: research.createResearcher,
-    createReferentChecker: research.createReferentChecker,
+    createAnchorChecker: research.createAnchorChecker,
     promptVersion: research.PROMPT_VERSION ?? 'unknown',
     createStore: store.createStore,
     seedDemoData: store.seedDemoData,
@@ -160,7 +161,7 @@ export async function loadRuntimeDeps(): Promise<PipelineDeps> {
     dispatchAlerts: alerts.dispatchAlerts,
     gateLaunchMarket: alerts.gateLaunchMarket,
     gateLaunchChain: alerts.gateLaunchChain,
-    launchCataloguedAlert: alerts.launchCataloguedAlert,
+    launchAnchoredAlert: alerts.launchAnchoredAlert,
     launchExpressedAlert: alerts.launchExpressedAlert,
   };
   return cached;

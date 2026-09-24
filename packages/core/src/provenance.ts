@@ -1,4 +1,49 @@
 /**
+ * The one question every report answers first: is there a real anchor behind
+ * this meme, or is it being pushed?
+ *
+ * - anchored: the thing the token points at existed before the token and
+ *             outside it — an old meme, a cultural artifact, or an inciting
+ *             event the token is a reaction to
+ * - forced:   the meme exists because the token does; the earliest mentions
+ *             are the deployer's own copy, paid posts, or nothing at all
+ * - unclear:  the evidence does not settle it
+ */
+export type AnchorVerdict = 'anchored' | 'forced' | 'unclear';
+
+export type AnchorType = 'historical-meme' | 'cultural-artifact' | 'inciting-event' | 'none';
+
+export type AnchorConfidence = 'high' | 'medium' | 'low';
+
+export interface AnchorSource {
+  title: string;
+  url?: string;
+  /** ISO date (or year) the source was published. */
+  date?: string;
+}
+
+export interface Anchor {
+  verdict: AnchorVerdict;
+  type: AnchorType;
+  /** What the token points at, in a few words. Empty when there is nothing. */
+  subject: string;
+  /** When the anchor first existed: ISO date, or a bare year for old memes. */
+  anchorDate?: string;
+  /** The earliest source found that does not mention the token. */
+  earliestSource?: AnchorSource;
+  /**
+   * Did the anchor exist before the token's first pool? Computed in code from
+   * `anchorDate` and the pool creation time, never taken from the model:
+   * models are unreliable at date comparison, and this is the test that
+   * separates a reaction from a manufactured meme.
+   */
+  precedesLaunch?: boolean;
+  /** One or two sentences: what the anchor is, or why there is none. */
+  summary: string;
+  confidence: AnchorConfidence;
+}
+
+/**
  * The thesis this project encodes: most "new" narratives are old narratives with
  * new participants. A token's provenance — where its meme came from, how many
  * times that meme has already been monetised, and whether this instance is the
@@ -58,6 +103,11 @@ export type RecycleVerdict = 'original' | 'revival' | 'derivative' | 'copycat' |
 
 export interface ProvenanceReport {
   tokenId: string;
+  /**
+   * The headline answer. Everything below it is supporting detail. Optional
+   * only because reports written before the verdict existed lack it.
+   */
+  anchor?: Anchor;
   /** Canonical name of the underlying meme/narrative, not the ticker. */
   memeName: string;
   /** Broad family: "dog", "frog", "political", "ai-agents", "nostalgia", etc. */

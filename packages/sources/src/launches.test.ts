@@ -57,7 +57,8 @@ function logFor(pool: string): Record<string, unknown> {
 }
 
 function makeApp(env: Record<string, string> = {}): AppConfig {
-  return loadConfig({ USE_FIXTURES: '1', ...env });
+  // Fixture pools span 21h; pin the window the fixtures were written for.
+  return loadConfig({ USE_FIXTURES: '1', LAUNCHES_LOOKBACK_HOURS: '24', ...env });
 }
 
 function launchConfig(app: AppConfig): SourceConfig {
@@ -388,7 +389,7 @@ describe('LaunchSource over the network path', () => {
   test('fails over across endpoints, walks, hydrates and never throws', async () => {
     hydrationRequests = [];
     const base = `http://127.0.0.1:${server.port}`;
-    const app = loadConfig({ RPC_ETHEREUM: `${base}/refuses,${base}/ok`, LAUNCHES_RATE_MS: '0' });
+    const app = loadConfig({ RPC_ETHEREUM: `${base}/refuses,${base}/ok`, LAUNCHES_RATE_MS: '0', LAUNCHES_LOOKBACK_HOURS: '24' });
     app.pipeline.sources = app.pipeline.sources.map((source) =>
       source.id === 'dexscreener' ? { ...source, rateLimitMs: 0 } : source,
     );
@@ -407,7 +408,7 @@ describe('LaunchSource over the network path', () => {
 
   test('no working endpoint is a recorded error and an empty list', async () => {
     const base = `http://127.0.0.1:${server.port}`;
-    const app = loadConfig({ RPC_ETHEREUM: `${base}/refuses`, LAUNCHES_RATE_MS: '0' });
+    const app = loadConfig({ RPC_ETHEREUM: `${base}/refuses`, LAUNCHES_RATE_MS: '0', LAUNCHES_LOOKBACK_HOURS: '24' });
     const source = new LaunchSource(launchConfig(app), { dexscreenerBaseUrl: base });
     const entries = await source.fetchTrending({ config: launchConfig(app), app, logger: silentLogger });
 
