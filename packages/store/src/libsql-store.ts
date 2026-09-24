@@ -140,25 +140,40 @@ const MEME_UPSERT = `INSERT INTO memes
 /**
  * Tokens previously seen running a meme, newest first, with their latest score.
  *
- * Joined through `provenance` rather than a token column, because a token's
- * meme is a finding of the research pass, not a property of the contract — and
- * the same token can be re-researched into a different meme.
+ * Each token contributes its LATEST provenance row, and only if that row
+ * resolved to this meme. Filtering by meme before choosing the latest row —
+ * the earlier shape of this query — kept a token re-researched into a
+ * different meme as precedent for the one it left.
+ *
+ * Both "latest" lookups are correlated on token_id, which the
+ * (token_id, created_at) and (token_id, computed_at) indexes serve directly,
+ * rather than grouping the whole scores table on every call. Joined through
+ * `provenance` rather than a token column, because a token's meme is a finding
+ * of the research pass, not a property of the contract.
  */
 const MEME_HISTORY = `SELECT
     t.id AS token_id, t.chain, t.symbol, t.name,
     t.first_seen_at, t.last_seen_at,
     p.recycle_verdict,
     sc.total AS score, sc.tier AS tier
-  FROM (
-    SELECT token_id, recycle_verdict, MAX(created_at) AS created_at
-    FROM provenance WHERE meme_id = ? GROUP BY token_id
-  ) p
+  FROM provenance p
   JOIN tokens t ON t.id = p.token_id
-  LEFT JOIN (
-    SELECT token_id, total, tier, MAX(computed_at) AS computed_at
-    FROM scores GROUP BY token_id
-  ) sc ON sc.token_id = p.token_id
-  WHERE t.id IS NOT NULL`;
+  LEFT JOIN scores sc ON sc.token_id = p.token_id
+    AND sc.computed_at = (
+      SELECT MAX(s2.computed_at) FROM scores s2 WHERE s2.token_id = p.token_id
+    )
+  WHERE p.meme_id = ?
+    AND p.created_at = (
+      SELECT MAX(p2.created_at) FROM provenance p2 WHERE p2.token_id = p.token_id
+    )`;
+
+/** Each token's latest report, where that report carries no meme link. */
+const UNLINKED_PROVENANCE = `SELECT p.id, p.token_id, p.meme_name, p.narrative_cluster
+  FROM provenance p
+  WHERE p.meme_id IS NULL
+    AND p.created_at = (
+      SELECT MAX(p2.created_at) FROM provenance p2 WHERE p2.token_id = p.token_id
+    )`;
 
 const PROVENANCE_UPSERT = `INSERT INTO provenance
     (id, run_id, token_id, created_at, meme_name, narrative_cluster, recycle_verdict,
@@ -387,7 +402,7 @@ export class LibsqlStore implements ProvenanceStore {
 
   async memeHistory(
     memeId: string,
-    options: { excludeTokenId?: string; limit?: number } = {},
+    options: { excludeTokenId?: string; seenBefore?: string; limit?: number } = {},
   ): Promise<MemeSighting[]> {
     if (memeId === '') return [];
     const limit = Math.min(50, Math.max(1, Math.trunc(options.limit ?? 10)));
@@ -397,10 +412,37 @@ export class LibsqlStore implements ProvenanceStore {
       sql += ' AND t.id != ?';
       args.push(options.excludeTokenId);
     }
+    if (options.seenBefore !== undefined) {
+      // first_seen_at is kept at its minimum by the token upsert, so this is
+      // when the pipeline first met the token, not when it last saw it.
+      sql += ' AND t.first_seen_at < ?';
+      args.push(options.seenBefore);
+    }
     sql += ' ORDER BY t.last_seen_at DESC LIMIT ?';
     args.push(limit);
     const rows = await this.all({ sql, args });
     return rows.map((row) => rowToMemeSighting(row as SqlRow));
+  }
+
+  async unlinkedProvenance(): Promise<
+    { id: string; tokenId: string; memeName: string; narrativeCluster: string }[]
+  > {
+    const rows = await this.all({ sql: UNLINKED_PROVENANCE, args: [] });
+    return rows.map((row) => {
+      const r = row as SqlRow;
+      return {
+        id: String(r.id ?? ''),
+        tokenId: String(r.token_id ?? ''),
+        memeName: String(r.meme_name ?? ''),
+        narrativeCluster: String(r.narrative_cluster ?? ''),
+      };
+    });
+  }
+
+  async linkProvenanceMeme(provenanceId: string, memeId: string): Promise<void> {
+    await this.write([
+      { sql: 'UPDATE provenance SET meme_id = ? WHERE id = ?', args: [memeId, provenanceId] },
+    ]);
   }
 
   async saveScore(runId: string, score: ProvenanceScore): Promise<void> {

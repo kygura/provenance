@@ -95,12 +95,27 @@ export interface ProvenanceStore {
 
   /**
    * Tokens this system has already watched run a meme, most recent first.
-   * `excludeTokenId` keeps the token under analysis out of its own precedent.
+   *
+   * A token counts only when its LATEST report resolved to this meme: one that
+   * was re-researched into a different meme stops being precedent for the old
+   * one. `excludeTokenId` keeps the token under analysis out of its own
+   * precedent; `seenBefore` (the run's start) keeps out tokens first seen in the
+   * current run, which are co-trending rather than prior.
    */
   memeHistory(
     memeId: string,
-    options?: { excludeTokenId?: string; limit?: number },
+    options?: { excludeTokenId?: string; seenBefore?: string; limit?: number },
   ): Promise<MemeSighting[]>;
+
+  /**
+   * Each token's latest report that is not linked to a meme yet. Feeds the
+   * backfill that links reports written before migration 3, or while the meme
+   * could not be resolved.
+   */
+  unlinkedProvenance(): Promise<{ id: string; tokenId: string; memeName: string; narrativeCluster: string }[]>;
+
+  /** Link one stored report to a meme; the column is authoritative on read. */
+  linkProvenanceMeme(provenanceId: string, memeId: string): Promise<void>;
 
   /** Most recent report for a token, used to skip re-analysis inside the TTL. */
   latestProvenance(tokenId: string): Promise<ProvenanceReport | null>;

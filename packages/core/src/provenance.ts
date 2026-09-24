@@ -156,5 +156,5 @@ export interface MemeSighting {
   recycleVerdict: RecycleVerdict;
   /** Most recent composite score, when one was computed. */
   score?: number;
-  tier?: string;
+  tier?: ScoreTier;
 }

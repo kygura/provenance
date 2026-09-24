@@ -113,6 +113,19 @@ export async function runPipeline(
   let outcomes: TokenOutcome[] = [];
 
   try {
+    // ---- Stage 1b: link stored reports that predate their meme -------------
+    // Reports written before migration 3, or whose meme failed to resolve, sit
+    // unlinked — and precedent memory would stay empty for every token the
+    // system saw before this feature, which is the history that matters most.
+    // Pure slugging, no model calls, bounded by one row per token.
+    try {
+      const linked = await backfillMemeLinks(store, resolved, log);
+      if (linked > 0) log.info('linked stored reports to memes', { linked });
+    } catch (error) {
+      // Memory is an enhancement; a failed backfill must not cost the run.
+      log.warn('meme backfill failed', { error: errorMessage(error) });
+    }
+
     // ---- Stage 2: discover, merge, filter, triage, cap -----------------------
     const discovery = await resolved.discoverTrending(app, log);
     stats.sourceErrors.push(...discovery.errors);
@@ -193,7 +206,13 @@ export async function runPipeline(
       const identity = resolved.resolveMemeIdentity(subject);
       if (!identity) return [];
       try {
-        const sightings = await store.memeHistory(identity.id, { excludeTokenId: snapshot.tokenId });
+        const sightings = await store.memeHistory(identity.id, {
+          excludeTokenId: snapshot.tokenId,
+          // Only tokens met before this run. A token first seen in this same
+          // run is co-trending, not a prior tokenisation — and whether it had
+          // been saved yet would depend on mapLimit's ordering.
+          seenBefore: startedAt,
+        });
         if (sightings.length > 0) {
           tokenLog.info('observed precedent found', { memeId: identity.id, priorTokens: sightings.length });
         }
@@ -406,6 +425,35 @@ export async function runPipeline(
   };
   if (fatal) record.error = fatal;
   return record;
+}
+
+/**
+ * Link each token's latest unlinked report to its canonical meme. Returns how
+ * many were linked; names that resolve to nothing are left unlinked, as they
+ * would be at write time.
+ */
+export async function backfillMemeLinks(
+  store: ProvenanceStore,
+  deps: Pick<PipelineDeps, 'resolveMemeIdentity'>,
+  log: Logger,
+): Promise<number> {
+  let linked = 0;
+  for (const row of await store.unlinkedProvenance()) {
+    const identity = deps.resolveMemeIdentity(row.memeName);
+    if (!identity) continue;
+    try {
+      const meme = await store.resolveMeme({
+        id: identity.id,
+        displayName: identity.displayName,
+        narrativeCluster: row.narrativeCluster,
+      });
+      await store.linkProvenanceMeme(row.id, meme.id);
+      linked += 1;
+    } catch (error) {
+      log.debug('backfill link failed', { provenanceId: row.id, error: errorMessage(error) });
+    }
+  }
+  return linked;
 }
 
 /**

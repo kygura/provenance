@@ -28,7 +28,7 @@ import { classify, describeHits } from './lexicon';
 import { buildQueries } from './queries';
 import { UNTRUSTED_POLICY, fence, scrub } from './untrusted';
 
-export const PROMPT_VERSION = 'provenance-research-v3';
+export const PROMPT_VERSION = 'provenance-research-v4';
 
 export const SYSTEM_PROMPT = `You are the provenance analyst for a research system that treats a memecoin's MEMETIC LINEAGE as a first-class signal, separate from its price, its chart and its marketing.
 
@@ -245,21 +245,31 @@ function evidenceBlock(evidence: readonly EvidenceItem[]): string {
 
 
 /**
- * Tokens this system itself watched run the same meme.
+ * Tokens this system itself watched, matched to this one by meme name.
  *
- * Kept apart from `evidenceBlock` and outside the untrusted fence on purpose:
- * these rows are this pipeline's own measurements, not somebody's web page, and
- * they are the one input no competitor scraping the same sources has. They also
- * settle `recycleGeneration` directly — a model guessing generation from web
- * evidence alone routinely undercounts, because a token that trended and faded
- * six months ago leaves very little trace to find.
+ * Two kinds of content with two levels of trust, kept apart:
+ *
+ *  - The measurements — chain, when each token was seen, the verdict and score
+ *    this pipeline assigned — are its own records. They sit outside the fence,
+ *    and are the one input no competitor scraping the same pages has.
+ *  - The tickers are NOT. A ticker is written by that token's deployer, exactly
+ *    like the ticker `deployerBlock` fences for the token under analysis. An
+ *    earlier version printed them raw in this trusted block, which let a
+ *    deployer plant an instruction in one token's ticker and have it read, as
+ *    system-measured fact, in the prompt of every later token on the meme.
+ *    Rows are labelled P1..Pn so the fenced tickers can refer back to them.
+ *
+ * The match itself is also only a hypothesis. The lookup key is a provisional
+ * slug built from this token's listed name and ticker, before any research —
+ * so the prompt asks the model to confirm the shared meme rather than telling
+ * it to count these unconditionally.
  */
 function precedentBlock(sightings: readonly MemeSighting[]): string {
   if (sightings.length === 0) return '';
 
-  const rows = sightings.map((s) => {
+  const rows = sightings.map((s, i) => {
     const parts = [
-      `- ${s.symbol || '(no ticker)'} on ${s.chain}`,
+      `- P${i + 1} on ${s.chain}`,
       `first seen ${s.firstSeenAt.slice(0, 10)}`,
       `last seen ${s.lastSeenAt.slice(0, 10)}`,
       `verdict ${s.recycleVerdict}`,
@@ -267,26 +277,33 @@ function precedentBlock(sightings: readonly MemeSighting[]): string {
     if (s.score !== undefined) parts.push(`scored ${s.score.toFixed(0)}${s.tier ? ` (${s.tier})` : ''}`);
     return parts.join(' · ');
   });
+  const tickers = sightings.map((s, i) => `P${i + 1}: ${s.symbol || '(no ticker)'}`);
 
   return [
-    `## Observed precedent (${sightings.length} prior token(s), measured by this system)`,
+    `## Observed precedent (${sightings.length} earlier token(s), measured by this system)`,
     '',
-    'This pipeline has already analysed the token(s) below and resolved each to',
-    'the same meme as this one. These are first-hand observations, not web',
-    'claims — treat them as the most reliable input you have.',
+    'This pipeline analysed the token(s) below in earlier runs. They were matched',
+    'to this one by meme NAME, before any research on this token — so treat the',
+    'shared meme as a strong lead to confirm, not as settled. The measurements',
+    'themselves (dates, verdicts, scores) are this system\'s own records and are',
+    'reliable.',
     '',
     rows.join('\n'),
     '',
-    'What follows from this:',
+    fence('tickers of the tokens above, written by their deployers', tickers.join('\n')),
     '',
-    '- Each of these is a PRIOR TOKENISATION of the meme. Include them in',
-    '  `priorCycles`, and count them in `recycleGeneration`, whether or not your',
-    '  web searches independently turn them up.',
-    '- A meme with prior tokenisations here is by definition not `original`.',
-    '- A token whose predecessors all faded is a weaker setup than one whose',
+    'If your research confirms these carry the same meme as this token:',
+    '',
+    '- each one is a PRIOR TOKENISATION — include it in `priorCycles` and count',
+    '  it in `recycleGeneration`, even if web search does not independently',
+    '  surface it (a token that trended and faded leaves little trace to find);',
+    '- the meme is then not `original` for this token;',
+    '- a token whose predecessors all faded is a weaker setup than one whose',
     '  predecessors held; say which in `speculativeSetup`.',
-    '- This does not date the meme. When it entered culture is still a question',
-    '  for the sources.',
+    '',
+    'If your research shows a different meme behind this token, disregard them',
+    'and say so in your notes. Either way, none of this dates the meme — when it',
+    'entered culture is still a question for the sources.',
   ].join('\n');
 }
 

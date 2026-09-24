@@ -151,6 +151,12 @@ export class FakeStore implements ProvenanceStore {
   readonly memeSightings = new Map<string, MemeSighting[]>();
   /** Every meme id the pipeline resolved, in order. */
   readonly resolvedMemes: string[] = [];
+  /** Arguments of every memeHistory call, so tests can check the run boundary. */
+  readonly memeHistoryCalls: { memeId: string; excludeTokenId?: string; seenBefore?: string }[] = [];
+  /** Seeded by a test: stored reports with no meme link yet. */
+  readonly unlinked: { id: string; tokenId: string; memeName: string; narrativeCluster: string }[] = [];
+  /** provenance id -> meme id, as linked by the backfill. */
+  readonly links = new Map<string, string>();
   readonly evidenceCache = new Map<string, string>();
   readonly watch = new Map<string, WatchEntry>();
   closed = false;
@@ -262,12 +268,29 @@ export class FakeStore implements ProvenanceStore {
 
   async memeHistory(
     memeId: string,
-    options: { excludeTokenId?: string; limit?: number } = {},
+    options: { excludeTokenId?: string; seenBefore?: string; limit?: number } = {},
   ): Promise<MemeSighting[]> {
     this.guard('memeHistory');
+    this.memeHistoryCalls.push({ memeId, ...options });
     const sightings = this.memeSightings.get(memeId) ?? [];
-    const kept = sightings.filter((s) => s.tokenId !== options.excludeTokenId);
+    const kept = sightings.filter(
+      (s) =>
+        s.tokenId !== options.excludeTokenId &&
+        (options.seenBefore === undefined || s.firstSeenAt < options.seenBefore),
+    );
     return kept.slice(0, options.limit ?? 10);
+  }
+
+  async unlinkedProvenance(): Promise<
+    { id: string; tokenId: string; memeName: string; narrativeCluster: string }[]
+  > {
+    this.guard('unlinkedProvenance');
+    return this.unlinked.filter((row) => !this.links.has(row.id));
+  }
+
+  async linkProvenanceMeme(provenanceId: string, memeId: string): Promise<void> {
+    this.guard('linkProvenanceMeme');
+    this.links.set(provenanceId, memeId);
   }
 
   async latestProvenance(tokenId: string): Promise<ProvenanceReport | null> {

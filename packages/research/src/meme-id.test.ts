@@ -51,6 +51,38 @@ describe('memeSlug keeps distinct memes distinct', () => {
   });
 });
 
+describe('memeSlug outside ASCII', () => {
+  /*
+   * An earlier version turned every non-ASCII letter into a separator, so
+   * these collapsed into shared slugs ('p-p', 'e-e', 'se-or-doge') and each
+   * became "observed precedent" for the other — fabricated precedent, the
+   * failure this module exists to prevent.
+   */
+  test('accented names that differ stay distinct', () => {
+    expect(memeSlug('Pépé')).not.toBe(memeSlug('Pöpö'));
+    expect(memeSlug('Señor Doge')).not.toBe(memeSlug('Seçor Doge'));
+  });
+
+  test('names in other scripts stay distinct', () => {
+    expect(memeSlug('Пепе')).not.toBe(memeSlug('Бебе'));
+    expect(memeSlug('ドージ')).not.toBe(memeSlug('ペペ'));
+  });
+
+  test('non-Latin letters survive into the slug rather than vanishing', () => {
+    expect(memeSlug('ペペ')).not.toBe('');
+    expect(isResolvableMeme(memeSlug('ペペ'))).toBe(true);
+  });
+
+  test('an accent is one meme typed two ways, so it does collide', () => {
+    expect(memeSlug('Pépé')).toBe(memeSlug('Pepe'));
+    expect(memeSlug('Pépé')).toBe('pepe');
+  });
+
+  test('a leading qualifier does not stop the article being dropped', () => {
+    expect(memeSlug('(meme) The Doge')).toBe(memeSlug('Doge'));
+  });
+});
+
 describe('memeSlug edge cases', () => {
   test('pure punctuation or emoji yields an empty slug', () => {
     expect(memeSlug('🐸🐸🐸')).toBe('');
@@ -91,6 +123,12 @@ describe('resolveMemeIdentity', () => {
       id: 'nyan-cat',
       displayName: 'Nyan Cat',
     });
+  });
+
+  test('the display name keeps its own script; only the key is folded', () => {
+    // Folding confusables is right for the key and wrong for a label: 'Пепе'
+    // was being stored as the mixed-script 'Пeпe'.
+    expect(resolveMemeIdentity('Пепе')?.displayName).toBe('Пепе');
   });
 
   test('returns null rather than a junk row for an unidentifiable name', () => {

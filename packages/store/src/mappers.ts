@@ -301,6 +301,9 @@ export function rowToProvenance(row: SqlRow, logger: Logger = silentLogger): Pro
     ...parsed,
     tokenId,
     memeName: text(row.meme_name),
+    // The column, not the JSON copy: a report linked after it was written (by
+    // the backfill) has meme_id set and a report_json that predates the link.
+    ...(text(row.meme_id) !== '' ? { memeId: text(row.meme_id) } : {}),
     narrativeCluster: text(row.narrative_cluster),
     originSummary: parsed.originSummary ?? '',
     lineage: Array.isArray(parsed.lineage) ? (parsed.lineage as LineageNode[]) : [],
@@ -364,7 +367,7 @@ export function rowToMeme(row: SqlRow): MemeRecord {
  */
 export function rowToMemeSighting(row: SqlRow): MemeSighting {
   const score = asNumber(row.score);
-  const tier = text(row.tier);
+  const tier = text(row.tier) === '' ? undefined : asTier(row.tier);
   return {
     tokenId: text(row.token_id),
     chain: text(row.chain),
@@ -374,7 +377,7 @@ export function rowToMemeSighting(row: SqlRow): MemeSighting {
     lastSeenAt: text(row.last_seen_at),
     recycleVerdict: asVerdict(row.recycle_verdict),
     ...(score !== undefined ? { score } : {}),
-    ...(tier !== '' ? { tier } : {}),
+    ...(tier !== undefined ? { tier } : {}),
   };
 }
 

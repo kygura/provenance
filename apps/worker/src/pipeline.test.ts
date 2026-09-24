@@ -370,7 +370,7 @@ describe('meme identity', () => {
         lastSeenAt: hoursAgo(4000),
         recycleVerdict: 'revival',
         score: 71,
-        tier: 'strong',
+        tier: 'A',
       },
     ]);
     const harness = makeHarness({
@@ -425,5 +425,57 @@ describe('meme identity', () => {
 
     expect(record.stats.analysed).toBe(1);
     expect(harness.precedentSeen[0]).toEqual([]);
+  });
+});
+
+describe('meme precedent boundaries and backfill', () => {
+  test('the precedent lookup is bounded to tokens met before this run', async () => {
+    // Without the bound, a co-trending token analysed earlier in the same run
+    // was handed over as a "prior tokenisation", and whether it appeared
+    // depended on mapLimit's ordering.
+    const store = new FakeStore();
+    const harness = makeHarness({
+      store,
+      snapshots: [makeSnapshot('solana:aaa')],
+      provisionalSubject: () => 'Nyan Cat',
+    });
+
+    const record = await runPipeline(makeConfig(), silentLogger, harness.deps, { runId: RUN, concurrency: 1 });
+
+    expect(store.memeHistoryCalls).toHaveLength(1);
+    expect(store.memeHistoryCalls[0]?.seenBefore).toBe(record.startedAt);
+  });
+
+  test('links stored reports that predate their meme, at the start of the run', async () => {
+    const store = new FakeStore();
+    store.unlinked.push({ id: 'p-old', tokenId: 'solana:old', memeName: 'Nyan Cat', narrativeCluster: 'cat' });
+    const harness = makeHarness({ store, snapshots: [makeSnapshot('solana:aaa')] });
+
+    await runPipeline(makeConfig(), silentLogger, harness.deps, { runId: RUN, concurrency: 1 });
+
+    expect(store.links.get('p-old')).toBe('nyan-cat');
+    // Linked before discovery, so this run's lookups can already see it.
+    expect(store.calls.indexOf('linkProvenanceMeme')).toBeLessThan(store.calls.indexOf('memeHistory'));
+  });
+
+  test('leaves an unresolvable stored report unlinked', async () => {
+    const store = new FakeStore();
+    store.unlinked.push({ id: 'p-x', tokenId: 'solana:x', memeName: 'unknown', narrativeCluster: 'cat' });
+    const harness = makeHarness({ store, snapshots: [makeSnapshot('solana:aaa')] });
+
+    await runPipeline(makeConfig(), silentLogger, harness.deps, { runId: RUN, concurrency: 1 });
+
+    expect(store.links.has('p-x')).toBe(false);
+  });
+
+  test('a failed backfill does not cost the run', async () => {
+    const store = new FakeStore();
+    store.failOn = { method: 'unlinkedProvenance' };
+    const harness = makeHarness({ store, snapshots: [makeSnapshot('solana:aaa')] });
+
+    const record = await runPipeline(makeConfig(), silentLogger, harness.deps, { runId: RUN, concurrency: 1 });
+
+    expect(record.status).not.toBe('failed');
+    expect(record.stats.analysed).toBe(1);
   });
 });

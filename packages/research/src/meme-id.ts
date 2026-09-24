@@ -19,6 +19,14 @@
  * Normalization is `normalizeText` from `queries.ts` — the same NFKC fold and
  * confusable mapping used on tickers, so a Cyrillic 'а' in a meme name resolves
  * to the same meme as the Latin one rather than squatting a second row.
+ *
+ * Letters outside ASCII are KEPT, not turned into separators. An earlier
+ * version replaced everything outside [a-z0-9] with '-', which collapsed
+ * 'Pépé' and 'Pöpö' to one slug ('p-p') and 'Пепе' and 'Бебе' to another
+ * ('e-e') — fabricating precedent between unrelated memes, the exact failure
+ * this module exists to avoid. Accents are stripped (so 'Pépé' and 'Pepe' do
+ * collide, deliberately: one meme typed two ways), and every other letter in
+ * any script survives as itself.
  */
 
 import { normalizeText } from './queries';
@@ -37,13 +45,20 @@ const LEADING_ARTICLE = /^(the|a|an)\s+/i;
 export function memeSlug(name: string): string {
   const cleaned = normalizeText(name)
     .replace(QUALIFIER, ' ')
+    // Trimmed before the article check: a leading qualifier leaves a leading
+    // space, and '(meme) The Doge' must still reach 'doge'.
+    .trim()
     .replace(LEADING_ARTICLE, '')
+    // Decompose, then drop combining marks: 'é' -> 'e', 'ö' -> 'o'. Base
+    // letters of every script survive.
+    .normalize('NFD')
+    .replace(/\p{M}+/gu, '')
     .toLowerCase();
 
   const slug = cleaned
     // Apostrophes close up ("pepe's" -> "pepes"); everything else separates.
     .replace(/['’]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
     .replace(/^-+|-+$/g, '');
 
   // A slug long enough to be a paragraph is a model that answered the wrong
@@ -92,6 +107,9 @@ export function resolveMemeIdentity(
 ): { id: string; displayName: string } | null {
   const id = memeSlug(name);
   if (!isResolvableMeme(id)) return null;
-  const displayName = normalizeText(name).replace(QUALIFIER, ' ').trim();
+  // Display keeps the name's own script. `normalizeText` folds confusables,
+  // which is right for the key and wrong for a label: 'Пепе' would be stored
+  // as the mixed-script 'Пeпe'.
+  const displayName = name.normalize('NFKC').replace(QUALIFIER, ' ').replace(/\s+/g, ' ').trim();
   return { id, displayName: displayName === '' ? name.trim() : displayName };
 }
