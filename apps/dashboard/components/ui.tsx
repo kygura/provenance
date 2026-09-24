@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import type { RecycleVerdict, RiskSeverity, ScoreTier } from '@provenance/core';
+import type { AnchorVerdict, RecycleVerdict, RiskSeverity, ScoreTier } from '@provenance/core';
 import {
+  anchorToken,
   chainLabel,
   runStatusToken,
   severityToken,
@@ -103,6 +104,10 @@ export function TierChip({ tier }: { tier?: ScoreTier }) {
 
 export function VerdictChip({ verdict }: { verdict?: RecycleVerdict }) {
   return <Chip token={verdictToken(verdict)} />;
+}
+
+export function AnchorChip({ verdict }: { verdict?: AnchorVerdict }) {
+  return <Chip token={anchorToken(verdict)} />;
 }
 
 export function SeverityChip({ severity }: { severity?: RiskSeverity }) {

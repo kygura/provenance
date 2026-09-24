@@ -3,10 +3,13 @@ import type { ChainAnalysis, HolderRow } from '@provenance/core';
 import {
   DEFAULT_WEIGHTS,
   EXTREME_CONCENTRATION_PCT,
+  FORCED_PENALTY,
   SINGLE_HOLDER_DOMINANCE_PCT,
   assertWeights,
   assessRisk,
+  scoreToken,
 } from './scoring';
+import { NOW, strongInput } from './test-support';
 
 function chain(overrides: Partial<ChainAnalysis> = {}): ChainAnalysis {
   return {
@@ -115,5 +118,49 @@ describe('assessRisk structural flags', () => {
       }),
     );
     expect(risk.criticalFlags.map((flag) => flag.code)).toEqual(['mint-authority-active']);
+  });
+});
+
+describe('anchor verdict', () => {
+  const anchor = {
+    type: 'none' as const,
+    subject: '',
+    summary: 'Earliest mentions are the deployer’s own launch posts.',
+  };
+
+  test('a confidently forced meme is penalised and capped at C, whatever its lineage says', () => {
+    const input = strongInput();
+    const clean = scoreToken(input, { now: NOW });
+    const forced = scoreToken(
+      { ...input, provenance: { ...input.provenance!, anchor: { ...anchor, verdict: 'forced', confidence: 'medium' } } },
+      { now: NOW },
+    );
+    expect(forced.total).toBeCloseTo(clean.total - FORCED_PENALTY, 1);
+    expect(['C', 'D']).toContain(forced.tier);
+    expect(forced.penalties.some((p) => p.reason.startsWith('Forced meme'))).toBe(true);
+  });
+
+  test('a low-confidence forced verdict only caps at B; anchored and unclear change nothing', () => {
+    const input = strongInput();
+    const clean = scoreToken(input, { now: NOW });
+    const weak = scoreToken(
+      { ...input, provenance: { ...input.provenance!, anchor: { ...anchor, verdict: 'forced', confidence: 'low' } } },
+      { now: NOW },
+    );
+    expect(weak.total).toBe(clean.total);
+    expect(['B', 'C', 'D']).toContain(weak.tier);
+    for (const verdict of ['anchored', 'unclear'] as const) {
+      const other = scoreToken(
+        {
+          ...input,
+          provenance: {
+            ...input.provenance!,
+            anchor: { ...anchor, verdict, type: 'historical-meme', subject: 'x', confidence: 'high' },
+          },
+        },
+        { now: NOW },
+      );
+      expect(other).toEqual(clean);
+    }
   });
 });

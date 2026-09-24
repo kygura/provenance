@@ -10,6 +10,7 @@ export {
   createScorer,
   DEFAULT_WEIGHTS,
   EXTREME_CONCENTRATION_PCT,
+  FORCED_PENALTY,
   LIQUIDITY_DEEP_USD,
   LIQUIDITY_FLOOR_USD,
   LOW_CONFIDENCE_THRESHOLD,
@@ -39,6 +40,7 @@ export {
 // Alert bodies
 export {
   renderAlertBody,
+  renderAnchorLine,
   renderComponents,
   renderMarketLines,
   renderPriorCycles,
@@ -71,7 +73,7 @@ export {
 } from './rules';
 
 // Launch lane
-export { gateLaunchChain, gateLaunchMarket, launchCataloguedAlert, launchExpressedAlert } from './launches';
+export { gateLaunchChain, gateLaunchMarket, launchAnchoredAlert, launchExpressedAlert } from './launches';
 
 // Channels
 export {

@@ -564,6 +564,9 @@ export function capTier(tier: ScoreTier, ceiling: ScoreTier | undefined): ScoreT
   return TIER_ORDER.indexOf(tier) >= TIER_ORDER.indexOf(ceiling) ? tier : ceiling;
 }
 
+/** Points off a meme judged `forced` at medium or high confidence. */
+export const FORCED_PENALTY = 25;
+
 /** Below this model confidence the provenance-derived components are scaled down. */
 export const LOW_CONFIDENCE_THRESHOLD = 0.45;
 
@@ -658,6 +661,19 @@ export function scoreToken(input: ScoringInput, options: ScoreOptions = {}): Pro
       points,
     });
     ceiling = capTier(ceiling ?? 'S', 'A');
+  }
+
+  // The anchor verdict is the question the project exists to answer, so a
+  // `forced` meme is capped however well its lineage fields happen to score:
+  // a manufactured meme with invented "prior cycles" must not read as tier A.
+  const anchor = input.provenance?.anchor;
+  if (anchor?.verdict === 'forced') {
+    if (anchor.confidence === 'low') {
+      ceiling = capTier(ceiling ?? 'S', 'B');
+    } else {
+      penalties.push({ reason: `Forced meme: ${anchor.summary || 'no independent anchor found'}`, points: FORCED_PENALTY });
+      ceiling = capTier(ceiling ?? 'S', 'C');
+    }
   }
 
   // Low model confidence scales the provenance-derived components down rather than

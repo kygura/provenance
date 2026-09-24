@@ -21,6 +21,7 @@ import {
   type ProvenanceReport,
   type ProvenanceScore,
   type RiskFlag,
+  type Anchor,
 } from '@provenance/core';
 
 const SEVERITY_MARK: Record<RiskFlag['severity'], string> = {
@@ -118,10 +119,33 @@ export function renderComponents(score: ProvenanceScore): string {
   )}`;
 }
 
+/**
+ * The headline of every alert: anchored, forced or unclear, what the anchor is,
+ * and whether it predates the token. Everything else in an alert supports it.
+ */
+export function renderAnchorLine(anchor: Anchor | undefined): string[] {
+  if (!anchor) return ['_Anchor_: not judged (report predates the anchor verdict).'];
+  const bits: string[] = [anchor.type === 'none' ? 'no anchor' : anchor.type.replace('-', ' ')];
+  if (anchor.anchorDate) bits.push(`dated ${anchor.anchorDate}`);
+  if (anchor.precedesLaunch === true) bits.push('before launch');
+  else if (anchor.precedesLaunch === false) bits.push('AFTER launch');
+  const subject = anchor.subject ? ` — ${anchor.subject}` : '';
+  const lines = [
+    `_Anchor_: **${anchor.verdict.toUpperCase()}**${subject} (${bits.join(', ')}; ${anchor.confidence} confidence)`,
+  ];
+  if (anchor.summary) lines.push(truncate(anchor.summary, 300));
+  if (anchor.earliestSource) {
+    const source = anchor.earliestSource;
+    lines.push(`_Earliest source_: ${source.title}${source.date ? ` (${source.date})` : ''}${source.url ? ` ${source.url}` : ''}`);
+  }
+  return lines;
+}
+
 function renderProvenanceLines(report: ProvenanceReport | undefined): string[] {
   if (!report) return ['_Provenance_: no report — the meme behind this token was not researched.'];
   const origin = report.originYear === undefined ? 'origin year unknown' : `origin ${report.originYear}`;
   return [
+    ...renderAnchorLine(report.anchor),
     `_Meme_: **${report.memeName}** (${origin}) · cluster \`${report.narrativeCluster}\``,
     `_Verdict_: **${report.recycleVerdict}** · generation ${report.recycleGeneration} · durability ${Math.round(
       report.memeticDurability,

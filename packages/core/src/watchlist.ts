@@ -1,36 +1,31 @@
 import type { Chain } from './chains';
+import type { Anchor } from './provenance';
 
 /**
- * The supply-side half of the system.
+ * The launch lane's record of every token it judged.
  *
- * Trending lists see a token once people are already buying it. The launch lane
- * sees it when its first pool is created, gates it on contract and liquidity
- * safety, and asks one cheap question — does the name point at something that
- * exists outside crypto? — before it is catalogued here. The two perspectives
- * meet when a catalogued token later shows up on a trending list: that
- * transition is recorded, with the hours it took, instead of being inferred.
+ * The point is to decide early. A token is judged when its first pool appears,
+ * not after it trends: the gate checks the contract and liquidity, the anchor
+ * check asks whether the meme has a real anchor or is being pushed, and an
+ * anchored token gets the full provenance research on the spot. Trending lists
+ * then serve as the outcome, recorded against the verdict that came first.
  *
- * - active:    catalogued from a launch, not yet seen trending
- * - expressed: a catalogued token that later appeared on a trending list
- * - dormant:   catalogued, never expressed within `dormantAfterHours`
+ * - active:    anchored at launch, not yet seen trending
+ * - expressed: judged at launch, later seen on a trending list
+ * - dormant:   anchored, never expressed within `dormantAfterHours`
+ * - dismissed: judged forced or unclear at launch. Kept so it is not paid
+ *              for again every run, and so a forced meme that trends anyway
+ *              is on record as exactly that.
  */
-export type WatchStatus = 'active' | 'expressed' | 'dormant';
-
-export type ReferentConfidence = 'high' | 'medium' | 'low';
+export type WatchStatus = 'active' | 'expressed' | 'dormant' | 'dismissed';
 
 /**
- * The launch lane's cultural gate: does this ticker/name refer to something
- * with mainstream recognition outside crypto? Deliberately narrower than a
- * `ProvenanceReport` — it answers one question for the price of a few searches,
- * and the full lineage research waits until the token earns it by trending.
+ * The launch lane's fast answer to the anchor question: the triage model, a
+ * small search budget, the `Anchor` block and nothing else. The full
+ * `ProvenanceReport` asks the same question in depth right after, when the
+ * fast answer is `anchored` — at launch, not once the token trends.
  */
-export interface ReferentCheck {
-  validated: boolean;
-  /** What the name actually refers to, in a few words. */
-  referent: string;
-  /** One or two sentences on staying power, or why it fails. */
-  summary: string;
-  confidence: ReferentConfidence;
+export interface AnchorCheck extends Anchor {
   model: string;
   checkedAt: string;
   /** URLs the model consulted, when it searched. */
@@ -63,13 +58,17 @@ export interface WatchEntry {
   expressedOn?: string[];
   /** Liquidity at the moment of cataloguing, for later comparison. */
   liquidityUsdAtCatalog?: number;
-  referent: ReferentCheck;
+  /** The fast verdict at launch. The full report, when run, is in `provenance`. */
+  anchor: AnchorCheck;
+  /** True once the full provenance research ran for this entry. */
+  researched?: boolean;
   gate: LaunchGateResult;
   updatedAt: string;
 }
 
 export interface WatchQuery {
   status?: WatchStatus;
+  verdict?: Anchor['verdict'];
   chain?: string;
   limit?: number;
 }

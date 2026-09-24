@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { loadConfig, type ChainAnalysis, type WatchEntry } from '@provenance/core';
-import { gateLaunchChain, gateLaunchMarket, launchCataloguedAlert, launchExpressedAlert } from './launches';
+import { gateLaunchChain, gateLaunchMarket, launchAnchoredAlert, launchExpressedAlert } from './launches';
 import { makeSnapshot } from './test-support';
 
 const config = loadConfig({}).launches;
@@ -111,9 +111,12 @@ describe('launch alerts', () => {
     leadHours: 36,
     expressedOn: ['dexscreener', 'geckoterminal'],
     liquidityUsdAtCatalog: 52_000,
-    referent: {
-      validated: true,
-      referent: 'DreamWorks film character',
+    anchor: {
+      verdict: 'anchored',
+      type: 'cultural-artifact',
+      subject: 'DreamWorks film character',
+      anchorDate: '2001-04-22',
+      precedesLaunch: true,
       summary: 'Recognised since 2001.',
       confidence: 'high',
       model: 'test',
@@ -124,17 +127,21 @@ describe('launch alerts', () => {
     updatedAt: '2026-09-21T12:00:00.000Z',
   };
 
-  test('ids are stable per run, token and rule', () => {
-    const a = launchCataloguedAlert('run-1', entry, evmSnapshot(52_000), cleanChain());
-    const b = launchCataloguedAlert('run-1', entry, evmSnapshot(52_000), cleanChain());
+  test('ids are stable per run, token and rule, and the verdict leads', () => {
+    const a = launchAnchoredAlert('run-1', entry, evmSnapshot(52_000), cleanChain());
+    const b = launchAnchoredAlert('run-1', entry, evmSnapshot(52_000), cleanChain());
     expect(a.id).toBe(b.id);
-    expect(a.rule).toBe('launch-catalogued');
+    expect(a.rule).toBe('launch-anchored');
+    expect(a.severity).toBe('critical');
+    expect(a.body.split('\n')[1]).toContain('ANCHORED — DreamWorks film character');
+    expect(a.body).toContain('before launch');
     expect(a.markdown).toContain('etherscan.io/token/');
+    expect(a.payload.researched).toBe(false);
   });
 
   test('the expressed alert states the lead time and where it trended', () => {
     const alert = launchExpressedAlert('run-2', entry, evmSnapshot(180_000));
-    expect(alert.title).toContain('36.0h');
+    expect(alert.title).toBe('Trending 36.0h after an anchored verdict: $SHREK');
     expect(alert.body).toContain('dexscreener, geckoterminal');
     expect(alert.body).not.toContain('**');
     expect(alert.payload.leadHours).toBe(36);

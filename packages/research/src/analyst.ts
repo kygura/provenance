@@ -7,6 +7,8 @@
  * the schema-validated report. Forcing both jobs into one call makes the
  * research worse, because the model starts optimising for filling fields
  * halfway through the search — and the lineage is the field that suffers.
+ * The anchor verdict leads the report; whether its date precedes the launch is
+ * decided here in code (`resolveAnchor`), never taken from the model.
  *
  * Search happens server-side. The alternative this replaced was scraping
  * DuckDuckGo and Know Your Meme HTML, which breaks whenever either site
@@ -26,9 +28,14 @@ import {
   type ResearchContext,
   type TokenSnapshot,
 } from '@provenance/core';
+import { resolveAnchor } from './anchor';
 import { CostTracker, usageFromResponse } from './cost';
 import { PROMPT_VERSION, SYSTEM_PROMPT, buildExtractionPrompt, buildResearchPrompt } from './prompt';
 import { PROVENANCE_TOOL_NAME, buildDegradedReport, provenanceTool, validateReportDraft } from './schema';
+import { harvest, searchErrorCode } from './search';
+
+// Re-exported so existing importers keep one entry point for the analyst.
+export { harvest, searchErrorCode, type Harvest } from './search';
 
 /**
  * Dynamic-filtering variant of the web search server tool. Requires a recent
@@ -54,60 +61,8 @@ export interface ResearchNotes {
   searchesRun: number;
 }
 
-interface Harvest {
-  texts: string[];
-  citations: string[];
-  searches: number;
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * Pull prose, source URLs and search count out of one response.
- *
- * Server-tool errors arrive as a 200 with an error object where the result list
- * would be, so the content of a `web_search_tool_result` is checked before it
- * is iterated — treating it as an array throws on exactly the responses that
- * most need reporting.
- */
-export function harvest(message: Anthropic.Message): Harvest {
-  const texts: string[] = [];
-  const citations: string[] = [];
-  let searches = 0;
-
-  for (const block of message.content) {
-    if (block.type === 'text') {
-      texts.push(block.text);
-      for (const citation of block.citations ?? []) {
-        const url = (citation as { url?: string }).url;
-        if (url) citations.push(url);
-      }
-    } else if (block.type === 'web_search_tool_result') {
-      searches += 1;
-      const content = block.content as unknown;
-      if (!Array.isArray(content)) continue;
-      for (const item of content) {
-        const url = (item as { url?: string }).url;
-        if (url) citations.push(url);
-      }
-    }
-  }
-
-  return { texts, citations, searches };
-}
-
-/** Error code on a `web_search_tool_result` whose search did not run. */
-export function searchErrorCode(message: Anthropic.Message): string | undefined {
-  for (const block of message.content) {
-    if (block.type !== 'web_search_tool_result') continue;
-    const content = block.content as unknown;
-    if (Array.isArray(content)) continue;
-    const code = (content as { error_code?: string } | undefined)?.error_code;
-    if (code) return code;
-  }
-  return undefined;
 }
 
 /**
@@ -340,6 +295,9 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
 
         return {
           ...outcome.draft,
+          // The order-of-events test runs in code, against the measured pool
+          // time; whatever the model thought about it is not consulted.
+          anchor: resolveAnchor(outcome.draft.anchor, snapshot.metrics.poolCreatedAt, found.citations.length),
           tokenId: snapshot.tokenId,
           evidence: mergeEvidence(outcome.draft.evidence, evidence),
           confidence: clamp(outcome.draft.confidence * (grounded ? 1 : 0.7) - penalty, 0, 1),

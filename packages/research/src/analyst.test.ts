@@ -20,7 +20,9 @@ function app(overrides: Partial<AppConfig['llm']> = {}): AppConfig {
   return { ...base, anthropicApiKey: 'sk-test', llm: { ...base.llm, ...overrides } };
 }
 
-function snapshot(): TokenSnapshot {
+const LAUNCH = '2026-09-01T12:00:00.000Z';
+
+function snapshot(metrics: TokenSnapshot['metrics'] = {}): TokenSnapshot {
   return {
     tokenId: 'solana:abc',
     chain: 'solana',
@@ -28,7 +30,7 @@ function snapshot(): TokenSnapshot {
     symbol: 'NYAN',
     name: 'Nyan Cat',
     socials: {},
-    metrics: { liquidityUsd: 100_000, volume24hUsd: 400_000 },
+    metrics: { liquidityUsd: 100_000, volume24hUsd: 400_000, poolCreatedAt: LAUNCH, ...metrics },
     pairs: [],
     appearances: [],
     bestRank: 1,
@@ -58,6 +60,15 @@ function textMessage(text: string, extra: Partial<Anthropic.Message> = {}): Anth
 /** A well-formed tool call the schema validator accepts without repairs. */
 function goodDraft(): Record<string, unknown> {
   return {
+    anchor: {
+      verdict: 'anchored',
+      type: 'historical-meme',
+      subject: 'Nyan Cat animation',
+      anchorDate: '2011-04-02',
+      earliestSource: { title: 'Nyan Cat - YouTube', url: 'https://example.invalid/nyan', date: '2011-04-02' },
+      summary: 'A 2011 animation that spread on YouTube.',
+      confidence: 'high',
+    },
     memeName: 'Nyan Cat',
     narrativeCluster: 'cat',
     originYear: 2011,
@@ -212,6 +223,17 @@ describe('mergeEvidence', () => {
 
 // --- the two-phase run ------------------------------------------------------
 
+/** A research turn that consulted one source. */
+function citedMessage(): Anthropic.Message {
+  return {
+    ...textMessage('notes'),
+    content: [
+      { type: 'text', text: 'notes', citations: [] },
+      { type: 'web_search_tool_result', content: [{ url: 'https://knowyourmeme.com/nyan' }] },
+    ],
+  } as unknown as Anthropic.Message;
+}
+
 describe('WebSearchAnalyst', () => {
   test('researches first with the search tool, then extracts with a forced tool call', async () => {
     const { subject, recorded } = analyst([textMessage('Nyan Cat dates to 2011.')], [toolMessage(goodDraft())]);
@@ -232,6 +254,56 @@ describe('WebSearchAnalyst', () => {
     expect(report.memeName).toBe('Nyan Cat');
     expect(report.recycleVerdict).toBe('revival');
     expect(report.originYear).toBe(2011);
+  });
+
+  test('leads with an anchor whose launch order is computed from the snapshot', async () => {
+    // The model claims the anchor came after the launch; the dates say otherwise.
+    const draft = { ...goodDraft(), anchor: { ...(goodDraft().anchor as object), precedesLaunch: false } };
+    const { subject } = analyst([citedMessage()], [toolMessage(draft)]);
+    const report = await subject.research(snapshot(), undefined, [], ctx);
+
+    expect(report.anchor?.verdict).toBe('anchored');
+    expect(report.anchor?.precedesLaunch).toBe(true);
+    expect(report.anchor?.confidence).toBe('high');
+    expect(report.anchor?.earliestSource?.date).toBe('2011-04-02');
+  });
+
+  test('an anchor dated after the pool opened is not an anchor for this token', async () => {
+    const late = { ...goodDraft(), anchor: { ...(goodDraft().anchor as object), anchorDate: '2026-09-10' } };
+    const { subject } = analyst([citedMessage()], [toolMessage(late)]);
+    const report = await subject.research(snapshot(), undefined, [], ctx);
+
+    expect(report.anchor?.precedesLaunch).toBe(false);
+    expect(report.anchor?.verdict).toBe('unclear');
+
+    // Same draft, pool opened later: now the anchor precedes it.
+    const again = analyst([citedMessage()], [toolMessage(late)]);
+    const later = await again.subject.research(snapshot({ poolCreatedAt: '2026-09-20T00:00:00.000Z' }), undefined, [], ctx);
+    expect(later.anchor?.precedesLaunch).toBe(true);
+    expect(later.anchor?.verdict).toBe('anchored');
+  });
+
+  test('an unknown launch time leaves precedesLaunch undefined', async () => {
+    const { subject } = analyst([citedMessage()], [toolMessage(goodDraft())]);
+    const report = await subject.research(snapshot({ poolCreatedAt: undefined }), undefined, [], ctx);
+    expect(report.anchor?.precedesLaunch).toBeUndefined();
+    expect(report.anchor?.verdict).toBe('anchored');
+  });
+
+  test('a high-confidence anchor with no citations drops to medium', async () => {
+    const { subject } = analyst([textMessage('notes')], [toolMessage(goodDraft())]);
+    const report = await subject.research(snapshot(), undefined, [], ctx);
+    expect(report.anchor?.confidence).toBe('medium');
+  });
+
+  test('a report with no anchor is repaired to unclear, not rejected', async () => {
+    const { anchor: _dropped, ...noAnchor } = goodDraft();
+    const { subject } = analyst([citedMessage()], [toolMessage(noAnchor)]);
+    const report = await subject.research(snapshot(), undefined, [], ctx);
+    expect(report.memeName).toBe('Nyan Cat');
+    expect(report.anchor?.verdict).toBe('unclear');
+    expect(report.anchor?.confidence).toBe('low');
+    expect(report.confidence).toBeLessThanOrEqual(0.45);
   });
 
   test('caches the system prompt on both calls', () => {
@@ -317,6 +389,8 @@ describe('WebSearchAnalyst', () => {
     expect(report.recycleVerdict).toBe('unclear');
     expect(report.confidence).toBeLessThanOrEqual(0.2);
     expect(report.risks.join(' ')).toContain('503 upstream');
+    expect(report.anchor).toMatchObject({ verdict: 'unclear', type: 'none', confidence: 'low' });
+    expect(report.anchor?.summary).toContain('503 upstream');
   });
 
   test('degrades when the research pass produces no notes at all', async () => {
@@ -337,6 +411,7 @@ describe('WebSearchAnalyst', () => {
 
     expect(recorded.create).toHaveLength(2);
     expect(report.recycleVerdict).toBe('unclear');
+    expect(report.anchor?.verdict).toBe('unclear');
   });
 
   test('a second extraction attempt can still succeed', async () => {

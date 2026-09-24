@@ -1,8 +1,16 @@
 {
-  "note": "Deterministic offline archetypes used by the stub researcher when no ANTHROPIC_API_KEY is set or pipeline.useFixtures is true. {{MEME}} is replaced with the derived meme subject, {{TICKER}} with the token symbol. These are plausible shapes, not researched claims - confidence is deliberately capped low.",
+  "note": "Deterministic offline archetypes used by the stub researcher when no ANTHROPIC_API_KEY is set or pipeline.useFixtures is true. {{MEME}} is replaced with the derived meme subject, {{TICKER}} with the token symbol. These are plausible shapes, not researched claims - confidence is deliberately capped low, and the stub forces every anchor to low confidence with an 'Offline fixture output, not researched' summary.",
   "archetypes": [
     {
       "id": "proven-revival",
+      "anchor": {
+        "verdict": "anchored",
+        "type": "historical-meme",
+        "subject": "{{MEME}}",
+        "anchorDate": "2013",
+        "summary": "{{MEME}} is assumed to be an older internet meme that predates {{TICKER}}. No source was consulted, so neither the anchor nor its date is established.",
+        "confidence": "low"
+      },
       "narrativeCluster": "nostalgia",
       "originYear": 2013,
       "originSummary": "{{MEME}} entered internet culture around 2013 and had a long first life on image boards and early social platforms before fading. Offline fixture mode cannot verify this: no live sources were consulted, so the dating below is illustrative rather than researched.",
@@ -29,6 +37,13 @@
     },
     {
       "id": "novel-or-first-tokenisation",
+      "anchor": {
+        "verdict": "unclear",
+        "type": "none",
+        "subject": "",
+        "summary": "nothing available offline ties {{MEME}} to anything that existed before {{TICKER}}, and nothing shows it was forced either.",
+        "confidence": "low"
+      },
       "narrativeCluster": "unclassified",
       "originSummary": "No offline evidence ties {{MEME}} to an earlier cultural moment. It may be genuinely new, or it may be an older meme this fixture cannot see. Treat the lineage as unresolved.",
       "lineage": [
@@ -50,6 +65,13 @@
     },
     {
       "id": "live-meme-copycat",
+      "anchor": {
+        "verdict": "unclear",
+        "type": "none",
+        "subject": "",
+        "summary": "{{MEME}} may ride a live meme, but offline mode cannot tell whether that meme predates {{TICKER}} or was made for it.",
+        "confidence": "low"
+      },
       "narrativeCluster": "derivative",
       "originSummary": "{{MEME}} appears to ride a narrative that is currently live rather than one being revived. Offline mode cannot distinguish a differentiated derivative from a pure copycat, so this is recorded as low confidence.",
       "lineage": [

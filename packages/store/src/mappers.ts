@@ -24,6 +24,10 @@ import type {
   SocialLinks,
   TokenSnapshot,
   TrendingEntry,
+  AnchorCheck,
+  AnchorConfidence,
+  AnchorType,
+  AnchorVerdict,
   WatchEntry,
   WatchStatus,
 } from '@provenance/core';
@@ -325,7 +329,7 @@ export function rowToProvenance(row: SqlRow, logger: Logger = silentLogger): Pro
 export function provenanceRowArgs(
   runId: string,
   report: ProvenanceReport,
-): [string, string, string, string, string, string, string, number, number, string, string, string] {
+): [string, string, string, string, string, string, string, number, number, string, string, string, string | null] {
   return [
     snapshotId(runId, report.tokenId),
     runId,
@@ -339,6 +343,7 @@ export function provenanceRowArgs(
     report.model,
     report.promptVersion,
     JSON.stringify(report),
+    report.anchor?.verdict ?? null,
   ];
 }
 
@@ -435,17 +440,39 @@ export function alertRowArgs(
 // watchlist
 // ---------------------------------------------------------------------------
 
-const WATCH_STATUSES: readonly WatchStatus[] = ['active', 'expressed', 'dormant'];
+const WATCH_STATUSES: readonly WatchStatus[] = ['active', 'expressed', 'dormant', 'dismissed'];
 export const asWatchStatus = (v: unknown): WatchStatus => oneOf(v, WATCH_STATUSES, 'active');
 
+const ANCHOR_VERDICTS: readonly AnchorVerdict[] = ['anchored', 'forced', 'unclear'];
+const ANCHOR_TYPES: readonly AnchorType[] = ['historical-meme', 'cultural-artifact', 'inciting-event', 'none'];
+const ANCHOR_CONFIDENCE: readonly AnchorConfidence[] = ['high', 'medium', 'low'];
+
 /**
- * The JSON blob carries the referent check and gate, which have no columns of
- * their own; the promoted columns win for everything the listing filters on.
+ * The JSON blob carries the full anchor check and gate; the promoted columns
+ * win for everything a listing filters on, and rebuild a minimal anchor when
+ * the blob is unreadable.
  */
 export function rowToWatch(row: SqlRow, logger: Logger = silentLogger): WatchEntry {
   const blob = parseObject<Partial<WatchEntry>>(row.entry_json, 'watchlist.entry_json', {}, logger);
   const tokenId = text(row.token_id);
   const leadHours = asNumber(row.lead_hours);
+  const fallbackAnchor: AnchorCheck = {
+    verdict: 'unclear',
+    type: 'none',
+    subject: text(row.referent),
+    summary: '',
+    confidence: 'low',
+    model: 'unknown',
+    checkedAt: text(row.first_seen_at),
+    citations: [],
+  };
+  const anchor: AnchorCheck = { ...fallbackAnchor, ...(blob.anchor ?? {}) };
+  anchor.verdict = oneOf(row.anchor_verdict, ANCHOR_VERDICTS, anchor.verdict);
+  anchor.type = oneOf(row.anchor_type, ANCHOR_TYPES, anchor.type);
+  anchor.confidence = oneOf(row.referent_confidence, ANCHOR_CONFIDENCE, anchor.confidence);
+  const anchorDate = asText(row.anchor_date);
+  if (anchorDate) anchor.anchorDate = anchorDate;
+
   const entry: WatchEntry = {
     tokenId,
     chain: normalizeChain(asText(row.chain) ?? parseTokenId(tokenId).chain),
@@ -454,15 +481,7 @@ export function rowToWatch(row: SqlRow, logger: Logger = silentLogger): WatchEnt
     name: text(row.name, blob.name ?? ''),
     status: asWatchStatus(row.status),
     firstSeenAt: text(row.first_seen_at, blob.firstSeenAt ?? ''),
-    referent: blob.referent ?? {
-      validated: false,
-      referent: text(row.referent),
-      summary: '',
-      confidence: 'low',
-      model: 'unknown',
-      checkedAt: text(row.first_seen_at),
-      citations: [],
-    },
+    anchor,
     gate: blob.gate ?? { passed: true, reasons: [] },
     updatedAt: text(row.updated_at, blob.updatedAt ?? ''),
   };
@@ -473,12 +492,16 @@ export function rowToWatch(row: SqlRow, logger: Logger = silentLogger): WatchEnt
   if (leadHours !== undefined) entry.leadHours = leadHours;
   if (blob.expressedOn) entry.expressedOn = blob.expressedOn;
   if (blob.liquidityUsdAtCatalog !== undefined) entry.liquidityUsdAtCatalog = blob.liquidityUsdAtCatalog;
+  if (blob.researched !== undefined) entry.researched = blob.researched;
   return entry;
 }
 
-export function watchRowArgs(
-  entry: WatchEntry,
-): [string, string, string, string, string, string, string, string | null, string | null, number | null, string, string, string, string] {
+/**
+ * The migration-2 `referent` / `referent_confidence` columns now hold the
+ * anchor subject and confidence; renaming them would mean rebuilding the
+ * table on libSQL for no behavioural gain.
+ */
+export function watchRowArgs(entry: WatchEntry): (string | number | null)[] {
   return [
     entry.tokenId,
     entry.chain,
@@ -490,9 +513,12 @@ export function watchRowArgs(
     entry.launchedAt ?? null,
     entry.expressedAt ?? null,
     entry.leadHours ?? null,
-    entry.referent.referent,
-    entry.referent.confidence,
+    entry.anchor.subject,
+    entry.anchor.confidence,
     entry.updatedAt,
     JSON.stringify(entry),
+    entry.anchor.verdict,
+    entry.anchor.type,
+    entry.anchor.anchorDate ?? null,
   ];
 }

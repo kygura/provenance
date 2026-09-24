@@ -14,6 +14,7 @@ import {
   type ProvenanceReport,
   type TokenDossier,
   type TokenSnapshot,
+  type WatchEntry,
   createLogger,
   loadConfig,
   nowIso,
@@ -56,8 +57,8 @@ usage: bun run apps/worker/src/cli.ts <command> [options]
 commands:
   run                      discover, analyse, research, score, alert
   discover                 discovery only; print the merged, triaged table
-  launches                 launch lane only: new pools and their market-gate verdicts
-  watchlist                tokens caught at launch, and whether they went on to trend
+  launches                 launch lane only: new pools and their market-gate results
+  watchlist                every launch judged: anchored/forced/unclear, and what happened next
   analyze <chain:address>  full treatment of one token, printed as a dossier
   migrate                  apply database migrations
   seed                     load demo data into the database
@@ -73,7 +74,9 @@ options:
   --sources dexscreener,…  restrict to these trending sources
   --no-llm                 skip the research stage entirely
   --run <id>               report: which run (default: the latest)
-  --status active|expressed|dormant   watchlist: filter by status
+  --status active|expressed|dormant|dismissed   watchlist: filter by status
+  --verdict anchored|forced|unclear            watchlist: filter by verdict
+  --lane launches          run: the launch lane only (the 30-minute cadence)
   --format table|json|markdown
   --verbose, -v            debug logging
   --no-color               disable ANSI colour (also honoured: NO_COLOR)
@@ -164,14 +167,19 @@ async function cmdLaunches(app: AppConfig, logger: Logger, deps: PipelineDeps, s
 
 async function cmdWatchlist(app: AppConfig, parsed: ParsedArgs, deps: PipelineDeps, style: Style): Promise<number> {
   const status = flagString(parsed.flags, 'status');
-  if (status !== undefined && !['active', 'expressed', 'dormant'].includes(status)) {
-    return fail(style, [`--status must be active, expressed or dormant (got ${status})`]);
+  if (status !== undefined && !['active', 'expressed', 'dormant', 'dismissed'].includes(status)) {
+    return fail(style, [`--status must be active, expressed, dormant or dismissed (got ${status})`]);
+  }
+  const verdict = flagString(parsed.flags, 'verdict');
+  if (verdict !== undefined && !['anchored', 'forced', 'unclear'].includes(verdict)) {
+    return fail(style, [`--verdict must be anchored, forced or unclear (got ${verdict})`]);
   }
   const store = deps.createStore(app);
   try {
     await store.migrate();
     const entries = await store.listWatch({
-      ...(status ? { status: status as 'active' | 'expressed' | 'dormant' } : {}),
+      ...(status ? { status: status as WatchEntry['status'] } : {}),
+      ...(verdict ? { verdict: verdict as WatchEntry['anchor']['verdict'] } : {}),
       limit: 200,
     });
     if (entries.length === 0) {
@@ -179,12 +187,15 @@ async function cmdWatchlist(app: AppConfig, parsed: ParsedArgs, deps: PipelineDe
       return EXIT_OK;
     }
     print(watchTable(entries, style));
-    const expressed = entries.filter((entry) => entry.leadHours !== undefined);
-    if (expressed.length > 0) {
-      const leads = expressed.map((entry) => entry.leadHours ?? 0).sort((a, b) => a - b);
-      const median = leads[Math.floor(leads.length / 2)] ?? 0;
-      print(style.dim(`\n${expressed.length}/${entries.length} expressed · median lead ${median.toFixed(1)}h`));
-    }
+    // The verdict's track record: how often each call went on to trend.
+    const summary = (['anchored', 'forced', 'unclear'] as const)
+      .map((v) => {
+        const judged = entries.filter((entry) => entry.anchor.verdict === v);
+        const trended = judged.filter((entry) => entry.expressedAt !== undefined).length;
+        return judged.length > 0 ? `${v} ${trended}/${judged.length} trended` : undefined;
+      })
+      .filter((line): line is string => line !== undefined);
+    if (summary.length > 0) print(style.dim(`\n${summary.join(' · ')}`));
   } finally {
     await store.close().catch(() => undefined);
   }

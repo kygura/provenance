@@ -34,7 +34,7 @@ import {
   nowIso,
 } from '@provenance/core';
 import { type PipelineDeps, loadRuntimeDeps } from './deps';
-import { type LlmBudget, emptyLaunchStats, reconcileWatchlist, runLaunchLane, sweepDormant } from './launch-lane';
+import { BUDGET_SOURCE, type LlmBudget, emptyLaunchStats, reconcileWatchlist, runLaunchLane, spend, sweepDormant } from './launch-lane';
 
 export interface RunOptions {
   /** `--no-llm`: run discovery, chain analysis and scoring, skip the model. */
@@ -48,8 +48,8 @@ export interface RunOptions {
   runId?: string;
 }
 
-/** Marker recorded in `stats.sourceErrors` when the LLM budget cut a run short. */
-export const BUDGET_SOURCE = 'llm-budget';
+/** Re-exported: callers and tests already import it from here. */
+export { BUDGET_SOURCE };
 
 type TokenStatus = 'analysed' | 'reused' | 'failed';
 
@@ -136,6 +136,53 @@ export async function runPipeline(
       log.error('watchlist reconciliation failed', { error: errorMessage(error) });
     }
 
+    const budget: LlmBudget = {
+      spent: 0,
+      limit: app.llm.maxCostUsdPerRun,
+      exhausted: app.llm.maxCostUsdPerRun <= 0,
+    };
+    if (budget.exhausted && !options.skipLlm) {
+      log.warn('LLM budget is zero; running market-only', {
+        maxCostUsdPerRun: app.llm.maxCostUsdPerRun,
+      });
+    }
+
+    const analyzerCtx: AnalyzerContext = { app, logger: log.child('chain') };
+    const researchCtx: ResearchContext = {
+      app,
+      logger: log.child('research'),
+      cacheGet: (key) => store.getCachedEvidence(key, app.pipeline.reanalyseAfterHours),
+      cachePut: (key, url, content) => store.putCachedEvidence(key, url, content),
+    };
+
+    // ---- Launch lane: first, so the verdict at launch gets the budget first ---
+    // The point of the project is judging a meme before its token trends, not
+    // after; trending research only gets what the launch lane leaves.
+    if (launches.length > 0) {
+      try {
+        laneAlerts.push(
+          ...(await runLaunchLane(launches, {
+            runId: id,
+            app,
+            store,
+            deps: resolved,
+            log: log.child('launches'),
+            budget,
+            stats: launchStats,
+            sourceErrors: stats.sourceErrors,
+            skipLlm: options.skipLlm === true,
+            concurrency,
+            analyzerCtx,
+            researchCtx,
+          })),
+        );
+      } catch (error) {
+        stats.sourceErrors.push({ source: 'launches', error: errorMessage(error) });
+        log.error('launch lane failed', { error: errorMessage(error) });
+      }
+      stats.llmCostUsd = Number(budget.spent.toFixed(6));
+    }
+
     const filtered = resolved.filterSnapshots(snapshots, app.pipeline);
     stats.afterFilter = filtered.kept.length;
     for (const drop of filtered.dropped) {
@@ -159,25 +206,6 @@ export async function runPipeline(
     // ---- Stage 3-5: per-token treatment, bounded and budgeted ----------------
     let researcher: ProvenanceResearcher | undefined;
     let researcherFailed = false;
-    const budget: LlmBudget = {
-      spent: 0,
-      limit: app.llm.maxCostUsdPerRun,
-      exhausted: app.llm.maxCostUsdPerRun <= 0,
-    };
-    if (budget.exhausted && !options.skipLlm) {
-      log.warn('LLM budget is zero; running market-only', {
-        maxCostUsdPerRun: app.llm.maxCostUsdPerRun,
-      });
-    }
-
-    const analyzerCtx: AnalyzerContext = { app, logger: log.child('chain') };
-    const researchCtx: ResearchContext = {
-      app,
-      logger: log.child('research'),
-      cacheGet: (key) => store.getCachedEvidence(key, app.pipeline.reanalyseAfterHours),
-      cachePut: (key, url, content) => store.putCachedEvidence(key, url, content),
-    };
-
     outcomes = await mapLimit(selected, concurrency, async (snapshot): Promise<TokenOutcome> => {
       const tokenLog = log.child(snapshot.symbol || snapshot.tokenId);
       try {
@@ -223,14 +251,8 @@ export async function runPipeline(
             provenance = report;
 
             // ---- Stage 5: cost ceiling ---------------------------------------
-            budget.spent += report.usage?.costUsd ?? 0;
+            spend(budget, report.usage?.costUsd ?? 0, stats.sourceErrors, log);
             stats.llmCostUsd = Number(budget.spent.toFixed(6));
-            if (budget.spent >= budget.limit && !budget.exhausted) {
-              budget.exhausted = true;
-              const detail = `LLM cost ceiling reached: $${budget.spent.toFixed(4)} of $${budget.limit}; remaining tokens get a market-only score`;
-              stats.sourceErrors.push({ source: BUDGET_SOURCE, error: detail });
-              log.warn(detail, { spentUsd: budget.spent, ceilingUsd: budget.limit });
-            }
           }
         }
 
@@ -264,31 +286,6 @@ export async function runPipeline(
       else stats.sourceErrors.push({ source: `token:${outcome.tokenId}`, error: outcome.error ?? 'unknown' });
     }
 
-    // ---- Launch lane: after trending, so research gets the budget first ------
-    if (launches.length > 0) {
-      try {
-        laneAlerts.push(
-          ...(await runLaunchLane(launches, {
-            runId: id,
-            app,
-            store,
-            deps: resolved,
-            log: log.child('launches'),
-            budget,
-            stats: launchStats,
-            sourceErrors: stats.sourceErrors,
-            skipLlm: options.skipLlm === true,
-            concurrency,
-            analyzerCtx,
-            researchCtx,
-          })),
-        );
-      } catch (error) {
-        stats.sourceErrors.push({ source: 'launches', error: errorMessage(error) });
-        log.error('launch lane failed', { error: errorMessage(error) });
-      }
-      stats.llmCostUsd = Number(budget.spent.toFixed(6));
-    }
     try {
       await sweepDormant(app, store, launchStats, log.child('watchlist'));
     } catch (error) {

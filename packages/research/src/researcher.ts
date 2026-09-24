@@ -13,6 +13,7 @@
 import {
   hashKey,
   nowIso,
+  type Anchor,
   type AppConfig,
   type ChainAnalysis,
   type EvidenceItem,
@@ -24,6 +25,7 @@ import {
 } from '@provenance/core';
 import archetypeFixture from '../../../fixtures/research/stub-archetypes.json' with { type: 'json' };
 import { WebSearchAnalyst, type AnalystOptions } from './analyst';
+import { resolveAnchor } from './anchor';
 import { CostTracker } from './cost';
 import { PROMPT_VERSION } from './prompt';
 import { buildQueries } from './queries';
@@ -43,6 +45,25 @@ interface Archetype {
   originYear?: number;
   originSummary: string;
   [key: string]: unknown;
+}
+
+const STUB_ANCHOR_PREFIX = 'Offline fixture output, not researched:';
+
+/**
+ * The same cap for the headline: low confidence, labelled as unresearched in
+ * its own summary (the verdict is read on its own, away from `risks`), and no
+ * source, since none was consulted.
+ */
+function stubAnchor(anchor: Anchor, snapshot: TokenSnapshot): Anchor {
+  const resolved = resolveAnchor(anchor, snapshot.metrics.poolCreatedAt, 0);
+  const { earliestSource: _none, ...rest } = resolved;
+  return {
+    ...rest,
+    summary: resolved.summary.startsWith(STUB_ANCHOR_PREFIX)
+      ? resolved.summary
+      : `${STUB_ANCHOR_PREFIX} ${resolved.summary}`.trim(),
+    confidence: 'low',
+  };
 }
 
 /**
@@ -103,6 +124,7 @@ export class StubResearcher implements ProvenanceResearcher {
 
     return {
       ...outcome.draft,
+      anchor: stubAnchor(outcome.draft.anchor, snapshot),
       tokenId: snapshot.tokenId,
       // Capped hard: fixture output must never look like a researched finding.
       confidence: Math.min(outcome.draft.confidence, 0.2),

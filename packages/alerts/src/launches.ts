@@ -1,10 +1,10 @@
 /**
- * Judgement for the launch lane: dexscanner's hard filters, and the two alerts
- * the lane produces.
+ * Judgement for the launch lane: the hard filters that keep garbage away from
+ * the anchor check, and the two alerts the lane produces.
  *
- * The trending lane scores and ranks; this lane rejects. At launch there is no
- * demand signal yet to outweigh a structural problem, so a token either clears
- * every filter or is not catalogued. That also inverts the trending lane's
+ * The gates do not decide whether a token is worth anything — the anchor verdict
+ * does. They only decide whether it is worth asking: a token whose deployer can
+ * still mint or blacklist is not an investable carrier of any meme, however real. That also inverts the trending lane's
  * missing-data policy on purpose: there, unknown is kept for the chain stage to
  * resolve; here the chain stage has already run, so unknown means "could not be
  * shown safe", and that is a rejection.
@@ -23,10 +23,11 @@ import {
   type ChainAnalysis,
   type LaunchConfig,
   type LaunchGateResult,
+  type ProvenanceReport,
   type TokenSnapshot,
   type WatchEntry,
 } from '@provenance/core';
-import { renderMarketLines, renderRiskFlags, stripMarkdown } from './format';
+import { renderAnchorLine, renderMarketLines, renderPriorCycles, renderRiskFlags, stripMarkdown } from './format';
 
 function gate(reasons: string[]): LaunchGateResult {
   return { passed: reasons.length === 0, reasons };
@@ -132,58 +133,84 @@ function build(
   };
 }
 
-/** A launch cleared the gate and the referent check: dexscanner's "new candidate". */
-export function launchCataloguedAlert(
+/**
+ * A launch cleared the gate and was judged anchored — the alert this project
+ * exists to send, at launch rather than after the token trends. When the full
+ * research already ran, its lineage rides along as supporting detail.
+ */
+export function launchAnchoredAlert(
   runId: string,
   entry: WatchEntry,
   snapshot: TokenSnapshot,
   chain: ChainAnalysis | undefined,
+  report?: ProvenanceReport,
 ): Alert {
   const url = explorerUrl(entry);
+  // The entry holds the lane's final verdict; the report's own anchor may be
+  // a low-confidence one the lane chose not to act on.
+  const anchor = entry.anchor;
   const lines = [
-    `**Catalogued at launch: $${entry.symbol}** — ${entry.name}`,
-    `_Referent_: **${entry.referent.referent || 'unnamed'}** · confidence ${entry.referent.confidence.toUpperCase()}`,
-    entry.referent.summary,
+    `**Anchored at launch: $${entry.symbol}** — ${entry.name}`,
+    ...renderAnchorLine(anchor),
     '',
+    ...(report
+      ? [
+          `_Meme_: ${report.memeName}${report.originYear !== undefined ? ` (${report.originYear})` : ''} · ${report.recycleVerdict}, generation ${report.recycleGeneration}`,
+          ...renderPriorCycles(report.priorCycles).slice(0, 3),
+          '',
+        ]
+      : []),
     ...renderMarketLines(snapshot.metrics, chain),
     ...(chain ? renderRiskFlags(chain.flags, 3) : []),
     '',
     `${entry.chain} · ${shortAddress(entry.tokenAddress)}${url ? ` · ${url}` : ''}`,
-    '_Watching for its first trending appearance._',
   ];
   return build(
     runId,
-    'launch-catalogued',
+    'launch-anchored',
     entry,
-    'info',
-    `Catalogued at launch: $${entry.symbol} — ${entry.referent.referent || entry.name}`,
+    anchor.confidence === 'high' ? 'critical' : 'warn',
+    `Anchored at launch: $${entry.symbol} — ${anchor.subject || entry.name}`,
     lines,
-    { referent: entry.referent.referent, confidence: entry.referent.confidence, launchedAt: entry.launchedAt },
+    {
+      verdict: anchor.verdict,
+      anchorType: anchor.type,
+      anchorDate: anchor.anchorDate,
+      precedesLaunch: anchor.precedesLaunch,
+      confidence: anchor.confidence,
+      researched: report !== undefined,
+      launchedAt: entry.launchedAt,
+    },
   );
 }
 
-/** A catalogued token reached a trending list: the two perspectives agreeing. */
+/**
+ * A judged launch reached a trending list: the outcome, recorded against the
+ * verdict that came first. Fires for dismissed tokens too — a forced meme that
+ * trended anyway is worth knowing about, and is labelled as exactly that.
+ */
 export function launchExpressedAlert(runId: string, entry: WatchEntry, snapshot: TokenSnapshot): Alert {
   const lead = entry.leadHours === undefined ? 'unknown' : `${entry.leadHours.toFixed(1)}h`;
+  const verdict = entry.anchor.verdict;
   const lines = [
-    `**Expressed: $${entry.symbol}** was catalogued at launch and is now trending on ${
+    `**Trending: $${entry.symbol}**, judged **${verdict}** at launch, is now on ${
       entry.expressedOn?.join(', ') || 'a tracked list'
     }.`,
-    `_Lead time_: ${lead} from catalogue to first trending appearance.`,
-    `_Referent_: ${entry.referent.referent || 'unnamed'} (${entry.referent.confidence})`,
+    `_Since verdict_: ${lead}.`,
+    ...renderAnchorLine(entry.anchor),
     '',
     ...renderMarketLines(snapshot.metrics, undefined),
-    entry.liquidityUsdAtCatalog !== undefined
-      ? `• Liquidity at catalogue ${formatUsd(entry.liquidityUsdAtCatalog)}`
-      : '',
-  ].filter((line, index, all) => line !== '' || all[index - 1] !== '');
+    ...(entry.liquidityUsdAtCatalog !== undefined
+      ? [`• Liquidity at verdict ${formatUsd(entry.liquidityUsdAtCatalog)}`]
+      : []),
+  ];
   return build(
     runId,
     'launch-expressed',
     entry,
-    'warn',
-    `Expressed after ${lead}: $${entry.symbol} (${entry.referent.referent || entry.name})`,
+    verdict === 'anchored' ? 'warn' : 'info',
+    `Trending ${lead} after an ${verdict} verdict: $${entry.symbol}`,
     lines,
-    { leadHours: entry.leadHours, expressedOn: entry.expressedOn ?? [] },
+    { leadHours: entry.leadHours, expressedOn: entry.expressedOn ?? [], verdict },
   );
 }

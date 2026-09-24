@@ -1,19 +1,24 @@
 /**
- * The launch lane, and where it meets the trending lane.
+ * The launch lane: where a meme is judged, at its token's first pool.
  *
- * Provenance started from demand: what is trending, and where did its meme
- * come from. Dexscanner started from supply: what just launched, and does its
- * name point at anything real. Both were looking at the same tokens from
- * opposite ends of their lives, so the merged pipeline runs both and records
- * the moment they agree — a token catalogued at launch that later shows up on
- * a trending list. That transition, and the hours it took, is measured rather
- * than inferred, which makes the watchlist a labelled dataset over time.
+ * Provenance exists to answer one question — is this meme anchored in
+ * something real (an old meme, a cultural artifact, an inciting event), or is
+ * it being forced? — and the answer is only useful early. Waiting for a token
+ * to trend before asking is backwards: by then the question has been answered
+ * by the market. So every launch that clears the hard gate gets the fast
+ * anchor check, an anchored launch gets the full provenance research straight
+ * away, and trending lists become the outcome recorded against a verdict that
+ * came first.
  *
  * Three steps, called from `runPipeline`:
- *   reconcile  a watchlisted token seen trending this run → `expressed`
- *   catalogue  launch-only tokens → market gate → chain → chain gate →
- *              referent check → watchlist
+ *   reconcile  a judged token seen trending this run → `expressed`
+ *   judge      launch-only tokens → market gate → chain → chain gate →
+ *              anchor check → (anchored) full research → watchlist
  *   sweep      `active` entries past `dormantAfterHours` → `dormant`
+ *
+ * Every verdict is stored, `dismissed` ones included: a token is judged once,
+ * not re-paid-for every 30 minutes, and a forced meme that trends anyway is on
+ * record as exactly that.
  *
  * Every per-token step is isolated the same way the trending lane's is: one
  * launch failing is a recorded error, never a failed run.
@@ -25,8 +30,11 @@ import {
   type ChainAnalysis,
   type LaunchStats,
   type Logger,
+  type AnchorCheck,
+  type AnchorChecker,
+  type ProvenanceReport,
+  type ProvenanceResearcher,
   type ProvenanceStore,
-  type ReferentChecker,
   type ResearchContext,
   type TokenSnapshot,
   type WatchEntry,
@@ -45,7 +53,29 @@ export interface LlmBudget {
 }
 
 export function emptyLaunchStats(): LaunchStats {
-  return { discovered: 0, rejected: 0, unvalidated: 0, catalogued: 0, expressed: 0, dormant: 0 };
+  return { discovered: 0, rejected: 0, dismissed: 0, catalogued: 0, researched: 0, expressed: 0, dormant: 0 };
+}
+
+/** Marker recorded in `stats.sourceErrors` when the LLM budget cut a run short. */
+export const BUDGET_SOURCE = 'llm-budget';
+
+/**
+ * Records spend against the shared ceiling. Crossing it is recorded once, as a
+ * source error, whichever lane crosses it — a run that stopped researching
+ * part-way is `partial`, and says why.
+ */
+export function spend(
+  budget: LlmBudget,
+  usd: number,
+  sourceErrors: { source: string; error: string }[],
+  log: Logger,
+): void {
+  budget.spent += usd;
+  if (budget.spent < budget.limit || budget.exhausted) return;
+  budget.exhausted = true;
+  const detail = `LLM cost ceiling reached: $${budget.spent.toFixed(4)} of $${budget.limit}; remaining tokens get no LLM work`;
+  sourceErrors.push({ source: BUDGET_SOURCE, error: detail });
+  log.warn(detail, { spentUsd: budget.spent, ceilingUsd: budget.limit });
 }
 
 function errorMessage(error: unknown): string {
@@ -61,13 +91,13 @@ function trendingSourcesOf(snapshot: TokenSnapshot): string[] {
 }
 
 /**
- * Marks watchlisted tokens that appear in this run's trending set. Runs over
- * every trending snapshot, before the trending filter: a catalogued token that
- * reached a list has expressed whether or not it then clears the liquidity and
- * volume thresholds for full research.
+ * Marks judged tokens that appear in this run's trending set. Runs over every
+ * trending snapshot, before the trending filter: reaching a list is the
+ * outcome, whether or not the token then clears the research thresholds.
  *
- * Dormant entries can still express. A late expression is a real outcome, and
- * dropping it would bias the lead-time record towards fast movers.
+ * Dormant and dismissed entries can still express. A late expression is a real
+ * outcome, and a forced meme that trends anyway is the case the verdict most
+ * needs to be checked against. The verdict itself is kept on the entry.
  */
 export async function reconcileWatchlist(
   runId: string,
@@ -129,10 +159,11 @@ export interface LaunchLaneContext {
 }
 
 /**
- * Catalogues launch-only tokens that clear every hard filter and the referent
- * check. Rejections are logged with the rule that fired — dexscanner's
- * `[REJECT]` lines — and counted, but not persisted: a rejected launch that
- * later trends is picked up by the trending lane on its own merits.
+ * Judges launch-only tokens. Gate rejections are logged with the rule that
+ * fired and counted, but not stored: a launch that fails early (too few
+ * holders yet) is retried on the next run while it is inside the lookback
+ * window. Anything that reaches the anchor check is stored whatever the
+ * verdict, so it is judged once.
  */
 export async function runLaunchLane(launches: TokenSnapshot[], ctx: LaunchLaneContext): Promise<Alert[]> {
   const { app, store, deps, log, stats } = ctx;
@@ -152,13 +183,14 @@ export async function runLaunchLane(launches: TokenSnapshot[], ctx: LaunchLaneCo
   }
 
   // Deepest pools first: with a per-run cap, the most tradeable launches are
-  // the ones worth the RPC and the referent check.
+  // the ones worth the RPC and the anchor check.
   const selected = candidates
     .sort((a, b) => (b.metrics.liquidityUsd ?? 0) - (a.metrics.liquidityUsd ?? 0))
     .slice(0, Math.max(0, app.launches.maxCatalogPerRun));
   if (selected.length === 0) return [];
 
-  let checker: ReferentChecker | undefined;
+  let checker: AnchorChecker | undefined;
+  let researcher: ProvenanceResearcher | undefined;
   const alerts = await mapLimit(selected, ctx.concurrency, async (snapshot): Promise<Alert | null> => {
     const tokenLog = log.child(`launch:${snapshot.symbol || snapshot.tokenId}`);
     try {
@@ -176,25 +208,48 @@ export async function runLaunchLane(launches: TokenSnapshot[], ctx: LaunchLaneCo
         return null;
       }
 
+      // Not judged, so not stored: the next run retries it with budget.
       if (ctx.skipLlm || ctx.budget.exhausted) {
-        stats.unvalidated += 1;
-        tokenLog.info('referent check skipped', { reason: ctx.skipLlm ? 'llm disabled' : 'llm budget exhausted' });
+        tokenLog.info('anchor check skipped', { reason: ctx.skipLlm ? 'llm disabled' : 'llm budget exhausted' });
         return null;
       }
-      checker ??= deps.createReferentChecker(app, log);
-      const referent = await checker.check(snapshot, ctx.researchCtx);
-      ctx.budget.spent += referent.usage?.costUsd ?? 0;
-      if (ctx.budget.spent >= ctx.budget.limit) ctx.budget.exhausted = true;
-      tokenLog.info('[VALIDATE] launch', {
+
+      // ---- fast verdict --------------------------------------------------------
+      checker ??= deps.createAnchorChecker(app, log);
+      const fast = await checker.check(snapshot, ctx.researchCtx);
+      spend(ctx.budget, fast.usage?.costUsd ?? 0, ctx.sourceErrors, log);
+      tokenLog.info('[VERDICT] launch', {
         tokenId: snapshot.tokenId,
-        validated: referent.validated,
-        confidence: referent.confidence,
-        referent: referent.referent,
+        verdict: fast.verdict,
+        type: fast.type,
+        subject: fast.subject,
+        precedesLaunch: fast.precedesLaunch,
+        confidence: fast.confidence,
       });
-      if (!referent.validated || referent.confidence === 'low') {
-        stats.unvalidated += 1;
-        return null;
+      const anchored = fast.verdict === 'anchored' && fast.confidence !== 'low';
+
+      // ---- full research, now, for an anchored meme ------------------------------
+      let report: ProvenanceReport | undefined;
+      if (anchored && app.launches.researchAnchored && !ctx.budget.exhausted) {
+        try {
+          researcher ??= deps.createResearcher(app, log);
+          const evidence = await deps.collectEvidence(snapshot, ctx.researchCtx);
+          report = await researcher.research(snapshot, chain, evidence, ctx.researchCtx);
+          spend(ctx.budget, report.usage?.costUsd ?? 0, ctx.sourceErrors, log);
+          stats.researched += 1;
+        } catch (error) {
+          tokenLog.warn('full research failed; keeping the fast verdict', { error: errorMessage(error) });
+        }
       }
+
+      // The deeper answer wins whenever it is confident: a disagreement
+      // overturns the fast check, an agreement replaces it with the better-
+      // sourced version. A degraded or low-confidence report changes nothing.
+      const deep = report?.anchor;
+      const confidentDeep = deep !== undefined && deep.confidence !== 'low';
+      const overturned = confidentDeep && deep.verdict !== 'anchored';
+      const verdict: AnchorCheck = confidentDeep ? { ...fast, ...deep } : fast;
+      const kept = anchored && !overturned;
 
       const at = nowIso();
       const entry: WatchEntry = {
@@ -203,23 +258,32 @@ export async function runLaunchLane(launches: TokenSnapshot[], ctx: LaunchLaneCo
         tokenAddress: snapshot.tokenAddress,
         symbol: snapshot.symbol,
         name: snapshot.name,
-        status: 'active',
+        status: kept ? 'active' : 'dismissed',
         firstSeenAt: at,
-        referent,
+        anchor: verdict,
         gate,
         updatedAt: at,
       };
+      if (report) entry.researched = true;
       if (snapshot.metrics.poolCreatedAt) entry.launchedAt = snapshot.metrics.poolCreatedAt;
       if (snapshot.metrics.liquidityUsd !== undefined) entry.liquidityUsdAtCatalog = snapshot.metrics.liquidityUsd;
 
-      // Snapshot, chain and a market-only score go into the run as well, so a
-      // catalogued launch has a dossier the dashboard can open.
+      if (!kept) {
+        await store.saveWatch(entry);
+        stats.dismissed += 1;
+        if (overturned) tokenLog.info('full research overturned the fast verdict', { verdict: deep?.verdict });
+        return null;
+      }
+
+      // Snapshot, chain, report and score go into the run as well, so an
+      // anchored launch has a full dossier the dashboard can open.
       await store.saveSnapshot(ctx.runId, snapshot);
       if (chain) await store.saveChainAnalysis(ctx.runId, chain);
-      await store.saveScore(ctx.runId, deps.scoreToken({ snapshot, chain }));
+      if (report) await store.saveProvenance(ctx.runId, report);
+      await store.saveScore(ctx.runId, deps.scoreToken({ snapshot, chain, provenance: report }));
       await store.saveWatch(entry);
       stats.catalogued += 1;
-      return deps.launchCataloguedAlert(ctx.runId, entry, snapshot, chain);
+      return deps.launchAnchoredAlert(ctx.runId, entry, snapshot, chain, report);
     } catch (error) {
       const message = errorMessage(error);
       tokenLog.error('launch failed', { error: message });
@@ -228,7 +292,6 @@ export async function runLaunchLane(launches: TokenSnapshot[], ctx: LaunchLaneCo
     }
   });
 
-  if (ctx.budget.exhausted) log.warn('llm budget exhausted during launch lane', { spentUsd: ctx.budget.spent });
   return alerts.filter((alert): alert is Alert => alert !== null);
 }
 
