@@ -1,5 +1,6 @@
 /**
- * The seven-stage run described in SPEC.md, and the only place the stages are
+ * The seven-stage run described in SPEC.md, plus the launch lane merged in
+ * from dexscanner (see launch-lane.ts), and the only place the stages are
  * wired together. Everything it touches arrives through `PipelineDeps`, so the
  * orchestration can be exercised without a database, a browser or an API key.
  *
@@ -33,6 +34,7 @@ import {
   nowIso,
 } from '@provenance/core';
 import { type PipelineDeps, loadRuntimeDeps } from './deps';
+import { type LlmBudget, emptyLaunchStats, reconcileWatchlist, runLaunchLane, sweepDormant } from './launch-lane';
 
 export interface RunOptions {
   /** `--no-llm`: run discovery, chain analysis and scoring, skip the model. */
@@ -90,7 +92,9 @@ export async function runPipeline(
     alertsFired: 0,
     llmCostUsd: 0,
     sourceErrors: [],
+    launches: emptyLaunchStats(),
   };
+  const launchStats = stats.launches ?? emptyLaunchStats();
 
   const store: ProvenanceStore = resolved.createStore(app);
   let startedAt = nowIso();
@@ -116,8 +120,21 @@ export async function runPipeline(
       log.warn('source failed', { source: failure.source, error: failure.error });
     }
 
-    const snapshots = resolved.mergeToSnapshots(discovery.entries);
+    const merged = resolved.mergeToSnapshots(discovery.entries);
+    // Two lanes from one discovery: demand (trending lists) and supply (new
+    // pools). `discovered` keeps meaning "trending tokens" across versions.
+    const { trending: snapshots, launches } = resolved.splitLanes(merged);
     stats.discovered = snapshots.length;
+
+    // Before the trending filter, on purpose: reaching a list is the event,
+    // whether or not the token then clears the research thresholds.
+    const laneAlerts: Alert[] = [];
+    try {
+      laneAlerts.push(...(await reconcileWatchlist(id, snapshots, store, resolved, launchStats, log.child('watchlist'))));
+    } catch (error) {
+      stats.sourceErrors.push({ source: 'watchlist', error: errorMessage(error) });
+      log.error('watchlist reconciliation failed', { error: errorMessage(error) });
+    }
 
     const filtered = resolved.filterSnapshots(snapshots, app.pipeline);
     stats.afterFilter = filtered.kept.length;
@@ -142,9 +159,12 @@ export async function runPipeline(
     // ---- Stage 3-5: per-token treatment, bounded and budgeted ----------------
     let researcher: ProvenanceResearcher | undefined;
     let researcherFailed = false;
-    let budgetSpent = 0;
-    let budgetExhausted = app.llm.maxCostUsdPerRun <= 0;
-    if (budgetExhausted && !options.skipLlm) {
+    const budget: LlmBudget = {
+      spent: 0,
+      limit: app.llm.maxCostUsdPerRun,
+      exhausted: app.llm.maxCostUsdPerRun <= 0,
+    };
+    if (budget.exhausted && !options.skipLlm) {
       log.warn('LLM budget is zero; running market-only', {
         maxCostUsdPerRun: app.llm.maxCostUsdPerRun,
       });
@@ -182,7 +202,7 @@ export async function runPipeline(
           });
         } else if (options.skipLlm) {
           tokenLog.debug('llm disabled; market-only score');
-        } else if (budgetExhausted) {
+        } else if (budget.exhausted) {
           tokenLog.warn('llm budget exhausted; market-only score');
         } else if (researcherFailed) {
           tokenLog.debug('researcher unavailable; market-only score');
@@ -203,13 +223,13 @@ export async function runPipeline(
             provenance = report;
 
             // ---- Stage 5: cost ceiling ---------------------------------------
-            budgetSpent += report.usage?.costUsd ?? 0;
-            stats.llmCostUsd = Number(budgetSpent.toFixed(6));
-            if (budgetSpent >= app.llm.maxCostUsdPerRun) {
-              budgetExhausted = true;
-              const detail = `LLM cost ceiling reached: $${budgetSpent.toFixed(4)} of $${app.llm.maxCostUsdPerRun}; remaining tokens get a market-only score`;
+            budget.spent += report.usage?.costUsd ?? 0;
+            stats.llmCostUsd = Number(budget.spent.toFixed(6));
+            if (budget.spent >= budget.limit && !budget.exhausted) {
+              budget.exhausted = true;
+              const detail = `LLM cost ceiling reached: $${budget.spent.toFixed(4)} of $${budget.limit}; remaining tokens get a market-only score`;
               stats.sourceErrors.push({ source: BUDGET_SOURCE, error: detail });
-              log.warn(detail, { spentUsd: budgetSpent, ceilingUsd: app.llm.maxCostUsdPerRun });
+              log.warn(detail, { spentUsd: budget.spent, ceilingUsd: budget.limit });
             }
           }
         }
@@ -244,8 +264,39 @@ export async function runPipeline(
       else stats.sourceErrors.push({ source: `token:${outcome.tokenId}`, error: outcome.error ?? 'unknown' });
     }
 
+    // ---- Launch lane: after trending, so research gets the budget first ------
+    if (launches.length > 0) {
+      try {
+        laneAlerts.push(
+          ...(await runLaunchLane(launches, {
+            runId: id,
+            app,
+            store,
+            deps: resolved,
+            log: log.child('launches'),
+            budget,
+            stats: launchStats,
+            sourceErrors: stats.sourceErrors,
+            skipLlm: options.skipLlm === true,
+            concurrency,
+            analyzerCtx,
+            researchCtx,
+          })),
+        );
+      } catch (error) {
+        stats.sourceErrors.push({ source: 'launches', error: errorMessage(error) });
+        log.error('launch lane failed', { error: errorMessage(error) });
+      }
+      stats.llmCostUsd = Number(budget.spent.toFixed(6));
+    }
+    try {
+      await sweepDormant(app, store, launchStats, log.child('watchlist'));
+    } catch (error) {
+      log.warn('dormancy sweep failed', { error: errorMessage(error) });
+    }
+
     // ---- Stage 6b: dispatch and persist -------------------------------------
-    const alerts = outcomes.flatMap((outcome) => outcome.alerts);
+    const alerts = [...outcomes.flatMap((outcome) => outcome.alerts), ...laneAlerts];
     stats.alertsFired = alerts.length;
     if (alerts.length > 0) {
       const sinks = selectSinks(resolved.createSinks(app, log), app.pipeline.dryRun);
@@ -302,9 +353,11 @@ export async function runPipeline(
  * it. A quiet market — no token clearing the filters, nothing broken — is `ok`.
  */
 export function resolveStatus(selectedCount: number, stats: RunStats): RunStatus {
-  const usable = stats.analysed + stats.reused;
+  // A catalogued launch is usable output too: a run whose trending sources all
+  // failed but whose launch lane worked is degraded, not dead.
+  const usable = stats.analysed + stats.reused + (stats.launches?.catalogued ?? 0);
   if (selectedCount > 0 && usable === 0) return 'failed';
-  if (selectedCount === 0 && stats.sourceErrors.length > 0) return 'failed';
+  if (selectedCount === 0 && usable === 0 && stats.sourceErrors.length > 0) return 'failed';
   if (stats.sourceErrors.length > 0) return 'partial';
   return 'ok';
 }

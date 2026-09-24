@@ -48,6 +48,34 @@ export interface LlmConfig {
   maxWebSearches: number;
 }
 
+/**
+ * The launch lane: dexscanner's supply-side scan, folded in. Thresholds are
+ * hard filters, not score inputs — a launch that fails one is not catalogued,
+ * because at this stage there is no demand signal to outweigh it.
+ */
+export interface LaunchConfig {
+  enabled: boolean;
+  /** How far back to read factory events on each run. */
+  lookbackHours: number;
+  /** New pools hydrated per run, newest first. */
+  maxCandidates: number;
+  /** Tokens given chain analysis and a referent check per run. */
+  maxCatalogPerRun: number;
+  /** Unlike the trending filter, unknown liquidity is a rejection here. */
+  minLiquidityUsd: number;
+  minHolderCount: number;
+  /** Top-10 non-LP concentration ceiling, percent. */
+  maxTop10Pct: number;
+  /** Reject when LP burn/lock could not be measured, not only when it is low. */
+  requireLpSecured: boolean;
+  /** Burned + locked LP share required to count as secured, percent. */
+  minLpSecuredPct: number;
+  /** An active entry that has not expressed after this long goes dormant. */
+  dormantAfterHours: number;
+  /** Web searches allowed per referent check. */
+  maxReferentSearches: number;
+}
+
 export interface ChainRpcConfig {
   solana: string[];
   ethereum: string[];
@@ -71,7 +99,10 @@ export interface AppConfig {
   databaseUrl: string;
   databaseAuthToken?: string;
   anthropicApiKey?: string;
+  /** Optional: enables `contractVerified`. Every other EVM read is keyless. */
+  etherscanApiKey?: string;
   pipeline: PipelineConfig;
+  launches: LaunchConfig;
   llm: LlmConfig;
   rpc: ChainRpcConfig;
   alerts: AlertConfig;
@@ -115,6 +146,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     databaseUrl: env.DATABASE_URL ?? 'file:./data/provenance.db',
     databaseAuthToken: env.DATABASE_AUTH_TOKEN,
     anthropicApiKey: env.ANTHROPIC_API_KEY,
+    etherscanApiKey: env.ETHERSCAN_API_KEY,
     dataDir: env.PROVENANCE_DATA_DIR ?? './data',
     logLevel: (env.LOG_LEVEL as AppConfig['logLevel']) ?? 'info',
     pipeline: {
@@ -138,6 +170,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
           limit: num(env.SOURCE_GECKOTERMINAL_LIMIT, 30),
           rateLimitMs: num(env.SOURCE_GECKOTERMINAL_RATE_MS, 2200),
         },
+        {
+          id: 'launches',
+          enabled: bool(env.LAUNCHES_ENABLED, true),
+          limit: num(env.LAUNCHES_MAX_CANDIDATES, 40),
+          rateLimitMs: num(env.LAUNCHES_RATE_MS, 250),
+        },
       ],
       maxTokensPerRun: num(env.MAX_TOKENS_PER_RUN, 15),
       minLiquidityUsd: num(env.MIN_LIQUIDITY_USD, 25_000),
@@ -155,6 +193,19 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       maxCostUsdPerRun: num(env.LLM_MAX_COST_USD_PER_RUN, 5),
       temperature: num(env.LLM_TEMPERATURE, 0.2),
       maxWebSearches: num(env.LLM_MAX_WEB_SEARCHES, 6),
+    },
+    launches: {
+      enabled: bool(env.LAUNCHES_ENABLED, true),
+      lookbackHours: num(env.LAUNCHES_LOOKBACK_HOURS, 24),
+      maxCandidates: num(env.LAUNCHES_MAX_CANDIDATES, 40),
+      maxCatalogPerRun: num(env.LAUNCHES_MAX_CATALOG_PER_RUN, 8),
+      minLiquidityUsd: num(env.LAUNCHES_MIN_LIQUIDITY_USD, 40_000),
+      minHolderCount: num(env.LAUNCHES_MIN_HOLDERS, 100),
+      maxTop10Pct: num(env.LAUNCHES_MAX_TOP10_PCT, 40),
+      requireLpSecured: bool(env.LAUNCHES_REQUIRE_LP_SECURED, true),
+      minLpSecuredPct: num(env.LAUNCHES_MIN_LP_SECURED_PCT, 90),
+      dormantAfterHours: num(env.LAUNCHES_DORMANT_AFTER_HOURS, 168),
+      maxReferentSearches: num(env.LAUNCHES_MAX_REFERENT_SEARCHES, 3),
     },
     rpc: {
       solana: rpcOr('RPC_SOLANA', ['https://api.mainnet-beta.solana.com']),

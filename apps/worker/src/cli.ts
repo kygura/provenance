@@ -37,10 +37,12 @@ import {
   type Style,
   createStyle,
   dossierTable,
+  launchSummary,
   renderDossier,
   renderRun,
   snapshotTable,
   statusColor,
+  watchTable,
 } from './format';
 
 export const EXIT_OK = 0;
@@ -54,6 +56,8 @@ usage: bun run apps/worker/src/cli.ts <command> [options]
 commands:
   run                      discover, analyse, research, score, alert
   discover                 discovery only; print the merged, triaged table
+  launches                 launch lane only: new pools and their market-gate verdicts
+  watchlist                tokens caught at launch, and whether they went on to trend
   analyze <chain:address>  full treatment of one token, printed as a dossier
   migrate                  apply database migrations
   seed                     load demo data into the database
@@ -69,6 +73,7 @@ options:
   --sources dexscreener,…  restrict to these trending sources
   --no-llm                 skip the research stage entirely
   --run <id>               report: which run (default: the latest)
+  --status active|expressed|dormant   watchlist: filter by status
   --format table|json|markdown
   --verbose, -v            debug logging
   --no-color               disable ANSI colour (also honoured: NO_COLOR)
@@ -121,10 +126,69 @@ async function cmdRun(
         `discovered=${record.stats.discovered} kept=${record.stats.afterFilter} analysed=${record.stats.analysed} reused=${record.stats.reused} alerts=${record.stats.alertsFired} cost=$${record.stats.llmCostUsd.toFixed(4)}`,
       ),
   );
+  const lanes = launchSummary(record.stats);
+  if (lanes) print(style.dim(lanes));
   for (const failure of record.stats.sourceErrors) {
     print(style.yellow(`! ${failure.source}: ${failure.error}`));
   }
   return record.status === 'failed' ? EXIT_FAILED : EXIT_OK;
+}
+
+/**
+ * Smoke test for the supply side: only the launches source runs, and each new
+ * pool is shown with its market-gate verdict. No RPC beyond discovery, no LLM.
+ */
+async function cmdLaunches(app: AppConfig, logger: Logger, deps: PipelineDeps, style: Style): Promise<number> {
+  const only: AppConfig = {
+    ...app,
+    launches: { ...app.launches, enabled: true },
+    pipeline: {
+      ...app.pipeline,
+      sources: app.pipeline.sources.map((source) => ({ ...source, enabled: source.id === 'launches' })),
+    },
+  };
+  const discovery = await deps.discoverTrending(only, logger);
+  const { launches } = deps.splitLanes(deps.mergeToSnapshots(discovery.entries));
+  const notes = new Map<string, string>();
+  for (const snapshot of launches) {
+    const gate = deps.gateLaunchMarket(snapshot, app.launches);
+    notes.set(snapshot.tokenId, gate.passed ? style.green('market gate ok') : style.dim(gate.reasons.join('; ')));
+  }
+  print(style.dim(`${discovery.entries.length} new pools → ${launches.length} launch-only tokens`));
+  print(snapshotTable(launches, style, notes));
+  for (const failure of discovery.errors) {
+    print(style.yellow(`! ${failure.source}: ${failure.error}`));
+  }
+  return discovery.errors.length > 0 && launches.length === 0 ? EXIT_FAILED : EXIT_OK;
+}
+
+async function cmdWatchlist(app: AppConfig, parsed: ParsedArgs, deps: PipelineDeps, style: Style): Promise<number> {
+  const status = flagString(parsed.flags, 'status');
+  if (status !== undefined && !['active', 'expressed', 'dormant'].includes(status)) {
+    return fail(style, [`--status must be active, expressed or dormant (got ${status})`]);
+  }
+  const store = deps.createStore(app);
+  try {
+    await store.migrate();
+    const entries = await store.listWatch({
+      ...(status ? { status: status as 'active' | 'expressed' | 'dormant' } : {}),
+      limit: 200,
+    });
+    if (entries.length === 0) {
+      print(style.dim('watchlist is empty'));
+      return EXIT_OK;
+    }
+    print(watchTable(entries, style));
+    const expressed = entries.filter((entry) => entry.leadHours !== undefined);
+    if (expressed.length > 0) {
+      const leads = expressed.map((entry) => entry.leadHours ?? 0).sort((a, b) => a - b);
+      const median = leads[Math.floor(leads.length / 2)] ?? 0;
+      print(style.dim(`\n${expressed.length}/${entries.length} expressed · median lead ${median.toFixed(1)}h`));
+    }
+  } finally {
+    await store.close().catch(() => undefined);
+  }
+  return EXIT_OK;
 }
 
 async function cmdDiscover(
@@ -312,6 +376,10 @@ export async function main(
         return await cmdRun(app, parsed, logger, deps, style);
       case 'discover':
         return await cmdDiscover(app, logger, deps, style);
+      case 'launches':
+        return await cmdLaunches(app, logger, deps, style);
+      case 'watchlist':
+        return await cmdWatchlist(app, parsed, deps, style);
       case 'analyze':
         return await cmdAnalyze(app, parsed, logger, deps, style);
       case 'migrate': {

@@ -7,6 +7,8 @@ import {
   type ProvenanceStore,
   type RunRecord,
   type TokenDossier,
+  type WatchEntry,
+  type WatchQuery,
 } from '@provenance/core';
 
 /**
@@ -168,6 +170,10 @@ export function getDossier(
 
 export function listAlerts(limit = 100): Promise<Result<Alert[]>> {
   return query('alert list', (s) => s.listAlerts(limit));
+}
+
+export function listWatch(q: WatchQuery = {}): Promise<Result<WatchEntry[]>> {
+  return query('watchlist', (s) => s.listWatch(q));
 }
 
 export function scoreHistory(

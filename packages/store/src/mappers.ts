@@ -24,6 +24,8 @@ import type {
   SocialLinks,
   TokenSnapshot,
   TrendingEntry,
+  WatchEntry,
+  WatchStatus,
 } from '@provenance/core';
 import { normalizeChain, parseTokenId, silentLogger } from '@provenance/core';
 
@@ -426,5 +428,71 @@ export function alertRowArgs(
     alert.createdAt,
     JSON.stringify(alert.payload ?? {}),
     JSON.stringify(deliveries ?? []),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// watchlist
+// ---------------------------------------------------------------------------
+
+const WATCH_STATUSES: readonly WatchStatus[] = ['active', 'expressed', 'dormant'];
+export const asWatchStatus = (v: unknown): WatchStatus => oneOf(v, WATCH_STATUSES, 'active');
+
+/**
+ * The JSON blob carries the referent check and gate, which have no columns of
+ * their own; the promoted columns win for everything the listing filters on.
+ */
+export function rowToWatch(row: SqlRow, logger: Logger = silentLogger): WatchEntry {
+  const blob = parseObject<Partial<WatchEntry>>(row.entry_json, 'watchlist.entry_json', {}, logger);
+  const tokenId = text(row.token_id);
+  const leadHours = asNumber(row.lead_hours);
+  const entry: WatchEntry = {
+    tokenId,
+    chain: normalizeChain(asText(row.chain) ?? parseTokenId(tokenId).chain),
+    tokenAddress: text(row.address, parseTokenId(tokenId).address),
+    symbol: text(row.symbol, blob.symbol ?? ''),
+    name: text(row.name, blob.name ?? ''),
+    status: asWatchStatus(row.status),
+    firstSeenAt: text(row.first_seen_at, blob.firstSeenAt ?? ''),
+    referent: blob.referent ?? {
+      validated: false,
+      referent: text(row.referent),
+      summary: '',
+      confidence: 'low',
+      model: 'unknown',
+      checkedAt: text(row.first_seen_at),
+      citations: [],
+    },
+    gate: blob.gate ?? { passed: true, reasons: [] },
+    updatedAt: text(row.updated_at, blob.updatedAt ?? ''),
+  };
+  const launchedAt = asText(row.launched_at) ?? blob.launchedAt;
+  if (launchedAt) entry.launchedAt = launchedAt;
+  const expressedAt = asText(row.expressed_at) ?? blob.expressedAt;
+  if (expressedAt) entry.expressedAt = expressedAt;
+  if (leadHours !== undefined) entry.leadHours = leadHours;
+  if (blob.expressedOn) entry.expressedOn = blob.expressedOn;
+  if (blob.liquidityUsdAtCatalog !== undefined) entry.liquidityUsdAtCatalog = blob.liquidityUsdAtCatalog;
+  return entry;
+}
+
+export function watchRowArgs(
+  entry: WatchEntry,
+): [string, string, string, string, string, string, string, string | null, string | null, number | null, string, string, string, string] {
+  return [
+    entry.tokenId,
+    entry.chain,
+    entry.tokenAddress,
+    entry.symbol,
+    entry.name,
+    entry.status,
+    entry.firstSeenAt,
+    entry.launchedAt ?? null,
+    entry.expressedAt ?? null,
+    entry.leadHours ?? null,
+    entry.referent.referent,
+    entry.referent.confidence,
+    entry.updatedAt,
+    JSON.stringify(entry),
   ];
 }

@@ -1,7 +1,13 @@
 import type { Chain } from './chains';
 
-/** Every upstream we pull trending lists from. */
-export type SourceId = 'dextools' | 'dexscreener' | 'geckoterminal' | 'manual';
+/**
+ * Every upstream we pull tokens from. `launches` is the supply side: new pools
+ * read straight off DEX factory events, before any list has noticed them.
+ */
+export type SourceId = 'dextools' | 'dexscreener' | 'geckoterminal' | 'launches' | 'manual';
+
+/** Sources that measure demand. A token on one of these is trending. */
+export const TRENDING_SOURCES: readonly SourceId[] = ['dextools', 'dexscreener', 'geckoterminal'];
 
 export interface TxnCounts {
   buys: number;

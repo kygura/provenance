@@ -42,9 +42,24 @@ export class JsonClient {
   }
 
   async getJson<T = unknown>(path: string, signal?: AbortSignal): Promise<T> {
+    return this.request<T>('GET', path, undefined, signal);
+  }
+
+  /**
+   * POST a JSON body and parse a JSON reply. JSON-RPC is the only caller; it
+   * rides the same limiter and retry policy as every GET so public nodes see
+   * the same etiquette.
+   */
+  async postJson<T = unknown>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+    return this.request<T>('POST', path, body, signal);
+  }
+
+  private async request<T>(method: 'GET' | 'POST', path: string, body: unknown, signal?: AbortSignal): Promise<T> {
     const url = path.startsWith('http') ? path : `${this.options.baseUrl}${path}`;
     const attempts = this.options.attempts ?? 3;
     const timeoutMs = this.options.timeoutMs ?? 20_000;
+    const headers: Record<string, string> = { accept: 'application/json', ...(this.options.headers ?? {}) };
+    if (method === 'POST') headers['content-type'] = 'application/json';
 
     return retry(
       () =>
@@ -55,11 +70,13 @@ export class JsonClient {
           signal?.addEventListener('abort', onAbort, { once: true });
           try {
             const response = await fetch(url, {
-              headers: { accept: 'application/json', ...(this.options.headers ?? {}) },
+              method,
+              headers,
+              body: method === 'POST' ? JSON.stringify(body) : undefined,
               signal: controller.signal,
             });
             if (!response.ok) {
-              throw new HttpError(`GET ${url} -> ${response.status}`, response.status, url);
+              throw new HttpError(`${method} ${url} -> ${response.status}`, response.status, url);
             }
             return (await response.json()) as T;
           } finally {

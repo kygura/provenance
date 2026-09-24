@@ -1,7 +1,70 @@
 {
   "chain": "ethereum",
-  "note": "Synthetic EVM JSON-RPC responses for the NYAN token in the DexTools/DexScreener fixtures. Hex words are generated, not hand-typed, so the ABI decoders are genuinely exercised. Params match structurally, so only the calldata selector distinguishes the eth_call entries.",
+  "note": "Synthetic EVM JSON-RPC responses for the NYAN token in the DexTools/DexScreener fixtures. Hex words are generated, not hand-typed, so the ABI decoders are genuinely exercised. Params match structurally, so only the calldata selector distinguishes the eth_call entries. Pair-scoped eth_call entries pin `to` and come first, because the token entries match any address.",
   "entries": [
+    {
+      "method": "eth_getCode",
+      "params": [
+        "0x9f2c4b1ea7d0ab3e6c5f81d2a94b7e03cd15a8fe"
+      ],
+      "result": "0x60806040526004361060585760003560e01c8063a9059cbb14605c57806370a0823114605c57806318160ddd14605c578063313ce56714605c577f00000000000000000000006340c10f1900000000000000000000000000000000505b600080fd5b00fea164736f6c6343000814000a",
+      "note": "Synthetic runtime code: an ERC-20 dispatcher (transfer, balanceOf, totalSupply, decimals) with no privileged selectors. A PUSH32 immediate carries the bytes 63 40c10f19 (mint(address,uint256)) as data, which the disassembly walk must skip, and a solc CBOR trailer."
+    },
+    {
+      "method": "eth_call",
+      "params": [
+        {
+          "to": "0x31d8a77bc4e2059f6a0c8d17b3e94f2051ca7d60",
+          "data": "0x18160ddd"
+        }
+      ],
+      "result": "0x00000000000000000000000000000000000000000000003635c9adc5dea00000",
+      "note": "LP totalSupply() on the NYAN pair: 1000 LP. Pinned by `to` and listed before the token's unpinned totalSupply entry, which would otherwise match first. The DexTools fixture labels this pair Uniswap V3; the RPC fixture treats it as a V2-style pair so the LP path is exercised."
+    },
+    {
+      "method": "eth_call",
+      "params": [
+        {
+          "to": "0x31d8a77bc4e2059f6a0c8d17b3e94f2051ca7d60",
+          "data": "0x70a082310000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "result": "0x00000000000000000000000000000000000000000000000000000000000003e8",
+      "note": "LP at the null address: the 1000-wei MINIMUM_LIQUIDITY every V2 pair burns on creation."
+    },
+    {
+      "method": "eth_call",
+      "params": [
+        {
+          "to": "0x31d8a77bc4e2059f6a0c8d17b3e94f2051ca7d60",
+          "data": "0x70a08231000000000000000000000000000000000000000000000000000000000000dead"
+        }
+      ],
+      "result": "0x00000000000000000000000000000000000000000000003635c9adc5de9ffc18",
+      "note": "The rest of the LP sent to 0x...dead: LP burned is 100%."
+    },
+    {
+      "method": "eth_call",
+      "params": [
+        {
+          "to": "0x31d8a77bc4e2059f6a0c8d17b3e94f2051ca7d60",
+          "data": "0x70a08231000000000000000000000000663a5c229c09b049e36dcc11a9b0d4a8eb9db214"
+        }
+      ],
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "note": "Unicrypt V2 locker holds no LP."
+    },
+    {
+      "method": "eth_call",
+      "params": [
+        {
+          "to": "0x31d8a77bc4e2059f6a0c8d17b3e94f2051ca7d60",
+          "data": "0x70a08231000000000000000000000000e2fe530c047f2d85298b07d9333c05737f1435fb"
+        }
+      ],
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "note": "Team Finance holds no LP."
+    },
     {
       "method": "eth_call",
       "params": [

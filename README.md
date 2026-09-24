@@ -34,6 +34,17 @@ and a tier. A copycat of a live meme scores badly. A clean revival of a proven
 meme with untouched mint authority and distributed holders scores well. A great
 story on a token whose mint authority is still live gets flagged, not promoted.
 
+## Two lanes
+
+Provenance also watches supply, not only demand. The launch lane (merged in from
+the `dexscanner` project) reads new Uniswap pools straight off the factory
+contracts and gates them hard: liquidity, burned or locked LP, no live
+mint/blacklist/pause functions in the bytecode, holder spread. Then one cheap
+model call asks whether the name refers to anything outside crypto. Survivors go
+on a watchlist. When a watchlisted token later shows up on a trending list, the
+run marks it `expressed` and records how many hours that took. See
+[`docs/launch-lane.md`](docs/launch-lane.md).
+
 ## What runs where
 
 | Piece | Runs on | Cost |
@@ -52,8 +63,11 @@ headless Chromium.
 ```
 discover ─┬─ dextools      (playwright, XHR interception w/ DOM fallback)
           ├─ dexscreener   (free public API: boosts, profiles, pairs)
-          └─ geckoterminal (free public API: trending pools)
+          ├─ geckoterminal (free public API: trending pools)
+          └─ launches      (factory PairCreated/PoolCreated over public RPC)
                 │
+          split lanes         launch-only tokens → launch lane (docs/launch-lane.md)
+                │             watchlisted tokens seen trending → expressed
           merge + triage      cross-source agreement, liquidity/volume/age filters
                 │
           chain analysis      holders, concentration, supply, authorities, LP,
@@ -101,6 +115,8 @@ Live run:
 
 ```bash
 bun run apps/worker/src/cli.ts discover                 # smoke-test the scrapers
+bun run apps/worker/src/cli.ts launches                 # smoke-test the launch scan
+bun run apps/worker/src/cli.ts watchlist                # what was caught at launch, and what became of it
 bun run apps/worker/src/cli.ts analyze solana:<mint>    # one token, full treatment
 bun run apps/worker/src/cli.ts run
 ```
@@ -109,7 +125,7 @@ bun run apps/worker/src/cli.ts run
 
 ```
 packages/core       contracts, types, config, logging, utilities
-packages/sources    trending discovery + normalization + merge
+packages/sources    trending + launch discovery, normalization, merge, lanes
 packages/chain      holder distribution, supply, authorities, risk flags
 packages/research   evidence collection + LLM provenance synthesis
 packages/store      libSQL persistence
