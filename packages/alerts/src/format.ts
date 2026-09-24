@@ -87,6 +87,12 @@ export function renderMarketLines(metrics: MarketMetrics | undefined, chain: Cha
     }
     if (chain.ownerRenounced !== undefined) authority.push(`owner ${chain.ownerRenounced ? 'renounced' : 'RETAINED'}`);
     if (chain.lpBurnedPct !== undefined) authority.push(`LP burned ${pct1(chain.lpBurnedPct)}`);
+    if (chain.lpLockedPct !== undefined) authority.push(`LP locked ${pct1(chain.lpLockedPct)}`);
+    if (chain.privilegedFunctions !== undefined) {
+      authority.push(
+        chain.privilegedFunctions.length === 0 ? 'no privileged fns' : `fns ${chain.privilegedFunctions.join('/')}`,
+      );
+    }
     if (chain.creatorHoldingPct !== undefined) authority.push(`creator ${pct1(chain.creatorHoldingPct)}`);
     if (authority.length > 0) lines.push(`• ${authority.join(' · ')}`);
   }

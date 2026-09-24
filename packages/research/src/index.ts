@@ -67,3 +67,17 @@ export {
 } from './evidence';
 export { HttpClient, HttpError, USER_AGENT, type FetchLike } from './http';
 export { TokenMetaCollector, tokenMetaEvidence } from './collectors/tokenmeta';
+export {
+  REFERENT_PROMPT_VERSION,
+  REFERENT_SYSTEM_PROMPT,
+  REFERENT_TOOL_NAME,
+  WebSearchReferentChecker,
+  StubReferentChecker,
+  createReferentChecker,
+  buildReferentPrompt,
+  buildReferentExtractionPrompt,
+  parseReferentDraft,
+  groundConfidence,
+  referentTool,
+  type ReferentOptions,
+} from './referent';

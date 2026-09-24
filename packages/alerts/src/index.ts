@@ -70,6 +70,9 @@ export {
   type NarrativeClusterContext,
 } from './rules';
 
+// Launch lane
+export { gateLaunchChain, gateLaunchMarket, launchCataloguedAlert, launchExpressedAlert } from './launches';
+
 // Channels
 export {
   buildDiscordPayload,

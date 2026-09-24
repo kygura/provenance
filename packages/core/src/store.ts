@@ -2,6 +2,7 @@ import type { Alert, DeliveryResult } from './alerts';
 import type { TokenSnapshot } from './market';
 import type { ChainAnalysis } from './onchain';
 import type { MemeRecord, MemeSighting, ProvenanceReport, ProvenanceScore } from './provenance';
+import type { WatchEntry, WatchQuery } from './watchlist';
 
 export type RunStatus = 'running' | 'ok' | 'partial' | 'failed';
 
@@ -23,6 +24,23 @@ export interface RunStats {
   llmCostUsd: number;
   sourceErrors: { source: string; error: string }[];
   durationMs?: number;
+  /** Launch-lane counters. Absent on runs from before the lane existed. */
+  launches?: LaunchStats;
+}
+
+export interface LaunchStats {
+  /** Launch-only tokens discovered this run. */
+  discovered: number;
+  /** Rejected by a hard filter, before or after chain analysis. */
+  rejected: number;
+  /** Passed the gate but failed the referent check. */
+  unvalidated: number;
+  /** Newly added to the watchlist. */
+  catalogued: number;
+  /** Watchlisted tokens seen trending for the first time this run. */
+  expressed: number;
+  /** Watchlisted tokens aged out this run. */
+  dormant: number;
 }
 
 /** One token's complete picture for a run: what the dashboard renders. */
@@ -92,6 +110,11 @@ export interface ProvenanceStore {
   listDossiers(query?: DossierQuery): Promise<TokenDossier[]>;
   getDossier(tokenId: string, runId?: string): Promise<TokenDossier | null>;
   listAlerts(limit?: number): Promise<Alert[]>;
+
+  /** Launch-lane watchlist. `saveWatch` upserts, keeping `firstSeenAt`. */
+  saveWatch(entry: WatchEntry): Promise<void>;
+  getWatch(tokenId: string): Promise<WatchEntry | null>;
+  listWatch(query?: WatchQuery): Promise<WatchEntry[]>;
 
   /** Cache for fetched evidence pages, keyed by URL hash. */
   getCachedEvidence(key: string, maxAgeHours: number): Promise<string | null>;

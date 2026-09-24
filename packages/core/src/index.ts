@@ -2,6 +2,7 @@ export * from './chains';
 export * from './market';
 export * from './onchain';
 export * from './provenance';
+export * from './watchlist';
 export * from './alerts';
 export * from './config';
 export * from './store';

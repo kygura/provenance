@@ -16,6 +16,8 @@ import type {
   RunStatus,
   TokenDossier,
   TokenSnapshot,
+  WatchEntry,
+  WatchQuery,
 } from '@provenance/core';
 import { createLogger, nowIso, silentLogger } from '@provenance/core';
 import {
@@ -31,10 +33,12 @@ import {
   rowToRun,
   rowToScore,
   rowToSnapshot,
+  rowToWatch,
   scoreRowArgs,
   snapshotRowArgs,
   tokenRowArgs,
   text,
+  watchRowArgs,
   type SqlRow,
 } from './mappers';
 import { applyLocalPragmas, isRemoteUrl, migrate } from './migrate';
@@ -631,6 +635,63 @@ export class LibsqlStore implements ProvenanceStore {
   private async latestRunId(): Promise<string | null> {
     const row = await this.one('SELECT id FROM runs ORDER BY started_at DESC, id DESC LIMIT 1');
     return row ? text((row as SqlRow).id) || null : null;
+  }
+
+  // -------------------------------------------------------------------------
+  // watchlist
+  // -------------------------------------------------------------------------
+
+  /**
+   * Upsert that never moves `first_seen_at` or an existing `expressed_at`:
+   * lead time is measured from the first catalogue, and a token that dipped
+   * off the lists and came back has not expressed twice.
+   */
+  async saveWatch(entry: WatchEntry): Promise<void> {
+    await this.write([
+      {
+        sql: `INSERT INTO watchlist (token_id, chain, address, symbol, name, status, first_seen_at,
+                launched_at, expressed_at, lead_hours, referent, referent_confidence, updated_at, entry_json)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(token_id) DO UPDATE SET
+                symbol = excluded.symbol,
+                name = excluded.name,
+                status = excluded.status,
+                first_seen_at = min(watchlist.first_seen_at, excluded.first_seen_at),
+                launched_at = coalesce(watchlist.launched_at, excluded.launched_at),
+                expressed_at = coalesce(watchlist.expressed_at, excluded.expressed_at),
+                lead_hours = coalesce(watchlist.lead_hours, excluded.lead_hours),
+                referent = excluded.referent,
+                referent_confidence = excluded.referent_confidence,
+                updated_at = excluded.updated_at,
+                entry_json = excluded.entry_json`,
+        args: watchRowArgs(entry),
+      },
+    ]);
+  }
+
+  async getWatch(tokenId: string): Promise<WatchEntry | null> {
+    const row = await this.one({ sql: 'SELECT * FROM watchlist WHERE token_id = ?', args: [tokenId] });
+    return row ? rowToWatch(row as SqlRow, this.logger) : null;
+  }
+
+  async listWatch(query: WatchQuery = {}): Promise<WatchEntry[]> {
+    const where: string[] = [];
+    const args: (string | number)[] = [];
+    if (query.status) {
+      where.push('status = ?');
+      args.push(query.status);
+    }
+    if (query.chain) {
+      where.push('chain = ?');
+      args.push(query.chain);
+    }
+    args.push(Math.max(1, Math.trunc(query.limit ?? 200)));
+    const rows = await this.all({
+      sql: `SELECT * FROM watchlist ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+            ORDER BY first_seen_at DESC, token_id ASC LIMIT ?`,
+      args,
+    });
+    return rows.map((row) => rowToWatch(row as SqlRow, this.logger));
   }
 
   // -------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import type { AppConfig, Logger, SourceConfig, SourceContext, TrendingEntry, Tre
 import { DexScreenerSource } from './dexscreener';
 import { DexToolsSource } from './dextools';
 import { GeckoTerminalSource } from './geckoterminal';
+import { LaunchSource } from './launches';
 
 export interface SourceError {
   source: string;
@@ -45,6 +46,12 @@ export function createSources(app: AppConfig, logger: Logger): TrendingSource[] 
         break;
       case 'dextools':
         sources.push(new DexToolsSource(config));
+        break;
+      case 'launches':
+        // Two switches: the source row gates the scan, `launches.enabled` gates
+        // the whole lane. Scanning for a lane nobody consumes is wasted RPC.
+        if (app.launches.enabled) sources.push(new LaunchSource(config));
+        else logger.debug('launch lane disabled', { source: config.id });
         break;
       default:
         logger.debug('no implementation for source', { source: config.id });

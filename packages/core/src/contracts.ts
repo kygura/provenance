@@ -4,6 +4,7 @@ import type { AppConfig, SourceConfig } from './config';
 import type { TokenSnapshot, TrendingEntry } from './market';
 import type { ChainAnalysis } from './onchain';
 import type { EvidenceItem, MemeSighting, ProvenanceReport, ProvenanceScore } from './provenance';
+import type { ReferentCheck } from './watchlist';
 
 /** A trending-list provider. One implementation per upstream site. */
 export interface TrendingSource {
@@ -64,6 +65,15 @@ export interface ProvenanceResearcher {
     evidence: EvidenceItem[],
     ctx: ResearchContext,
   ): Promise<ProvenanceReport>;
+}
+
+/**
+ * The launch lane's cheap cultural gate. One question, a small search budget,
+ * and a boolean answer; the full `ProvenanceResearcher` runs only once a
+ * catalogued token starts trending.
+ */
+export interface ReferentChecker {
+  check(snapshot: TokenSnapshot, ctx: ResearchContext): Promise<ReferentCheck>;
 }
 
 export interface ScoringInput {

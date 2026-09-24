@@ -16,12 +16,16 @@ import {
   type ProvenanceReport,
   type ProvenanceScore,
   type ProvenanceStore,
+  type ReferentCheck,
   type RunRecord,
   type RunStats,
   type RunStatus,
   type ScoringInput,
   type TokenDossier,
   type TokenSnapshot,
+  type WatchEntry,
+  type WatchQuery,
+  TRENDING_SOURCES,
   loadConfig,
   nowIso,
   type MemeRecord,
@@ -36,6 +40,7 @@ export function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     ...overrides,
     pipeline: { ...base.pipeline, ...(overrides.pipeline ?? {}) },
     llm: { ...base.llm, ...(overrides.llm ?? {}) },
+    launches: { ...base.launches, ...(overrides.launches ?? {}) },
   };
 }
 
@@ -147,6 +152,7 @@ export class FakeStore implements ProvenanceStore {
   /** Every meme id the pipeline resolved, in order. */
   readonly resolvedMemes: string[] = [];
   readonly evidenceCache = new Map<string, string>();
+  readonly watch = new Map<string, WatchEntry>();
   closed = false;
   /** Set to make a specific method reject, for failure-isolation tests. */
   failOn?: { method: string; times?: number };
@@ -307,6 +313,35 @@ export class FakeStore implements ProvenanceStore {
     this.evidenceCache.set(key, content);
   }
 
+  async saveWatch(entry: WatchEntry): Promise<void> {
+    this.guard('saveWatch');
+    const prior = this.watch.get(entry.tokenId);
+    // Same keep-the-first semantics as the libSQL upsert.
+    this.watch.set(
+      entry.tokenId,
+      prior
+        ? {
+            ...entry,
+            firstSeenAt: prior.firstSeenAt < entry.firstSeenAt ? prior.firstSeenAt : entry.firstSeenAt,
+            ...(prior.expressedAt ? { expressedAt: prior.expressedAt, leadHours: prior.leadHours } : {}),
+          }
+        : entry,
+    );
+  }
+
+  async getWatch(tokenId: string): Promise<WatchEntry | null> {
+    this.guard('getWatch');
+    return this.watch.get(tokenId) ?? null;
+  }
+
+  async listWatch(query: WatchQuery = {}): Promise<WatchEntry[]> {
+    this.guard('listWatch');
+    return [...this.watch.values()]
+      .filter((entry) => !query.status || entry.status === query.status)
+      .sort((a, b) => b.firstSeenAt.localeCompare(a.firstSeenAt))
+      .slice(0, query.limit ?? 200);
+  }
+
   async close(): Promise<void> {
     this.guard('close');
     this.closed = true;
@@ -327,6 +362,66 @@ export interface HarnessOptions {
   createResearcher?: () => never;
   scoreToken?: (input: ScoringInput) => ProvenanceScore;
   store?: FakeStore;
+  /** Launch lane: referent verdict per token; defaults to a validated high. */
+  referent?: (snapshot: TokenSnapshot) => ReferentCheck;
+  /** Launch lane: chain-gate verdict; defaults to pass. */
+  chainGate?: (chain: ChainAnalysis | undefined) => { passed: boolean; reasons: string[] };
+}
+
+export function makeReferent(overrides: Partial<ReferentCheck> = {}): ReferentCheck {
+  return {
+    validated: true,
+    referent: 'a film character',
+    summary: 'Recognised well outside crypto.',
+    confidence: 'high',
+    model: 'test',
+    checkedAt: nowIso(),
+    citations: [],
+    usage: { inputTokens: 10, outputTokens: 10, costUsd: 0.01 },
+    ...overrides,
+  };
+}
+
+/** A launch-lane snapshot: its only appearance is on the `launches` source. */
+export function makeLaunchSnapshot(tokenId: string, overrides: Partial<TokenSnapshot> = {}): TokenSnapshot {
+  const base = makeSnapshot(tokenId, overrides);
+  return {
+    ...base,
+    sourceCount: 1,
+    appearances: [
+      {
+        source: 'launches',
+        rank: 1,
+        chain: base.chain,
+        tokenAddress: base.tokenAddress,
+        symbol: base.symbol,
+        name: base.name,
+        capturedAt: base.capturedAt,
+        metrics: base.metrics,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+/** A snapshot that appeared on a trending source. */
+export function makeTrendingSnapshot(tokenId: string, source: 'dexscreener' | 'geckoterminal' = 'dexscreener'): TokenSnapshot {
+  const base = makeSnapshot(tokenId);
+  return {
+    ...base,
+    appearances: [
+      {
+        source,
+        rank: 1,
+        chain: base.chain,
+        tokenAddress: base.tokenAddress,
+        symbol: base.symbol,
+        name: base.name,
+        capturedAt: base.capturedAt,
+        metrics: base.metrics,
+      },
+    ],
+  };
 }
 
 export interface Harness {
@@ -405,6 +500,12 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       stages.push('triage');
       return input;
     },
+    splitLanes(input) {
+      const isLaunchOnly = (snapshot: TokenSnapshot) =>
+        snapshot.appearances.some((a) => a.source === 'launches') &&
+        !snapshot.appearances.some((a) => (TRENDING_SOURCES as readonly string[]).includes(a.source));
+      return { trending: input.filter((s) => !isLaunchOnly(s)), launches: input.filter(isLaunchOnly) };
+    },
     async analyzeToken(snapshot): Promise<ChainAnalysis> {
       stages.push(`analyze:${snapshot.tokenId}`);
       if (options.analyzeToken) return options.analyzeToken(snapshot);
@@ -430,6 +531,15 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
         },
       };
     },
+    createReferentChecker() {
+      stages.push('createReferentChecker');
+      return {
+        async check(snapshot) {
+          stages.push(`referent:${snapshot.tokenId}`);
+          return options.referent ? options.referent(snapshot) : makeReferent();
+        },
+      };
+    },
     promptVersion: 'test-1',
     createStore(): ProvenanceStore {
       stages.push('createStore');
@@ -448,6 +558,21 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       stages.push(`alerts:${input.snapshot.tokenId}`);
       if (options.createAlerts) return options.createAlerts(runId, input);
       return [];
+    },
+    gateLaunchMarket(snapshot) {
+      const liquidity = snapshot.metrics.liquidityUsd;
+      return liquidity !== undefined && liquidity >= 40_000
+        ? { passed: true, reasons: [] }
+        : { passed: false, reasons: ['liquidity'] };
+    },
+    gateLaunchChain(chain) {
+      return options.chainGate ? options.chainGate(chain) : { passed: true, reasons: [] };
+    },
+    launchCataloguedAlert(runId, entry) {
+      return { ...makeAlert(runId, entry.tokenId, 'launch-catalogued'), id: `${runId}:${entry.tokenId}:catalogued` };
+    },
+    launchExpressedAlert(runId, entry) {
+      return { ...makeAlert(runId, entry.tokenId, 'launch-expressed'), id: `${runId}:${entry.tokenId}:expressed` };
     },
     createSinks(): AlertChannelSink[] {
       stages.push('createSinks');

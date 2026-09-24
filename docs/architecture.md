@@ -25,6 +25,11 @@ upstreams with different shapes, vocabularies and reliability into one
 `bestRank`) because a token on two lists is a different observation from a token
 on one.
 
+The `launches` source is the one exception to "what is trending": it reads new
+pools off DEX factory events, so the pipeline sees supply before demand.
+`splitLanes` sends launch-only tokens down a separate lane with hard gates and
+a watchlist; see `launch-lane.md`.
+
 **chain** owns "who holds it". It is deliberately dependency-free — raw JSON-RPC
 over `fetch` — because every wallet SDK that would make this convenient also
 wants an API key or a paid endpoint. It never throws: an unsupported chain
@@ -48,7 +53,7 @@ model inside a nonce-delimited block that the system prompt marks as evidence
 and never as instruction. A token description is attacker-controlled text, and
 it feeds the field the score weighs most.
 
-**alerts** owns judgement — scoring and rules. Separated from delivery so the
+**alerts** owns judgement — scoring and rules, and the launch lane's gates. Separated from delivery so the
 scoring model can be tuned and tested without touching a network, and so rules
 can be added without touching the pipeline.
 

@@ -176,6 +176,42 @@ export const MIGRATIONS: Migration[] = [
   },
   {
     version: 2,
+    name: 'watchlist',
+    statements: [
+      // ---- watchlist --------------------------------------------------------
+      // The launch lane's catalogue. Keyed by token, not by run: an entry is a
+      // standing claim ("caught at launch, waiting to see if demand arrives")
+      // that later runs update in place. Deliberately no foreign key to
+      // `tokens`, because a launch-only token is catalogued in a run that may
+      // not have saved a snapshot for it, and the entry must outlive a run
+      // being deleted.
+      `CREATE TABLE IF NOT EXISTS watchlist (
+  token_id TEXT PRIMARY KEY,
+  chain TEXT NOT NULL,
+  address TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  launched_at TEXT,
+  expressed_at TEXT,
+  lead_hours REAL,
+  referent TEXT,
+  referent_confidence TEXT,
+  updated_at TEXT NOT NULL,
+  entry_json TEXT NOT NULL
+)`,
+      `CREATE INDEX IF NOT EXISTS idx_watchlist_status ON watchlist (status, first_seen_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_watchlist_first_seen_at ON watchlist (first_seen_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_watchlist_expressed_at ON watchlist (expressed_at DESC)`,
+    ],
+  },
+  {
+    // Numbered 3, not 2: 'watchlist' shipped as version 2 first, and the runner
+    // skips any version it has already recorded. Reusing 2 here would leave
+    // every database that applied 'watchlist' without the memes table forever,
+    // and every provenance write would then fail on the missing meme_id column.
+    version: 3,
     name: 'meme-identity',
     statements: [
       // ---- memes ------------------------------------------------------------

@@ -214,10 +214,11 @@ export function ExternalLink({
   );
 }
 
-export function SiteNav({ current }: { current: 'run' | 'alerts' | 'runs' }) {
-  const items: { key: 'run' | 'alerts' | 'runs'; href: string; label: string }[] = [
+export function SiteNav({ current }: { current: 'run' | 'alerts' | 'watchlist' | 'runs' }) {
+  const items: { key: 'run' | 'alerts' | 'watchlist' | 'runs'; href: string; label: string }[] = [
     { key: 'run', href: '/', label: 'Run' },
     { key: 'alerts', href: '/alerts', label: 'Alerts' },
+    { key: 'watchlist', href: '/watchlist', label: 'Watchlist' },
     { key: 'runs', href: '/runs', label: 'History' },
   ];
   return (

@@ -169,7 +169,32 @@ CREATE TABLE IF NOT EXISTS evidence_cache (
 
 CREATE INDEX IF NOT EXISTS idx_evidence_cache_fetched_at ON evidence_cache (fetched_at DESC);
 
--- ===== migration 002: meme-identity =====
+-- ===== migration 002: watchlist =====
+
+CREATE TABLE IF NOT EXISTS watchlist (
+  token_id TEXT PRIMARY KEY,
+  chain TEXT NOT NULL,
+  address TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  launched_at TEXT,
+  expressed_at TEXT,
+  lead_hours REAL,
+  referent TEXT,
+  referent_confidence TEXT,
+  updated_at TEXT NOT NULL,
+  entry_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_watchlist_status ON watchlist (status, first_seen_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_watchlist_first_seen_at ON watchlist (first_seen_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_watchlist_expressed_at ON watchlist (expressed_at DESC);
+
+-- ===== migration 003: meme-identity =====
 
 CREATE TABLE IF NOT EXISTS memes (
   id TEXT PRIMARY KEY,

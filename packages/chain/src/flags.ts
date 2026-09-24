@@ -6,7 +6,7 @@
  * and the dashboard renders them. Rename one and you break history.
  */
 
-import type { ChainAnalysis, MarketMetrics, RiskFlag, RiskSeverity } from '@provenance/core';
+import type { ChainAnalysis, MarketMetrics, PrivilegedFunction, RiskFlag, RiskSeverity } from '@provenance/core';
 
 /**
  * Every tunable number in one place. Percentages are 0-100, matching the repo
@@ -43,7 +43,30 @@ export type FlagAnalysis = Pick<
   | 'creatorHoldingPct'
   | 'lpBurnedPct'
   | 'lpLockedPct'
+  | 'contractVerified'
+  | 'privilegedFunctions'
 >;
+
+/**
+ * Severity of each `privileged-<kind>` flag while an owner may still call it.
+ * Mint, blacklist and pause can each trap or dilute holders outright; fee and
+ * max-tx setters are usually bounded nuisances until proven otherwise.
+ */
+export const PRIVILEGED_SEVERITY: Readonly<Record<PrivilegedFunction, RiskSeverity>> = {
+  mint: 'critical',
+  blacklist: 'critical',
+  pause: 'critical',
+  fee: 'warn',
+  'max-tx': 'warn',
+};
+
+const PRIVILEGED_DESCRIPTION: Readonly<Record<PrivilegedFunction, string>> = {
+  mint: 'a mint function (supply can be inflated)',
+  blacklist: 'a blacklist/bot-list function (holders can be blocked from selling)',
+  pause: 'a pause function (transfers can be halted)',
+  fee: 'a fee/tax setter (sell tax can be raised)',
+  'max-tx': 'a max-transaction/max-wallet setter (sells can be capped)',
+};
 
 export interface FlagInput {
   analysis: FlagAnalysis;
@@ -101,6 +124,31 @@ export function evaluateFlags(input: FlagInput): RiskFlag[] {
       code: 'owner-not-renounced',
       severity: 'warn',
       detail: 'Contract ownership is not renounced; privileged functions remain callable.',
+    });
+  }
+
+  // Bytecode-detected privileged entry points. Renounced ownership downgrades
+  // to info rather than silencing: `owner()` being zero neutralises Ownable
+  // gates but not role-based ones, and the reader should still see the finding.
+  for (const kind of new Set(a.privilegedFunctions ?? [])) {
+    const renounced = a.ownerRenounced === true;
+    flags.push({
+      code: `privileged-${kind}`,
+      severity: renounced ? 'info' : PRIVILEGED_SEVERITY[kind],
+      detail: renounced
+        ? `Bytecode exposes ${PRIVILEGED_DESCRIPTION[kind]}; ownership is renounced, so it is inert if owner-gated.`
+        : `Bytecode exposes ${PRIVILEGED_DESCRIPTION[kind]} and ownership is ${
+            a.ownerRenounced === false ? 'not renounced' : 'undetermined'
+          }.`,
+    });
+  }
+
+  // Only an explicit "not verified" answer; undefined means nobody asked.
+  if (a.contractVerified === false) {
+    flags.push({
+      code: 'contract-unverified',
+      severity: 'warn',
+      detail: 'Contract source is not verified on the explorer; its logic cannot be reviewed.',
     });
   }
 
