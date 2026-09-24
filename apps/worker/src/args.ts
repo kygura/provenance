@@ -8,6 +8,8 @@ import { type AppConfig, type Chain, normalizeChain } from '@provenance/core';
 export const COMMANDS = [
   'run',
   'discover',
+  'launches',
+  'watchlist',
   'analyze',
   'migrate',
   'seed',
@@ -24,7 +26,7 @@ export function isCommand(value: string): value is CommandName {
 }
 
 /** Flags that consume the following argument when not written as `--flag=value`. */
-export const VALUE_FLAGS = ['limit', 'chains', 'sources', 'run', 'format'] as const;
+export const VALUE_FLAGS = ['limit', 'chains', 'sources', 'run', 'format', 'status'] as const;
 
 export const BOOLEAN_FLAGS = [
   'dry-run',

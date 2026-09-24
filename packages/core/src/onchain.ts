@@ -25,6 +25,13 @@ export interface TokenSupply {
   burnedPct?: number;
 }
 
+/**
+ * Privileged entry points found in the deployed bytecode's dispatch table.
+ * Read from the code itself, so it works on unverified contracts; whether the
+ * function is still callable depends on who owns the contract.
+ */
+export type PrivilegedFunction = 'mint' | 'blacklist' | 'pause' | 'fee' | 'max-tx';
+
 export type AnalysisMethod = 'rpc' | 'explorer' | 'indexer' | 'partial' | 'unavailable';
 
 /**
@@ -68,6 +75,11 @@ export interface ChainAnalysis {
   ownerRenounced?: boolean;
   /** EVM: contract source verified on the public explorer. */
   contractVerified?: boolean;
+  /**
+   * EVM: privileged functions present in the bytecode. An empty array means
+   * the code was read and none were found; undefined means it was not read.
+   */
+  privilegedFunctions?: PrivilegedFunction[];
   /** Buy/sell tax in percent where detectable. */
   buyTaxPct?: number;
   sellTaxPct?: number;

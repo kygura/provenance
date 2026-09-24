@@ -6,6 +6,7 @@ import {
   type SourceId,
   type TokenSnapshot,
   type TrendingEntry,
+  TRENDING_SOURCES,
   isEvm,
   ratio,
   tokenId,
@@ -17,13 +18,19 @@ import { ageHoursFrom, countDefinedMetrics, isRecord, mergeSocials, metricKeys }
 /**
  * MERGE PRECEDENCE (numeric market data).
  *
- *   dexscreener (40) > geckoterminal (30) > dextools (20) > manual (10)
+ *   dexscreener (40) > geckoterminal (30) > dextools (20) > launches (15) > manual (10)
  *
  * DexScreener and GeckoTerminal are structured, versioned JSON APIs whose
  * numbers come straight from their indexers; DexTools is scraped, so its values
  * are rendered-and-reparsed at best and a guessed XHR shape at worst. `manual`
  * is a hand-seeded backfill row and is deliberately ranked last so a human
  * typo can never silently overwrite a live API reading.
+ *
+ * `launches` hydrates through the same DexScreener endpoint, so its numbers are
+ * no worse than `dexscreener`'s — but it ranks below every trending source on
+ * purpose. A trending row was read at the moment a list surfaced the token; a
+ * launch row may be an unindexed stub whose only fact is an estimated creation
+ * time. When a launch starts trending, the trending reading describes it.
  *
  * Within the same source the entry with the MORE COMPLETE `MarketMetrics`
  * (more defined fields) wins, then the better rank. Selection is field by
@@ -34,6 +41,7 @@ export const SOURCE_PRECEDENCE: Record<SourceId, number> = {
   dexscreener: 40,
   geckoterminal: 30,
   dextools: 20,
+  launches: 15,
   manual: 10,
 };
 
@@ -162,6 +170,32 @@ export function mergeToSnapshots(entries: TrendingEntry[]): TokenSnapshot[] {
   }
 
   return snapshots;
+}
+
+export interface Lanes {
+  trending: TokenSnapshot[];
+  launches: TokenSnapshot[];
+}
+
+/**
+ * Splits merged snapshots into the demand lane and the supply lane. A token on
+ * any trending list is trending, even if we also saw it launch: the demand
+ * signal is the stronger observation and the trending pipeline is the deeper
+ * treatment. Only rows seen *solely* by the launch scan go to `launches`.
+ * Anything else — manual-only, or manual plus launch — stays in `trending`,
+ * because a hand-seeded row has always meant "analyse this fully".
+ */
+export function splitLanes(snapshots: TokenSnapshot[]): Lanes {
+  const trending: TokenSnapshot[] = [];
+  const launches: TokenSnapshot[] = [];
+  for (const snapshot of snapshots) {
+    const sources = snapshot.appearances.map((entry) => entry.source);
+    const launchOnly = sources.length > 0 && sources.every((source) => source === 'launches');
+    const onTrendingList = sources.some((source) => TRENDING_SOURCES.includes(source));
+    if (launchOnly && !onTrendingList) launches.push(snapshot);
+    else trending.push(snapshot);
+  }
+  return { trending, launches };
 }
 
 function stripUndefined(value: PairInfo): Partial<PairInfo> {

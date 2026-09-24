@@ -5,8 +5,10 @@
  */
 import {
   type RunRecord,
+  type RunStats,
   type TokenDossier,
   type TokenSnapshot,
+  type WatchEntry,
   formatPct,
   formatUsd,
   truncate,
@@ -98,6 +100,32 @@ export function snapshotTable(snapshots: TokenSnapshot[], style: Style, notes?: 
     notes?.get(snapshot.tokenId) ?? '',
   ]);
   return table(['#', 'SYMBOL', 'CHAIN', 'RANK', 'SRC', 'LIQ', 'VOL24H', '24H', 'NOTE'], rows, style);
+}
+
+/** The launch lane's catalogue: what was caught at launch, and what became of it. */
+export function watchTable(entries: WatchEntry[], style: Style): string {
+  const rows = entries.map((entry) => [
+    truncate(entry.symbol || '?', 12),
+    entry.chain,
+    entry.status === 'expressed'
+      ? style.green(entry.status)
+      : entry.status === 'dormant'
+        ? style.dim(entry.status)
+        : style.cyan(entry.status),
+    truncate(entry.referent.referent || '-', 28),
+    entry.referent.confidence,
+    entry.firstSeenAt.slice(0, 16).replace('T', ' '),
+    entry.leadHours === undefined ? '-' : `${entry.leadHours.toFixed(1)}h`,
+    formatUsd(entry.liquidityUsdAtCatalog),
+  ]);
+  return table(['SYMBOL', 'CHAIN', 'STATUS', 'REFERENT', 'CONF', 'CATALOGUED', 'LEAD', 'LIQ@CAT'], rows, style);
+}
+
+/** One line of launch-lane counters, or nothing for runs from before the lane. */
+export function launchSummary(stats: RunStats): string | undefined {
+  const l = stats.launches;
+  if (!l) return undefined;
+  return `launches: discovered=${l.discovered} rejected=${l.rejected} unvalidated=${l.unvalidated} catalogued=${l.catalogued} expressed=${l.expressed} dormant=${l.dormant}`;
 }
 
 export function dossierTable(dossiers: TokenDossier[], style: Style): string {
@@ -242,6 +270,7 @@ export function renderRun(
       `- finished: ${run.finishedAt ?? '-'}`,
       `- discovered: ${run.stats.discovered}, after filter: ${run.stats.afterFilter}, analysed: ${run.stats.analysed}, reused: ${run.stats.reused}`,
       `- alerts: ${run.stats.alertsFired}, llm cost: $${run.stats.llmCostUsd.toFixed(4)}`,
+      ...(launchSummary(run.stats) ? [`- ${launchSummary(run.stats)}`] : []),
       '',
       '| Symbol | Chain | Score | Tier | Verdict | Gen | Meme | Alerts |',
       '| --- | --- | ---: | --- | --- | ---: | --- | ---: |',
@@ -266,6 +295,7 @@ export function renderRun(
         run.stats.durationMs ? ` in ${(run.stats.durationMs / 1000).toFixed(1)}s` : ''
       }`,
     ),
+    ...(launchSummary(run.stats) ? [style.dim(launchSummary(run.stats) ?? '')] : []),
     '',
   ];
   const errors = run.stats.sourceErrors.map((e) => style.yellow(`! ${e.source}: ${e.error}`));

@@ -1,0 +1,201 @@
+{
+  "schemaVersion": "1.0.0",
+  "pairs": [
+    {
+      "chainId": "ethereum",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/ethereum/0x9a4c7e21b5d83f60a2c9e14d7b3f58a06e2d1c95",
+      "pairAddress": "0x9A4C7e21b5d83F60a2c9E14d7b3F58a06E2d1C95",
+      "labels": [
+        "v2"
+      ],
+      "baseToken": {
+        "address": "0x5b3e7F2A9C14D8E06b71a4c2F9D3e8b1a7C50d42",
+        "name": "Shrek Inu",
+        "symbol": "SHREK"
+      },
+      "quoteToken": {
+        "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        "name": "Wrapped Ether",
+        "symbol": "WETH"
+      },
+      "priceNative": "0.0000000412",
+      "priceUsd": "0.0001071",
+      "txns": {
+        "m5": {
+          "buys": 9,
+          "sells": 6
+        },
+        "h1": {
+          "buys": 131,
+          "sells": 97
+        },
+        "h6": {
+          "buys": 802,
+          "sells": 611
+        },
+        "h24": {
+          "buys": 2914,
+          "sells": 2230
+        }
+      },
+      "volume": {
+        "m5": 3120.4,
+        "h1": 41877.2,
+        "h6": 233104.9,
+        "h24": 912440.3
+      },
+      "priceChange": {
+        "m5": 0.8,
+        "h1": 4.1,
+        "h6": 17.6,
+        "h24": 212.3
+      },
+      "liquidity": {
+        "usd": 186420.55,
+        "base": 868300000,
+        "quote": 35.9
+      },
+      "fdv": 45020000,
+      "marketCap": 45020000,
+      "pairCreatedAt": 1790074800000,
+      "info": {
+        "imageUrl": "https://dd.dexscreener.com/ds-data/tokens/ethereum/shrek-inu.png",
+        "websites": [
+          {
+            "label": "Website",
+            "url": "https://shrekinu.example"
+          }
+        ],
+        "socials": [
+          {
+            "type": "twitter",
+            "url": "https://x.com/shrekinu_eth"
+          },
+          {
+            "type": "telegram",
+            "url": "https://t.me/shrekinu_eth"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "ethereum",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/ethereum/0x3d6e1a8f4c27b90e5d3a6c81f2b47e09a5c3d718",
+      "pairAddress": "0x3D6e1a8f4C27b90E5D3A6c81F2b47E09a5c3d718",
+      "labels": [
+        "v3"
+      ],
+      "baseToken": {
+        "address": "0x5b3e7F2A9C14D8E06b71a4c2F9D3e8b1a7C50d42",
+        "name": "Shrek Inu",
+        "symbol": "SHREK"
+      },
+      "quoteToken": {
+        "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        "name": "Wrapped Ether",
+        "symbol": "WETH"
+      },
+      "priceNative": "0.0000000414",
+      "priceUsd": "0.0001076",
+      "txns": {
+        "m5": {
+          "buys": 1,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 14,
+          "sells": 9
+        },
+        "h6": {
+          "buys": 88,
+          "sells": 61
+        },
+        "h24": {
+          "buys": 201,
+          "sells": 150
+        }
+      },
+      "volume": {
+        "m5": 210.1,
+        "h1": 3304.7,
+        "h6": 18220.5,
+        "h24": 40912.8
+      },
+      "priceChange": {
+        "m5": 0.2,
+        "h1": 3.9,
+        "h6": 16.8,
+        "h24": 44.1
+      },
+      "liquidity": {
+        "usd": 21030.12,
+        "base": 97400000,
+        "quote": 4.1
+      },
+      "fdv": 45230000,
+      "marketCap": 45230000,
+      "pairCreatedAt": 1790125200000
+    },
+    {
+      "chainId": "ethereum",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/ethereum/0x8b2f5d19e6a40c73b8d2e5f16a9c37b04e8d2a61",
+      "pairAddress": "0x8b2F5D19e6A40C73B8D2e5F16a9C37b04E8d2A61",
+      "labels": [
+        "v3"
+      ],
+      "baseToken": {
+        "address": "0xE41D6a9B3c72F05e8D1A6B4C93F27E0d5A8c1B76",
+        "name": "Kermit Coin",
+        "symbol": "KERMIT"
+      },
+      "quoteToken": {
+        "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "name": "USD Coin",
+        "symbol": "USDC"
+      },
+      "priceNative": "0.00003310",
+      "priceUsd": "0.00003310",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 1
+        },
+        "h1": {
+          "buys": 6,
+          "sells": 11
+        },
+        "h6": {
+          "buys": 40,
+          "sells": 57
+        },
+        "h24": {
+          "buys": 118,
+          "sells": 140
+        }
+      },
+      "volume": {
+        "m5": 55.2,
+        "h1": 1422.9,
+        "h6": 7310.4,
+        "h24": 19208.6
+      },
+      "priceChange": {
+        "m5": -0.6,
+        "h1": -7.2,
+        "h6": -21.4,
+        "h24": -38.9
+      },
+      "liquidity": {
+        "usd": 12408.77,
+        "base": 187400000,
+        "quote": 6205.3
+      },
+      "fdv": 3310000,
+      "marketCap": 3310000,
+      "pairCreatedAt": 1790103600000
+    }
+  ]
+}

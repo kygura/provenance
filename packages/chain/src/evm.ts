@@ -37,7 +37,10 @@ import {
   topicToAddress,
   TRANSFER_TOPIC0,
 } from './abi';
+import { readPrivilegedFunctions } from './bytecode';
+import { checkContractVerified } from './explorer';
 import { evaluateFlags } from './flags';
+import { measureLp } from './lp';
 import { concentration } from './metrics';
 import { isEvmBurnAddress, lookupEvmAddress } from './labels';
 import { Budget, RpcClient, type TransportProvider } from './rpc';
@@ -156,6 +159,35 @@ export async function analyzeEvm(
 
   const supply = { total: formatUnits(totalRaw, decimals), decimals };
 
+  // --- contract surface: bytecode, LP, explorer ----------------------------
+  // Cheap, bounded reads, done before the log scan so a long scan cannot
+  // starve them of budget. Each degrades to a note and never throws.
+  const [codeScan, lp, contractVerified] = await Promise.all([
+    readPrivilegedFunctions(client, address),
+    measureLp(client, snapshot.pairs, budget),
+    checkContractVerified({
+      app,
+      chain: snapshot.chain,
+      address,
+      notes,
+      timeoutMs: opts.callTimeoutMs,
+      budget,
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+    }),
+  ]);
+  if (codeScan.note) notes.push(codeScan.note);
+  if (codeScan.matches.length > 0) {
+    notes.push(`Privileged selectors in bytecode: ${codeScan.matches.map((m) => `${m.selector} (${m.kind})`).join(', ')}.`);
+  }
+  notes.push(...lp.notes);
+
+  const surface: Pick<ChainAnalysis, 'privilegedFunctions' | 'lpBurnedPct' | 'lpLockedPct' | 'contractVerified'> = {
+    ...(codeScan.privilegedFunctions !== undefined ? { privilegedFunctions: codeScan.privilegedFunctions } : {}),
+    ...(lp.lpBurnedPct !== undefined ? { lpBurnedPct: lp.lpBurnedPct } : {}),
+    ...(lp.lpLockedPct !== undefined ? { lpLockedPct: lp.lpLockedPct } : {}),
+    ...(contractVerified !== undefined ? { contractVerified } : {}),
+  };
+
   // --- holder reconstruction from Transfer logs ----------------------------
   let latestBlock = 0;
   try {
@@ -167,7 +199,8 @@ export async function analyzeEvm(
       method: 'partial',
       supply,
       ownerRenounced,
-      flags: evaluateFlags({ analysis: { method: 'partial', ownerRenounced }, metrics: snapshot.metrics }),
+      ...surface,
+      flags: evaluateFlags({ analysis: { method: 'partial', ownerRenounced, ...surface }, metrics: snapshot.metrics }),
       durationMs: Date.now() - started,
     };
   }
@@ -235,7 +268,8 @@ export async function analyzeEvm(
       method: 'partial',
       supply,
       ownerRenounced,
-      flags: evaluateFlags({ analysis: { method: 'partial', ownerRenounced }, metrics: snapshot.metrics }),
+      ...surface,
+      flags: evaluateFlags({ analysis: { method: 'partial', ownerRenounced, ...surface }, metrics: snapshot.metrics }),
       durationMs: Date.now() - started,
     };
   }
@@ -286,7 +320,7 @@ export async function analyzeEvm(
     herfindahl: conc.herfindahl,
     gini: conc.gini,
     ownerRenounced,
-    lpBurnedPct: burnedRaw > 0 ? burnedRaw : undefined,
+    ...surface,
     topHolders: rows.slice(0, opts.topN),
     fetchedAt: nowIso(),
     durationMs: Date.now() - started,

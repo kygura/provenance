@@ -21,16 +21,20 @@ import type {
   ChainAnalysis,
   DeliveryResult,
   EvidenceItem,
+  LaunchConfig,
+  LaunchGateResult,
   Logger,
   PipelineConfig,
   ProvenanceReport,
   ProvenanceResearcher,
   ProvenanceScore,
   ProvenanceStore,
+  ReferentChecker,
   ResearchContext,
   ScoringInput,
   TokenSnapshot,
   TrendingEntry,
+  WatchEntry,
 } from '@provenance/core';
 
 export interface DiscoveryResult {
@@ -50,6 +54,8 @@ export interface PipelineDeps {
   mergeToSnapshots(entries: TrendingEntry[]): TokenSnapshot[];
   filterSnapshots(snapshots: TokenSnapshot[], pipeline: PipelineConfig): FilterResult;
   triageOrder(snapshots: TokenSnapshot[]): TokenSnapshot[];
+  /** Launch-only snapshots go to the launch lane; everything else is trending. */
+  splitLanes(snapshots: TokenSnapshot[]): { trending: TokenSnapshot[]; launches: TokenSnapshot[] };
 
   // @provenance/chain
   analyzeToken(snapshot: TokenSnapshot, ctx: AnalyzerContext): Promise<ChainAnalysis>;
@@ -57,6 +63,7 @@ export interface PipelineDeps {
   // @provenance/research
   collectEvidence(snapshot: TokenSnapshot, ctx: ResearchContext): Promise<EvidenceItem[]>;
   createResearcher(app: AppConfig, logger: Logger): ProvenanceResearcher;
+  createReferentChecker(app: AppConfig, logger: Logger): ReferentChecker;
   promptVersion: string;
 
   // @provenance/store
@@ -67,6 +74,15 @@ export interface PipelineDeps {
   scoreToken(input: ScoringInput): ProvenanceScore;
   defaultRules: AlertRule[];
   createAlerts(runId: string, input: AlertRuleInput, rules?: AlertRule[]): Alert[];
+  gateLaunchMarket(snapshot: TokenSnapshot, config: LaunchConfig): LaunchGateResult;
+  gateLaunchChain(chain: ChainAnalysis | undefined, config: LaunchConfig): LaunchGateResult;
+  launchCataloguedAlert(
+    runId: string,
+    entry: WatchEntry,
+    snapshot: TokenSnapshot,
+    chain: ChainAnalysis | undefined,
+  ): Alert;
+  launchExpressedAlert(runId: string, entry: WatchEntry, snapshot: TokenSnapshot): Alert;
   createSinks(app: AppConfig, logger: Logger): AlertChannelSink[];
   dispatchAlerts(
     alerts: Alert[],
@@ -90,16 +106,24 @@ async function loadModule<T>(specifier: string): Promise<T> {
 
 type SourcesModule = Pick<
   PipelineDeps,
-  'discoverTrending' | 'mergeToSnapshots' | 'filterSnapshots' | 'triageOrder'
+  'discoverTrending' | 'mergeToSnapshots' | 'filterSnapshots' | 'triageOrder' | 'splitLanes'
 >;
 type ChainModule = Pick<PipelineDeps, 'analyzeToken'>;
-type ResearchModule = Pick<PipelineDeps, 'collectEvidence' | 'createResearcher'> & {
+type ResearchModule = Pick<PipelineDeps, 'collectEvidence' | 'createResearcher' | 'createReferentChecker'> & {
   PROMPT_VERSION?: string;
 };
 type StoreModule = Pick<PipelineDeps, 'createStore' | 'seedDemoData'>;
 type AlertsModule = Pick<
   PipelineDeps,
-  'scoreToken' | 'defaultRules' | 'createAlerts' | 'createSinks' | 'dispatchAlerts'
+  | 'scoreToken'
+  | 'defaultRules'
+  | 'createAlerts'
+  | 'createSinks'
+  | 'dispatchAlerts'
+  | 'gateLaunchMarket'
+  | 'gateLaunchChain'
+  | 'launchCataloguedAlert'
+  | 'launchExpressedAlert'
 >;
 
 let cached: PipelineDeps | undefined;
@@ -121,9 +145,11 @@ export async function loadRuntimeDeps(): Promise<PipelineDeps> {
     mergeToSnapshots: sources.mergeToSnapshots,
     filterSnapshots: sources.filterSnapshots,
     triageOrder: sources.triageOrder,
+    splitLanes: sources.splitLanes,
     analyzeToken: chain.analyzeToken,
     collectEvidence: research.collectEvidence,
     createResearcher: research.createResearcher,
+    createReferentChecker: research.createReferentChecker,
     promptVersion: research.PROMPT_VERSION ?? 'unknown',
     createStore: store.createStore,
     seedDemoData: store.seedDemoData,
@@ -132,6 +158,10 @@ export async function loadRuntimeDeps(): Promise<PipelineDeps> {
     createAlerts: alerts.createAlerts,
     createSinks: alerts.createSinks,
     dispatchAlerts: alerts.dispatchAlerts,
+    gateLaunchMarket: alerts.gateLaunchMarket,
+    gateLaunchChain: alerts.gateLaunchChain,
+    launchCataloguedAlert: alerts.launchCataloguedAlert,
+    launchExpressedAlert: alerts.launchExpressedAlert,
   };
   return cached;
 }

@@ -106,6 +106,24 @@ export const EVM_KNOWN_ADDRESSES: readonly KnownAddress[] = [
   { address: '0x10ed43c718714eb63d5aa57b78b54704e256024e', label: 'protocol:pancakeswap', note: 'PancakeSwap V2 router' },
 ];
 
+/**
+ * LP-token lockers. An LP balance held here counts toward `lpLockedPct`.
+ *
+ * Kept out of `EVM_KNOWN_ADDRESSES` on purpose: Team Finance also vests team
+ * allocations of the token itself, and a vesting balance is real float that
+ * unlocks later, so it must not be excluded from holder concentration.
+ *
+ * Provenance: both addresses are the Ethereum-mainnet deployments carried over
+ * from dexscanner's constants, not verified on-chain from this sandbox. They
+ * are queried on every EVM chain because an address that is not a locker there
+ * simply reports a zero balance; a lock held by a chain-specific locker
+ * deployment is missed, which understates `lpLockedPct` — the safe direction.
+ */
+export const EVM_LP_LOCKERS: readonly KnownAddress[] = [
+  { address: '0x663a5c229c09b049e36dcc11a9b0d4a8eb9db214', label: 'locker:unicrypt', note: 'UniCrypt V2 liquidity locker' },
+  { address: '0xe2fe530c047f2d85298b07d9333c05737f1435fb', label: 'locker:team-finance', note: 'Team Finance token/LP lock' },
+];
+
 const EVM_INDEX = new Map(EVM_KNOWN_ADDRESSES.map((entry) => [entry.address, entry]));
 
 export function lookupEvmAddress(address: string): KnownAddress | undefined {

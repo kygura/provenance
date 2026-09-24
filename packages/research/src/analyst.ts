@@ -166,6 +166,9 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
   ): Promise<ProvenanceReport> {
     const log = this.logger.child('analyst');
     const model = this.app.llm.model;
+    // The tracker lives for the whole run; a report carries only its own spend,
+    // because the pipeline sums `usage.costUsd` across reports.
+    const spentBefore = this.tracker.totalUsd;
 
     let found: ResearchNotes;
     try {
@@ -204,7 +207,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
       });
     }
 
-    return this.runExtractionPass(snapshot, chain, found, allEvidence, log);
+    return this.runExtractionPass(snapshot, chain, found, allEvidence, log, spentBefore);
   }
 
   // -- phase 1 ---------------------------------------------------------------
@@ -280,6 +283,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     found: ResearchNotes,
     evidence: EvidenceItem[],
     log: Logger,
+    spentBefore: number,
   ): Promise<ProvenanceReport> {
     const model = this.app.llm.model;
     const prompt = buildExtractionPrompt(snapshot, chain, found.notes, found.citations);
@@ -345,7 +349,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
           usage: {
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
-            costUsd: this.tracker.totalUsd,
+            costUsd: Number((this.tracker.totalUsd - spentBefore).toFixed(6)),
           },
         };
       } catch (error) {

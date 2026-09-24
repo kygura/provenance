@@ -356,3 +356,21 @@ describe('WebSearchAnalyst', () => {
     expect(tracker.totalUsd).toBeGreaterThan(0);
   });
 });
+
+// --- cost accounting ----------------------------------------------------------
+
+describe('per-report cost', () => {
+  test('each report carries its own spend, not the run total', async () => {
+    // The pipeline sums `usage.costUsd` across reports against the run budget,
+    // so a cumulative figure here would count every earlier token again.
+    const { subject, tracker } = analyst(
+      [textMessage('notes one'), textMessage('notes two')],
+      [toolMessage(goodDraft()), toolMessage(goodDraft())],
+    );
+    const first = await subject.research(snapshot(), undefined, [], ctx);
+    const second = await subject.research(snapshot(), undefined, [], ctx);
+    expect(first.usage?.costUsd).toBeGreaterThan(0);
+    expect(second.usage?.costUsd).toBe(first.usage?.costUsd);
+    expect((first.usage?.costUsd ?? 0) + (second.usage?.costUsd ?? 0)).toBeCloseTo(tracker.totalUsd, 6);
+  });
+});
