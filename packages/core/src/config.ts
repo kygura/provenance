@@ -36,7 +36,15 @@ export interface PipelineConfig {
  * speaks the OpenAI chat-completions dialect, each with its own way (or none)
  * of searching the web.
  */
-export const LLM_PROVIDERS = ['anthropic', 'openai', 'openrouter', 'moonshot', 'deepseek', 'openai-compatible'] as const;
+export const LLM_PROVIDERS = [
+  'anthropic',
+  'openai',
+  'openrouter',
+  'moonshot',
+  'qwen',
+  'deepseek',
+  'openai-compatible',
+] as const;
 export type LlmProvider = (typeof LLM_PROVIDERS)[number];
 
 export interface LlmProviderConfig {
@@ -49,7 +57,7 @@ export interface LlmConfig {
   /**
    * Model used for the deep provenance synthesis, as `provider:model` or a bare
    * id whose provider is inferred (`claude-*` -> anthropic, `gpt-*` -> openai,
-   * `kimi-*` -> moonshot, `deepseek-*` -> deepseek).
+   * `kimi-*` -> moonshot, `qwen*` -> qwen, `deepseek-*` -> deepseek).
    */
   model: string;
   /**
@@ -245,6 +253,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
         moonshot: {
           apiKey: env.MOONSHOT_API_KEY || env.KIMI_API_KEY || undefined,
           baseUrl: env.MOONSHOT_BASE_URL || undefined,
+        },
+        qwen: {
+          apiKey: env.DASHSCOPE_API_KEY || env.QWEN_API_KEY || undefined,
+          baseUrl: env.DASHSCOPE_BASE_URL || undefined,
         },
         deepseek: { apiKey: env.DEEPSEEK_API_KEY || undefined, baseUrl: env.DEEPSEEK_BASE_URL || undefined },
         'openai-compatible': {

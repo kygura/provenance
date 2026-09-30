@@ -14,6 +14,7 @@ const INFERRED: ReadonlyArray<[RegExp, LlmProvider]> = [
   [/^claude-/, 'anthropic'],
   [/^(gpt-|o\d|chatgpt-)/, 'openai'],
   [/^(kimi-|moonshot-)/, 'moonshot'],
+  [/^qwen/, 'qwen'],
   [/^deepseek-/, 'deepseek'],
 ];
 
@@ -50,6 +51,7 @@ export const PROVIDER_KEY_ENV: Readonly<Record<LlmProvider, string>> = {
   openai: 'OPENAI_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
   moonshot: 'MOONSHOT_API_KEY',
+  qwen: 'DASHSCOPE_API_KEY',
   deepseek: 'DEEPSEEK_API_KEY',
   'openai-compatible': 'OPENAI_COMPATIBLE_API_KEY',
 };

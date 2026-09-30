@@ -38,6 +38,7 @@ dispatch. Add the secrets under **Settings → Secrets and variables → Actions
 | `OPENAI_API_KEY` | one LLM key | for `openai:` models |
 | `OPENROUTER_API_KEY` | one LLM key | for `openrouter:` models (Kimi, DeepSeek, GPT… through one key) |
 | `MOONSHOT_API_KEY` | one LLM key | for `moonshot:` Kimi models |
+| `DASHSCOPE_API_KEY` | one LLM key | for `qwen:` models on Alibaba Model Studio |
 | `DEEPSEEK_API_KEY` | one LLM key | for `deepseek:` models (no web search) |
 | `OPENAI_COMPATIBLE_API_KEY` / `OPENAI_COMPATIBLE_BASE_URL` | one LLM key | any other OpenAI-dialect endpoint (no web search) |
 | `DATABASE_URL` | yes | Turso database URL |
@@ -55,9 +56,10 @@ Only the keys for the providers those models name are needed. A cheap setup
 that keeps web search, for example:
 
 ```
-LLM_MODEL=openrouter:moonshotai/kimi-k2
-LLM_EXTRACT_MODEL=openrouter:deepseek/deepseek-chat
-LLM_TRIAGE_MODEL=openrouter:moonshotai/kimi-k2
+LLM_MODEL=qwen:qwen3.7-plus
+LLM_EXTRACT_MODEL=qwen:qwen3.8-flash
+LLM_TRIAGE_MODEL=qwen:qwen3.8-flash
+LLM_PRICING=qwen3.7-plus=0.4/1.6,qwen3.8-flash=0.15/0.47
 ```
 
 A run refuses to start if a configured model has no key, or no price (OpenRouter

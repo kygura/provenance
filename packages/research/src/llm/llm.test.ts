@@ -64,6 +64,7 @@ describe('parseModelSpec', () => {
     expect(parseModelSpec('gpt-5.4-mini').provider).toBe('openai');
     expect(parseModelSpec('kimi-k2-0905-preview').provider).toBe('moonshot');
     expect(parseModelSpec('deepseek-chat').provider).toBe('deepseek');
+    expect(parseModelSpec('qwen3.7-plus').provider).toBe('qwen');
     expect(parseModelSpec('moonshotai/kimi-k2').provider).toBe('openrouter');
     expect(parseModelSpec('something-new').provider).toBe('anthropic');
   });
@@ -240,6 +241,43 @@ describe('moonshot', () => {
     expect((await llm.callTool(TOOL, noUsage)).input).toEqual({ ok: 1 });
     expect(calls[0]?.body.tool_choice).toBe('auto');
     expect(calls[0]?.body.temperature).toBe(0.2);
+  });
+});
+
+describe('qwen', () => {
+  test('search goes to the native DashScope endpoint and reads search_info sources', async () => {
+    const { fetch, calls } = fakeFetch([
+      {
+        body: {
+          output: {
+            choices: [{ message: { content: 'Nyan Cat, 2011.' } }],
+            search_info: { search_results: [{ index: 1, title: 'KYM', url: 'https://kym.invalid/nyan' }, { index: 2 }] },
+          },
+          usage: { input_tokens: 900, output_tokens: 80, prompt_tokens_details: { cached_tokens: 300 } },
+        },
+      },
+    ]);
+    const usages: unknown[] = [];
+    const llm = new OpenAiLlm('qwen', 'qwen3.7-plus', { apiKey: 'k', fetch });
+    const found = await llm.search(SEARCH, (_m, usage) => usages.push(usage));
+
+    expect(calls[0]?.url).toBe(
+      'https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
+    );
+    const parameters = calls[0]?.body.parameters as Record<string, unknown>;
+    expect(parameters.enable_search).toBe(true);
+    expect(parameters.search_options).toEqual({ forced_search: true, enable_source: true });
+    expect(found).toEqual({ texts: ['Nyan Cat, 2011.'], citations: ['https://kym.invalid/nyan'], searches: 1 });
+    expect(usages[0]).toEqual({ inputTokens: 600, outputTokens: 80, cacheReadTokens: 300, cacheWriteTokens: 0 });
+  });
+
+  test('extraction uses the compatible endpoint', async () => {
+    const { fetch, calls } = fakeFetch([
+      chat({ tool_calls: [{ id: '1', function: { name: 'record', arguments: '{"ok":true}' } }] }),
+    ]);
+    const llm = new OpenAiLlm('qwen', 'qwen3.8-flash', { apiKey: 'k', fetch });
+    expect((await llm.callTool(TOOL, noUsage)).input).toEqual({ ok: true });
+    expect(calls[0]?.url).toBe('https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions');
   });
 });
 

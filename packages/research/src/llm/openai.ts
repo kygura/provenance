@@ -13,6 +13,9 @@
  *   - `builtin`    Moonshot's `$web_search` builtin function: the model asks,
  *                  the client echoes the arguments back, Moonshot runs it.
  *                  No structured citations, so URLs are read out of the prose.
+ *   - `dashscope`  Qwen on Alibaba Model Studio: `enable_search` on the native
+ *                  DashScope endpoint, which (unlike its OpenAI-compatible
+ *                  one) returns the sources in `search_info`.
  *   - `none`       DeepSeek and custom endpoints: no search. The turn is
  *                  answered from recall, which the analyst already scores as
  *                  ungrounded.
@@ -22,7 +25,7 @@ import type { LlmProvider } from '@provenance/core';
 import type { TokenUsage } from '../cost';
 import type { LlmClient, SearchRequest, SearchResult, ToolCallRequest, ToolCallResult, UsageSink } from './types';
 
-export type SearchMode = 'responses' | 'plugin' | 'builtin' | 'none';
+export type SearchMode = 'responses' | 'plugin' | 'builtin' | 'dashscope' | 'none';
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
 interface ProviderProfile {
@@ -38,6 +41,12 @@ export const PROVIDER_PROFILES: Readonly<Record<Exclude<LlmProvider, 'anthropic'
   openai: { baseUrl: 'https://api.openai.com/v1', search: 'responses', forceToolChoice: true, reasoningParams: true },
   openrouter: { baseUrl: 'https://openrouter.ai/api/v1', search: 'plugin', forceToolChoice: true, reasoningParams: false },
   moonshot: { baseUrl: 'https://api.moonshot.ai/v1', search: 'builtin', forceToolChoice: false, reasoningParams: false },
+  qwen: {
+    baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    search: 'dashscope',
+    forceToolChoice: false,
+    reasoningParams: false,
+  },
   deepseek: { baseUrl: 'https://api.deepseek.com/v1', search: 'none', forceToolChoice: true, reasoningParams: false },
   'openai-compatible': { search: 'none', forceToolChoice: true, reasoningParams: false },
 };
@@ -84,6 +93,14 @@ interface ChatMessage {
 interface ChatResponse {
   choices?: Array<{ message?: ChatMessage; finish_reason?: string }>;
   usage?: ChatUsage;
+}
+
+interface DashscopeResponse {
+  output?: {
+    choices?: Array<{ message?: { content?: string | null } }>;
+    search_info?: { search_results?: Array<{ url?: string }> };
+  };
+  usage?: { input_tokens?: number; output_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
 }
 
 interface ResponsesResponse {
@@ -177,12 +194,17 @@ export class OpenAiLlm implements LlmClient {
 
   // -- transport ----------------------------------------------------------------
 
+  /**
+   * `path` is appended to the base URL; an absolute URL is used as is (the
+   * DashScope native endpoint lives beside the compatible one, not under it).
+   */
   private async post<T>(path: string, body: Record<string, unknown>): Promise<T> {
+    const url = path.startsWith('https://') ? path : `${this.baseUrl}${path}`;
     let lastError: Error | undefined;
     for (let attempt = 1; attempt <= this.retries; attempt++) {
       let response: Response;
       try {
-        response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        response = await this.fetchImpl(url, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
@@ -234,6 +256,8 @@ export class OpenAiLlm implements LlmClient {
         return this.searchPlugin(request, onUsage);
       case 'builtin':
         return this.searchBuiltin(request, onUsage);
+      case 'dashscope':
+        return this.searchDashscope(request, onUsage);
       default:
         return this.searchNone(request, onUsage);
     }
@@ -330,6 +354,44 @@ export class OpenAiLlm implements LlmClient {
     }
     if (result.searches > 0) result.citations = [...new Set(result.texts.flatMap(urlsIn))];
     return result;
+  }
+
+  private async searchDashscope(request: SearchRequest, onUsage: UsageSink): Promise<SearchResult> {
+    const url = `${this.baseUrl.replace(/\/compatible-mode\/v1$/, '')}/api/v1/services/aigc/text-generation/generation`;
+    const response = await this.post<DashscopeResponse>(url, {
+      model: this.model,
+      input: {
+        messages: [
+          { role: 'system', content: request.system },
+          { role: 'user', content: request.prompt },
+        ],
+      },
+      parameters: {
+        result_format: 'message',
+        max_tokens: request.maxTokens,
+        // One search per call, forced: a research turn that decides not to
+        // search is a turn answered from recall.
+        enable_search: request.maxSearches > 0,
+        search_options: { forced_search: request.maxSearches > 0, enable_source: true },
+      },
+    });
+    const input = count(response.usage?.input_tokens);
+    const cached = Math.min(input, count(response.usage?.prompt_tokens_details?.cached_tokens));
+    onUsage(this.model, {
+      inputTokens: input - cached,
+      outputTokens: count(response.usage?.output_tokens),
+      cacheReadTokens: cached,
+      cacheWriteTokens: 0,
+    });
+    const content = response.output?.choices?.[0]?.message?.content;
+    const citations = (response.output?.search_info?.search_results ?? [])
+      .map((item) => item.url)
+      .filter((url): url is string => typeof url === 'string' && url !== '');
+    return {
+      texts: content ? [content] : [],
+      citations,
+      searches: request.maxSearches > 0 ? 1 : 0,
+    };
   }
 
   private async searchNone(request: SearchRequest, onUsage: UsageSink): Promise<SearchResult> {
