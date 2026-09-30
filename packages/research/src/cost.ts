@@ -1,5 +1,5 @@
 /**
- * Cost accounting for the only paid credential in the project.
+ * Cost accounting for the LLM calls, the only paid part of the pipeline.
  *
  * The pipeline runs twice a day against a per-run budget (`llm.maxCostUsdPerRun`),
  * so spend has to be known after every call, not estimated afterwards from logs.
@@ -58,7 +58,14 @@ export interface TokenUsage {
  * Returns undefined for a genuinely unknown model — an honest "cost unknown"
  * beats a fabricated number in a budget check.
  */
-export function resolvePricing(model: string): ModelPricing | undefined {
+export function resolvePricing(
+  model: string,
+  overrides: Readonly<Record<string, ModelPricing>> = {},
+): ModelPricing | undefined {
+  // Operator-supplied prices win: they are how a non-Anthropic model gets priced
+  // at all, and how a repriced one is corrected without a release.
+  const override = overrides[model];
+  if (override !== undefined) return override;
   const exact = MODEL_PRICING_USD_PER_MTOK[model];
   if (exact !== undefined) return exact;
   let best: { id: string; pricing: ModelPricing } | undefined;
@@ -74,8 +81,12 @@ function nonNegative(value: number | undefined): number {
 }
 
 /** USD cost of one API call, or undefined when the model is not in the table. */
-export function estimateCostUsd(model: string, usage: TokenUsage): number | undefined {
-  const pricing = resolvePricing(model);
+export function estimateCostUsd(
+  model: string,
+  usage: TokenUsage,
+  overrides: Readonly<Record<string, ModelPricing>> = {},
+): number | undefined {
+  const pricing = resolvePricing(model, overrides);
   if (pricing === undefined) return undefined;
   const perToken = pricing.inputPerMTok / 1_000_000;
   const cost =
@@ -126,11 +137,21 @@ export class CostTracker {
   private readonly entries: CostEntry[] = [];
   private running = 0;
 
-  constructor(readonly limitUsd: number = Number.POSITIVE_INFINITY) {}
+  constructor(
+    readonly limitUsd: number = Number.POSITIVE_INFINITY,
+    private readonly pricing: Readonly<Record<string, ModelPricing>> = {},
+  ) {}
 
-  /** Record one API call; returns its cost in USD (0 when unpriced). */
-  add(model: string, usage: TokenUsage): number {
-    const priced = estimateCostUsd(model, usage);
+  /**
+   * Record one API call; returns its cost in USD (0 when unpriced).
+   * `reportedUsd` is what the provider says it billed (OpenRouter); it beats
+   * any table, since it is the invoice rather than an estimate of it.
+   */
+  add(model: string, usage: TokenUsage, reportedUsd?: number): number {
+    const priced =
+      reportedUsd !== undefined && Number.isFinite(reportedUsd) && reportedUsd >= 0
+        ? Number(reportedUsd.toFixed(6))
+        : estimateCostUsd(model, usage, this.pricing);
     const costUsd = priced ?? 0;
     this.entries.push({
       model,

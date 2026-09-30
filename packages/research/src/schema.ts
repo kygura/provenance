@@ -10,6 +10,7 @@
  * it never throws and never reaches the store as if it were sound.
  */
 import type Anthropic from '@anthropic-ai/sdk';
+import type { ToolSpec } from './llm/types';
 import type {
   Anchor,
   AnchorConfidence,
@@ -176,17 +177,16 @@ export const PROVENANCE_TOOL_SCHEMA: Anthropic.Tool.InputSchema = {
   },
 };
 
-export function provenanceTool(cacheable = true): Anthropic.Tool {
-  const tool: Anthropic.Tool = {
+export function provenanceTool(cacheable = true): ToolSpec {
+  return {
     name: PROVENANCE_TOOL_NAME,
     description:
       'Record the provenance analysis for one token, leading with the anchor verdict. Call exactly once. Every field is required unless marked optional; omit originYear and anchor dates rather than guessing them.',
-    input_schema: PROVENANCE_TOOL_SCHEMA,
+    schema: PROVENANCE_TOOL_SCHEMA as unknown as Record<string, unknown>,
+    // Anthropic renders tools before system and messages, so a cache
+    // breakpoint here covers the whole static prefix.
+    cacheable,
   };
-  // Tools render before system and messages, so a cache breakpoint here covers
-  // the whole static prefix.
-  if (cacheable) tool.cache_control = { type: 'ephemeral' };
-  return tool;
 }
 
 export interface ValidationOutcome {

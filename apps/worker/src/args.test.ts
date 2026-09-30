@@ -133,6 +133,41 @@ describe('validateEnv', () => {
     expect(validateEnv('run', app, parseArgs(['run']))[0]).toContain('DATABASE_AUTH_TOKEN');
   });
 
+  test('names the key of whichever provider each configured model needs', () => {
+    const base = makeConfig();
+    const app = makeConfig({
+      anthropicApiKey: 'sk-test',
+      llm: { ...base.llm, model: 'openrouter:moonshotai/kimi-k2', extractModel: 'deepseek:deepseek-chat' },
+    });
+    const errors = validateEnv('run', app, parseArgs(['run'])).join('\n');
+    expect(errors).toContain('OPENROUTER_API_KEY');
+    expect(errors).toContain('DEEPSEEK_API_KEY');
+    expect(errors).not.toContain('ANTHROPIC_API_KEY');
+  });
+
+  test('an unpriced model is refused unless the provider reports billed cost', () => {
+    const base = makeConfig();
+    const providers = {
+      ...base.llm.providers,
+      openai: { apiKey: 'sk-openai' },
+      openrouter: { apiKey: 'sk-or' },
+    };
+    const unpriced = makeConfig({
+      anthropicApiKey: 'sk-test',
+      llm: { ...base.llm, providers, model: 'openai:gpt-5.4-mini', extractModel: 'openrouter:deepseek/deepseek-chat' },
+    });
+    const errors = validateEnv('run', unpriced, parseArgs(['run']));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('LLM_PRICING');
+    expect(errors[0]).toContain('gpt-5.4-mini');
+
+    const priced = makeConfig({
+      anthropicApiKey: 'sk-test',
+      llm: { ...unpriced.llm, pricing: { 'gpt-5.4-mini': { inputPerMTok: 0.75, outputPerMTok: 4.5 } } },
+    });
+    expect(validateEnv('run', priced, parseArgs(['run']))).toEqual([]);
+  });
+
   test('alerts:test insists on at least one channel', () => {
     const errors = validateEnv('alerts:test', makeConfig(), parseArgs(['alerts:test']));
     expect(errors[0]).toContain('TELEGRAM_BOT_TOKEN');

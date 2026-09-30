@@ -4,6 +4,7 @@
  * a configuration error rather than a silently ignored typo.
  */
 import { type AppConfig, type Chain, normalizeChain } from '@provenance/core';
+import { configuredModelSpecs, missingCredentials, PROVIDER_KEY_ENV, resolvePricing } from '@provenance/research';
 
 export const COMMANDS = [
   'run',
@@ -223,10 +224,33 @@ export function validateEnv(command: CommandName, app: AppConfig, parsed: Parsed
   const needsLlm =
     (command === 'run' || command === 'analyze') && !llmDisabled(app, parsed) && !app.pipeline.useFixtures;
 
-  if (needsLlm && !app.anthropicApiKey) {
-    errors.push(
-      'ANTHROPIC_API_KEY is not set. It is the only paid credential; pass --fixtures or --no-llm to run without it.',
-    );
+  if (needsLlm) {
+    for (const spec of missingCredentials(app)) {
+      errors.push(
+        `${PROVIDER_KEY_ENV[spec.provider]} is not set, needed for ${spec.provider}:${spec.model}. ` +
+          'Set it, point LLM_MODEL / LLM_EXTRACT_MODEL / LLM_TRIAGE_MODEL at a provider you have a key for, ' +
+          'or pass --fixtures or --no-llm to run without one.',
+      );
+    }
+    const specs = configuredModelSpecs(app);
+    if (
+      specs.some((spec) => spec.provider === 'openai-compatible') &&
+      !app.llm.providers?.['openai-compatible']?.baseUrl
+    ) {
+      errors.push('OPENAI_COMPATIBLE_BASE_URL is required for an openai-compatible: model.');
+    }
+    // A budget the tracker cannot price is a budget that never trips.
+    if (Number.isFinite(app.llm.maxCostUsdPerRun)) {
+      for (const spec of specs) {
+        if (spec.provider === 'openrouter') continue; // billed cost comes back per call
+        if (!resolvePricing(spec.model, app.llm.pricing ?? {})) {
+          errors.push(
+            `No price for ${spec.provider}:${spec.model}, so LLM_MAX_COST_USD_PER_RUN cannot be enforced. ` +
+              `Add it to LLM_PRICING as "${spec.model}=<input $/MTok>/<output $/MTok>".`,
+          );
+        }
+      }
+    }
   }
   if (!app.databaseUrl) {
     errors.push('DATABASE_URL is not set and no default applied.');

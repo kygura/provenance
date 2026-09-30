@@ -116,7 +116,7 @@ produces partial data with an explicit note, never an aborted run.
 
 ```bash
 bun install
-cp .env.example .env          # ANTHROPIC_API_KEY is the only one needed to start
+cp .env.example .env          # one LLM key is all you need; ANTHROPIC_API_KEY by default
 
 bun run apps/worker/src/cli.ts migrate
 bun run apps/worker/src/cli.ts seed          # demo data, no network needed
