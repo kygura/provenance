@@ -29,8 +29,11 @@ Local development instead: leave `DATABASE_URL` at its default
 
 ## 2. Scheduled runner — GitHub Actions
 
-`.github/workflows/provenance.yml` runs the pipeline on a cron and on manual
-dispatch. Add the secrets under **Settings → Secrets and variables → Actions**:
+`.github/workflows/provenance.yml` (full run, twice daily) and `launches.yml`
+(launch lane, every 30 minutes) both run on a cron and on manual dispatch. They
+share one job, `run-lane.yml`, which is the only place secrets and variables are
+forwarded to the worker; a new provider's key is one line there. Add the
+secrets under **Settings → Secrets and variables → Actions**:
 
 | Secret | Required | What it is |
 |---|---|---|
@@ -47,6 +50,7 @@ dispatch. Add the secrets under **Settings → Secrets and variables → Actions
 | `TELEGRAM_CHAT_ID` | no | your chat or channel id |
 | `DISCORD_WEBHOOK_URL` | no | channel webhook |
 | `ALERT_WEBHOOK_URL` | no | any JSON endpoint |
+| `ETHERSCAN_API_KEY` | no | contract verification lookups |
 
 Tuning knobs (`MAX_TOKENS_PER_RUN`, `MIN_LIQUIDITY_USD`,
 `ALERT_SCORE_THRESHOLD`, `LLM_MAX_COST_USD_PER_RUN`, …) belong in **Variables**
