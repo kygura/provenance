@@ -191,7 +191,13 @@ function list(value: string | undefined): string[] {
  * on Vercel without code changes. Defaults are tuned to be conservative: a run
  * with no configuration does something sensible and cheap.
  */
-export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
+export function loadConfig(raw: Record<string, string | undefined> = process.env): AppConfig {
+  // A value pasted into a secrets form often brings a leading space or a
+  // trailing newline. In a token that becomes an invalid Authorization header,
+  // which fails far from the paste that caused it. No setting here means
+  // anything by surrounding whitespace.
+  const env: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(raw)) env[key] = value?.trim();
   const chains = list(env.PROVENANCE_CHAINS).map(normalizeChain);
   const rpcOr = (key: string, fallback: string[]): string[] => {
     const configured = list(env[key]);
