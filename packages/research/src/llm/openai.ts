@@ -95,6 +95,8 @@ interface ChatMessage {
   role: string;
   content?: string | null;
   tool_calls?: ChatToolCall[];
+  /** Reasoning models' visible thinking (OpenRouter). Not the answer, but not nothing. */
+  reasoning?: string | null;
   annotations?: Array<{ type?: string; url_citation?: { url?: string } }>;
 }
 
@@ -313,24 +315,57 @@ export class OpenAiLlm implements LlmClient {
     return result;
   }
 
-  private async searchPlugin(request: SearchRequest, onUsage: UsageSink): Promise<SearchResult> {
-    const response = await this.post<ChatResponse>('/chat/completions', {
-      model: this.model,
-      messages: [
-        { role: 'system', content: request.system },
-        { role: 'user', content: request.prompt },
-      ],
-      plugins: [{ id: 'web', max_results: Math.max(1, Math.min(10, request.maxSearches)) }],
-      usage: { include: true },
+  /**
+   * A prose chat turn that ends with prose. A reasoning model can spend the
+   * whole output budget thinking and return empty content (finish_reason
+   * `length`); the first live Kimi run did this on two of three tokens. That
+   * turn is retried once with twice the budget and low effort, and if the
+   * answer is still empty the model's visible reasoning stands in for it —
+   * it holds what the search found, which the extraction pass can structure.
+   */
+  private async proseTurn(
+    body: Record<string, unknown>,
+    request: SearchRequest,
+    onUsage: UsageSink,
+  ): Promise<{ text: string; message: ChatMessage | undefined }> {
+    let response = await this.post<ChatResponse>('/chat/completions', {
+      ...body,
       ...this.sampling(request.maxTokens, undefined, request.reasoningEffort),
     });
     this.report(onUsage, response.usage);
-    const message = response.choices?.[0]?.message;
+    let choice = response.choices?.[0];
+    if (!choice?.message?.content?.trim()) {
+      response = await this.post<ChatResponse>('/chat/completions', {
+        ...body,
+        ...this.sampling(request.maxTokens * 2, undefined, 'low'),
+      });
+      this.report(onUsage, response.usage);
+      choice = response.choices?.[0];
+    }
+    const message = choice?.message;
+    const text = message?.content?.trim() || message?.reasoning?.trim() || '';
+    return { text, message };
+  }
+
+  private async searchPlugin(request: SearchRequest, onUsage: UsageSink): Promise<SearchResult> {
+    const { text, message } = await this.proseTurn(
+      {
+        model: this.model,
+        messages: [
+          { role: 'system', content: request.system },
+          { role: 'user', content: request.prompt },
+        ],
+        plugins: [{ id: 'web', max_results: Math.max(1, Math.min(10, request.maxSearches)) }],
+        usage: { include: true },
+      },
+      request,
+      onUsage,
+    );
     const citations = (message?.annotations ?? [])
       .filter((note) => note.type === 'url_citation' && note.url_citation?.url)
       .map((note) => note.url_citation?.url as string);
     return {
-      texts: message?.content ? [message.content] : [],
+      texts: text ? [text] : [],
       citations,
       // The plugin runs one search per call, before the model sees the prompt.
       searches: request.maxSearches > 0 ? 1 : 0,

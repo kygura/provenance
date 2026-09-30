@@ -37,9 +37,11 @@ const USER_AGENT =
 
 export interface DexToolsSourceOptions {
   baseUrl?: string;
-  /** Extra wait after `networkidle` for the Angular table to render. */
+  /** Extra wait after the data calls land, for the Angular table to render. */
   settleMs?: number;
   navigationTimeoutMs?: number;
+  /** How long to wait after DOMContentLoaded for the app's data calls. */
+  dataWaitMs?: number;
 }
 
 export class DexToolsSource implements TrendingSource {
@@ -206,11 +208,20 @@ export class DexToolsSource implements TrendingSource {
     page.on('response', onResponse);
 
     try {
+      // DexTools keeps sockets and pollers open, so `networkidle` never comes
+      // and the navigation used to burn its whole timeout. Wait for the DOM,
+      // then for the app's own data calls to land, bounded either way.
       await page.goto(url, {
-        waitUntil: 'networkidle',
-        timeout: this.options.navigationTimeoutMs ?? 90_000,
+        waitUntil: 'domcontentloaded',
+        timeout: this.options.navigationTimeoutMs ?? 30_000,
       });
-      await page.waitForTimeout(this.options.settleMs ?? 4_000);
+      const deadline = Date.now() + (this.options.dataWaitMs ?? 20_000);
+      while (Date.now() < deadline) {
+        await Promise.allSettled(pending);
+        if (captured.some(looksLikeDexToolsPayload)) break;
+        await page.waitForTimeout(1_000);
+      }
+      await page.waitForTimeout(this.options.settleMs ?? 2_000);
       await Promise.allSettled(pending);
 
       await this.dumpCaptures(slug, captured);
