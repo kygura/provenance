@@ -235,6 +235,39 @@ describe('reasoning effort', () => {
   });
 });
 
+describe('reasoning models that spend the budget thinking', () => {
+  test('an empty answer is retried once with twice the budget and low effort', async () => {
+    const { fetch, calls } = fakeFetch([
+      chat({ content: '', reasoning: 'thinking...' }, {}, 'length'),
+      chat({ content: 'Nyan Cat, 2011.', annotations: [{ type: 'url_citation', url_citation: { url: 'https://a.invalid' } }] }),
+    ]);
+    const llm = new OpenAiLlm('openrouter', 'moonshotai/kimi-k2.6', { apiKey: 'k', fetch });
+    const found = await llm.search(SEARCH, noUsage);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.body.max_tokens).toBe(1000);
+    expect(calls[1]?.body.max_tokens).toBe(2000);
+    expect(calls[1]?.body.reasoning).toEqual({ effort: 'low' });
+    expect(found.texts).toEqual(['Nyan Cat, 2011.']);
+    expect(found.citations).toEqual(['https://a.invalid']);
+  });
+
+  test('when the retry is empty too, the visible reasoning stands in for the notes', async () => {
+    const { fetch } = fakeFetch([
+      chat({ content: null, reasoning: 'first' }, {}, 'length'),
+      chat({ content: '  ', reasoning: 'Searched: Nyan Cat is a 2011 animation.' }, {}, 'length'),
+    ]);
+    const llm = new OpenAiLlm('openrouter', 'moonshotai/kimi-k2.6', { apiKey: 'k', fetch });
+    expect((await llm.search(SEARCH, noUsage)).texts).toEqual(['Searched: Nyan Cat is a 2011 animation.']);
+  });
+
+  test('a non-empty answer is not retried', async () => {
+    const { fetch, calls } = fakeFetch([chat({ content: 'done' })]);
+    await new OpenAiLlm('openrouter', 'x/y', { apiKey: 'k', fetch }).search(SEARCH, noUsage);
+    expect(calls).toHaveLength(1);
+  });
+});
+
 describe('moonshot', () => {
   test('echoes $web_search arguments back and stops offering search at the cap', async () => {
     const searchCall = (id: string) => ({

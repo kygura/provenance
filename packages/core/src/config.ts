@@ -313,8 +313,10 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       researchAnchored: bool(env.LAUNCHES_RESEARCH_ANCHORED, true),
     },
     rpc: {
-      solana: rpcOr('RPC_SOLANA', ['https://api.mainnet-beta.solana.com']),
-      ethereum: rpcOr('RPC_ETHEREUM', ['https://eth.llamarpc.com', 'https://rpc.ankr.com/eth']),
+      // Public, keyless, tried in order. api.mainnet-beta 429s under any load
+      // and Ankr now requires a key, so neither can lead.
+      solana: rpcOr('RPC_SOLANA', ['https://solana-rpc.publicnode.com', 'https://api.mainnet-beta.solana.com']),
+      ethereum: rpcOr('RPC_ETHEREUM', ['https://ethereum-rpc.publicnode.com', 'https://eth.llamarpc.com']),
       base: rpcOr('RPC_BASE', ['https://mainnet.base.org']),
       bsc: rpcOr('RPC_BSC', ['https://bsc-dataseed.binance.org']),
       arbitrum: rpcOr('RPC_ARBITRUM', ['https://arb1.arbitrum.io/rpc']),
