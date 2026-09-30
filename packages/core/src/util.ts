@@ -41,6 +41,8 @@ export interface RetryOptions {
   /** Return false to stop retrying and rethrow immediately. */
   retryable?: (error: unknown) => boolean;
   onRetry?: (error: unknown, attempt: number, delayMs: number) => void;
+  /** Minimum wait before the next attempt for this error (e.g. a 429's Retry-After). */
+  minDelayMs?: (error: unknown) => number;
 }
 
 /** Exponential backoff with jitter. */
@@ -57,7 +59,8 @@ export async function retry<T>(fn: () => Promise<T>, options: RetryOptions = {})
       lastError = error;
       if (options.retryable && !options.retryable(error)) throw error;
       if (attempt === attempts) break;
-      const delay = Math.min(max, base * 2 ** (attempt - 1)) * (0.5 + Math.random() * 0.5);
+      const backoff = Math.min(max, base * 2 ** (attempt - 1)) * (0.5 + Math.random() * 0.5);
+      const delay = Math.max(backoff, options.minDelayMs?.(error) ?? 0);
       options.onRetry?.(error, attempt, delay);
       await sleep(delay);
     }

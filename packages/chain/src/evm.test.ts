@@ -92,4 +92,45 @@ describe('analyzeEvm contract surface, against the NYAN fixture', () => {
     expect(notes).toContain('concentrated-liquidity');
     expect(notes).toContain('ETHERSCAN_API_KEY');
   });
+
+  test('a Uniswap v4 pool id does not abort holder analysis', async () => {
+    // Regression: v4 pairs carry a 32-byte pool id, which normalizeAddress threw on.
+    const transport = await createFixtureTransport();
+    const config = app();
+    const poolId = `0x${'ab'.repeat(32)}`;
+    const snapshot = { ...nyan(), pairs: [{ pairAddress: poolId, liquidityUsd: 50_000 }] };
+    const analysis = await analyzeEvm(snapshot, { app: config, logger: silentLogger }, async () => transport, {}, config, silentLogger);
+    expect(analysis.supply?.burnedPct).toBeGreaterThan(0);
+    expect(analysis.topHolders?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  test('a refused log range is retried with a narrower window', async () => {
+    const word = (value: bigint) => `0x${value.toString(16).padStart(64, '0')}`;
+    const ranges: number[] = [];
+    const transport = new MockRpcTransport({
+      handlers: {
+        eth_call: ({ call }) => {
+          const { data } = call.params[0] as { data: string };
+          if (data === '0x313ce567') return { result: word(18n) };
+          if (data === '0x18160ddd') return { result: word(10n ** 24n) };
+          return { error: { code: 3, message: 'execution reverted' } };
+        },
+        eth_getCode: () => ({ result: '0x' }),
+        eth_blockNumber: () => ({ result: '0x1000000' }),
+        eth_getLogs: ({ call }) => {
+          const { fromBlock, toBlock } = call.params[0] as { fromBlock: string; toBlock: string };
+          const span = Number(BigInt(toBlock) - BigInt(fromBlock)) + 1;
+          ranges.push(span);
+          if (span > 2_000) return { error: { code: -32005, message: 'block range too large' } };
+          return { result: [] };
+        },
+      },
+    });
+    const config = { ...app(), pipeline: { ...app().pipeline, useFixtures: false } };
+    const analysis = await analyzeEvm(nyan(), { app: config, logger: silentLogger }, async () => transport, { maxChunks: 3 }, config, silentLogger);
+    expect(ranges[0]).toBe(9_000);
+    expect(ranges.slice(1).every((span) => span <= 2_000)).toBe(true);
+    expect(ranges.length).toBe(4);
+    expect(analysis.notes.join(' ')).not.toContain('Log scan stopped');
+  });
 });

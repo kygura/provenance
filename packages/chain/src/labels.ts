@@ -103,6 +103,7 @@ export const EVM_KNOWN_ADDRESSES: readonly KnownAddress[] = [
   { address: '0x7a250d5630b4cf539739df2c5dacb4c659f2488d', label: 'protocol:uniswap', note: 'Uniswap V2 router 02' },
   { address: '0xe592427a0aece92de3edee1f18e0157c05861564', label: 'protocol:uniswap', note: 'Uniswap V3 router' },
   { address: '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45', label: 'protocol:uniswap', note: 'Uniswap V3 router 02' },
+  { address: '0x000000000004444c5dc75cb358380d2e3de08a90', label: 'protocol:uniswap', note: 'Uniswap V4 PoolManager (holds every v4 pool on Ethereum)' },
   { address: '0x10ed43c718714eb63d5aa57b78b54704e256024e', label: 'protocol:pancakeswap', note: 'PancakeSwap V2 router' },
 ];
 

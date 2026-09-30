@@ -315,10 +315,19 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
     rpc: {
       // Public, keyless, tried in order. api.mainnet-beta 429s under any load
       // and Ankr now requires a key, so neither can lead.
-      solana: rpcOr('RPC_SOLANA', ['https://solana-rpc.publicnode.com', 'https://api.mainnet-beta.solana.com']),
-      ethereum: rpcOr('RPC_ETHEREUM', ['https://ethereum-rpc.publicnode.com', 'https://eth.llamarpc.com']),
-      base: rpcOr('RPC_BASE', ['https://mainnet.base.org']),
-      bsc: rpcOr('RPC_BSC', ['https://bsc-dataseed.binance.org']),
+      solana: rpcOr('RPC_SOLANA', [
+        'https://solana-rpc.publicnode.com',
+        'https://solana.drpc.org',
+        'https://api.mainnet-beta.solana.com',
+      ]),
+      ethereum: rpcOr('RPC_ETHEREUM', [
+        'https://ethereum-rpc.publicnode.com',
+        'https://eth.drpc.org',
+        'https://1rpc.io/eth',
+        'https://eth.llamarpc.com',
+      ]),
+      base: rpcOr('RPC_BASE', ['https://mainnet.base.org', 'https://base-rpc.publicnode.com']),
+      bsc: rpcOr('RPC_BSC', ['https://bsc-dataseed.binance.org', 'https://bsc-rpc.publicnode.com']),
       arbitrum: rpcOr('RPC_ARBITRUM', ['https://arb1.arbitrum.io/rpc']),
       polygon: rpcOr('RPC_POLYGON', ['https://polygon-rpc.com']),
       avalanche: rpcOr('RPC_AVALANCHE', ['https://api.avax.network/ext/bc/C/rpc']),

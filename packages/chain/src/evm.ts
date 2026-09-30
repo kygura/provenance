@@ -28,6 +28,7 @@ import {
   encodeBalanceOf,
   encodeCall,
   formatUnits,
+  isAddress,
   isZeroAddress,
   normalizeAddress,
   quantityToBigInt,
@@ -220,12 +221,16 @@ export async function analyzeEvm(
 
   // Walk backwards from the head: the most recent activity is the most
   // informative if the budget runs out before the full span is covered.
-  for (let end = latestBlock; end > fromBlock; end -= opts.chunkBlocks) {
+  // Nodes that refuse a wide range (403, "range too large") usually accept a
+  // narrow one, so a refusal shrinks the window once before giving up.
+  let chunkBlocks = opts.chunkBlocks;
+  const narrowBlocks = Math.max(1, Math.floor(opts.chunkBlocks / 8));
+  for (let end = latestBlock; end > fromBlock; ) {
     if (chunks >= opts.maxChunks || budget.expired()) {
       truncated = true;
       break;
     }
-    const start = Math.max(fromBlock, end - opts.chunkBlocks + 1);
+    const start = Math.max(fromBlock, end - chunkBlocks + 1);
     try {
       const logs = await client.call<Array<{ topics: string[]; data: string }>>('eth_getLogs', [
         {
@@ -253,7 +258,12 @@ export async function analyzeEvm(
       }
       scannedFrom = start;
       chunks += 1;
+      end = start - 1;
     } catch (error) {
+      if (chunkBlocks > narrowBlocks) {
+        chunkBlocks = narrowBlocks;
+        continue;
+      }
       // A node refusing a range is the common case, not an exception.
       notes.push(`Log scan stopped at block ${start}: ${(error as Error).message}`);
       truncated = true;
@@ -277,7 +287,11 @@ export async function analyzeEvm(
   // Balances derived from a partial window can go negative for wallets that
   // held before the window opened. Those are not holders we measured, so drop
   // them rather than clamping to zero and inventing a distribution.
-  const poolAddresses = new Set(snapshot.pairs.map((pair) => normalizeAddress(pair.pairAddress)));
+  // Uniswap v4 pairs are keyed by a 32-byte pool id, not a contract address;
+  // their tokens sit in the PoolManager singleton, which labels.ts covers.
+  const poolAddresses = new Set(
+    snapshot.pairs.filter((pair) => isAddress(pair.pairAddress)).map((pair) => normalizeAddress(pair.pairAddress)),
+  );
   const rows: HolderRow[] = [];
   for (const [holder, raw] of balances) {
     if (raw <= 0n) continue;

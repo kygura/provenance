@@ -58,7 +58,7 @@ export type TransportProvider = () => Promise<RpcTransport>;
 export class RpcError extends Error {
   constructor(
     message: string,
-    readonly detail: { endpoint?: string; method?: string; code?: number; cause?: unknown } = {},
+    readonly detail: { endpoint?: string; method?: string; code?: number; cause?: unknown; retryAfterMs?: number } = {},
   ) {
     super(message);
     this.name = 'RpcError';
@@ -155,9 +155,11 @@ export class HttpRpcTransport implements RpcTransport {
     });
 
     if (!response.ok) {
+      const retryAfter = Number(response.headers.get('retry-after'));
       throw new RpcError(`HTTP ${response.status} from ${request.endpoint}`, {
         endpoint: request.endpoint,
         code: response.status,
+        ...(Number.isFinite(retryAfter) && retryAfter > 0 ? { retryAfterMs: Math.min(retryAfter * 1000, 10_000) } : {}),
       });
     }
 
@@ -205,6 +207,28 @@ export interface CallOptions {
   attempts?: number;
   /** Skip failover; used for optional heavyweight calls we do not want to retry. */
   singleEndpoint?: boolean;
+}
+
+/**
+ * Rate limiters keyed by endpoint and shared by every client in the process.
+ * Each token's analysis builds its own client and several run concurrently, so
+ * per-client limiters let them hit a public RPC together and draw 429s.
+ */
+const SHARED_LIMITERS = new Map<string, RateLimiter>();
+
+function sharedLimiter(endpoint: string, minGapMs: number): RateLimiter {
+  let limiter = SHARED_LIMITERS.get(endpoint);
+  if (!limiter) {
+    limiter = new RateLimiter(minGapMs);
+    SHARED_LIMITERS.set(endpoint, limiter);
+  }
+  return limiter;
+}
+
+/** How long to back off before retrying a rate-limited endpoint. */
+function rateLimitDelayMs(error: unknown): number {
+  if (!(error instanceof RpcError) || error.detail.code !== 429) return 0;
+  return error.detail.retryAfterMs ?? 1_500;
 }
 
 export type Attempt<T> = { ok: true; value: T } | { ok: false; error: Error };
@@ -269,7 +293,7 @@ export class RpcClient {
   constructor(private readonly options: RpcClientOptions) {
     this.endpoints = options.endpoints.length > 0 ? options.endpoints : [];
     for (const endpoint of this.endpoints) {
-      this.limiters.set(endpoint, new RateLimiter(options.rateLimitMs ?? 0));
+      this.limiters.set(endpoint, sharedLimiter(endpoint, options.rateLimitMs ?? 0));
     }
   }
 
@@ -304,6 +328,7 @@ export class RpcClient {
           attempts,
           baseDelayMs: 250,
           maxDelayMs: 2_000,
+          minDelayMs: rateLimitDelayMs,
           retryable: (error) => !(error instanceof RpcError && error.message === 'aborted by caller'),
           onRetry: (error, attempt) => {
             this.options.logger.debug('rpc retry', {
