@@ -258,6 +258,23 @@ export function validateEnv(command: CommandName, app: AppConfig, parsed: Parsed
   if (app.databaseUrl.startsWith('libsql://') && !app.databaseAuthToken) {
     errors.push('DATABASE_AUTH_TOKEN is required for a remote libsql:// DATABASE_URL.');
   }
+  // Anything outside the JWT alphabet ends up in the Authorization header and
+  // fails as "invalid header value", which names neither the variable nor the
+  // cause. Describe the problem without echoing the secret.
+  const token = app.databaseAuthToken;
+  if (token && /[^A-Za-z0-9_.-]/.test(token)) {
+    const found = [
+      /\s/.test(token) && 'whitespace',
+      /["']/.test(token) && 'quotes',
+      token.includes('=') && "'='",
+      /[^\x00-\x7F]/.test(token) && `${[...token].filter((ch) => ch > '\x7F').length} non-ASCII character(s), e.g. a look-alike dash`,
+    ].filter(Boolean);
+    errors.push(
+      `DATABASE_AUTH_TOKEN is not a Turso token: it contains ${found.join(', ') || 'characters a token never has'}` +
+        ` (${token.length} chars, ${token.includes('eyJ') ? 'a token-like "eyJ" part is inside' : 'no "eyJ" token part at all'}).` +
+        ' Set the secret to the token alone, the text starting with "eyJ".',
+    );
+  }
   if (command === 'alerts:test') {
     const alerts = app.alerts;
     const configured =
