@@ -239,6 +239,8 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
             tool: provenanceTool(),
             maxTokens: this.app.llm.maxOutputTokens,
             temperature: this.app.llm.temperature,
+            // Copying notes into a schema needs no deliberation.
+            reasoningEffort: 'low',
           },
           this.onUsage,
         );

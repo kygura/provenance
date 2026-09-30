@@ -28,7 +28,15 @@ export interface SearchRequest {
    * and resumed when the provider pauses it. The fast anchor check leaves this off.
    */
   long?: boolean;
+  reasoningEffort?: ReasoningEffort;
 }
+
+/**
+ * Hint for reasoning models. Their hidden reasoning is billed and counted
+ * against the output budget, so a short structured call asks for little of it.
+ * Providers without the knob ignore it.
+ */
+export type ReasoningEffort = 'low' | 'medium' | 'high';
 
 export interface SearchResult {
   texts: string[];
@@ -46,6 +54,7 @@ export interface ToolCallRequest {
   tool: ToolSpec;
   maxTokens: number;
   temperature?: number;
+  reasoningEffort?: ReasoningEffort;
 }
 
 export interface ToolCallResult {

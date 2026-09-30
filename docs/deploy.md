@@ -56,6 +56,14 @@ Only the keys for the providers those models name are needed. A cheap setup
 that keeps web search, for example:
 
 ```
+LLM_MODEL=openrouter:moonshotai/kimi-k2.6
+LLM_EXTRACT_MODEL=openrouter:openai/gpt-5.6-luna
+LLM_TRIAGE_MODEL=openrouter:openai/gpt-5.6-luna
+```
+
+or, cheapest with direct keys and no aggregator fee:
+
+```
 LLM_MODEL=qwen:qwen3.7-plus
 LLM_EXTRACT_MODEL=qwen:qwen3.8-flash
 LLM_TRIAGE_MODEL=qwen:qwen3.8-flash

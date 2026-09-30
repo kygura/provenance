@@ -315,6 +315,8 @@ export class WebSearchAnchorChecker implements AnchorChecker {
           prompt: buildAnchorPrompt(snapshot),
           maxTokens: 1500,
           maxSearches: this.maxWebSearches,
+          // Runs on every launch through the gate, with a small output budget.
+          reasoningEffort: 'low',
         },
         onUsage,
       );
@@ -336,6 +338,7 @@ export class WebSearchAnchorChecker implements AnchorChecker {
           tool: anchorTool(),
           maxTokens: 600,
           temperature: 0,
+          reasoningEffort: 'low',
         },
         onUsage,
       );

@@ -212,6 +212,29 @@ describe('openrouter', () => {
   });
 });
 
+describe('reasoning effort', () => {
+  test('is sent in each dialect that has it and nowhere else', async () => {
+    const reply = () => chat({ tool_calls: [{ id: '1', function: { name: 'record', arguments: '{}' } }] });
+    const request = { ...TOOL, reasoningEffort: 'low' as const };
+
+    const openai = fakeFetch([reply()]);
+    await new OpenAiLlm('openai', 'gpt-5.6-luna', { apiKey: 'k', fetch: openai.fetch }).callTool(request, noUsage);
+    expect(openai.calls[0]?.body.reasoning_effort).toBe('low');
+
+    const router = fakeFetch([reply()]);
+    await new OpenAiLlm('openrouter', 'openai/gpt-5.6-luna', { apiKey: 'k', fetch: router.fetch }).callTool(
+      request,
+      noUsage,
+    );
+    expect(router.calls[0]?.body.reasoning).toEqual({ effort: 'low' });
+
+    const qwen = fakeFetch([reply()]);
+    await new OpenAiLlm('qwen', 'qwen3.8-flash', { apiKey: 'k', fetch: qwen.fetch }).callTool(request, noUsage);
+    expect(qwen.calls[0]?.body).not.toHaveProperty('reasoning');
+    expect(qwen.calls[0]?.body).not.toHaveProperty('reasoning_effort');
+  });
+});
+
 describe('moonshot', () => {
   test('echoes $web_search arguments back and stops offering search at the cap', async () => {
     const searchCall = (id: string) => ({
