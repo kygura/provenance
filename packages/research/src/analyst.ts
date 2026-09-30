@@ -15,7 +15,7 @@
  * reflows and returns nothing rather than saying it failed.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import {
   clamp,
   nowIso,
@@ -29,23 +29,21 @@ import {
   type TokenSnapshot,
 } from '@provenance/core';
 import { resolveAnchor } from './anchor';
-import { CostTracker, usageFromResponse } from './cost';
+import { CostTracker } from './cost';
+import { createLlm, type CreateLlmOptions, type LlmClient, type UsageSink } from './llm';
 import { PROMPT_VERSION, SYSTEM_PROMPT, buildExtractionPrompt, buildResearchPrompt } from './prompt';
 import { PROVENANCE_TOOL_NAME, buildDegradedReport, provenanceTool, validateReportDraft } from './schema';
-import { harvest, searchErrorCode } from './search';
 
 // Re-exported so existing importers keep one entry point for the analyst.
 export { harvest, searchErrorCode, type Harvest } from './search';
 
-/**
- * Dynamic-filtering variant of the web search server tool. Requires a recent
- * model; an older one returns a 400 naming the tool type, which `research()`
- * treats as "no search available" rather than as a failed run.
- */
-const WEB_SEARCH_TOOL_TYPE = 'web_search_20260209' as const;
-
 export interface AnalystOptions {
+  /** Injected Anthropic `messages` client, used when a pass runs on Anthropic. */
   client?: Pick<Anthropic, 'messages'>;
+  /** Injected clients per pass; override the config's model specs. */
+  researchLlm?: LlmClient;
+  extractLlm?: LlmClient;
+  fetch?: CreateLlmOptions['fetch'];
   tracker?: CostTracker;
   /** Attempts at a usable tool call in the extraction pass before degrading. */
   attempts?: number;
@@ -96,10 +94,11 @@ export function citationsToEvidence(citations: readonly string[], retrievedAt: s
 }
 
 export class WebSearchAnalyst implements ProvenanceResearcher {
-  private readonly client: Pick<Anthropic, 'messages'>;
+  private readonly researchLlm: LlmClient;
+  private readonly extractLlm: LlmClient;
   private readonly attempts: number;
   private readonly maxWebSearches: number;
-  private readonly maxPauseTurnRestarts: number;
+  private readonly onUsage: UsageSink;
 
   constructor(
     private readonly app: AppConfig,
@@ -107,10 +106,28 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     readonly tracker: CostTracker,
     options: AnalystOptions = {},
   ) {
-    this.client = options.client ?? new Anthropic({ apiKey: app.anthropicApiKey ?? '', maxRetries: 3 });
+    const build: CreateLlmOptions = {
+      anthropicClient: options.client,
+      fetch: options.fetch,
+      maxPauseTurnRestarts: options.maxPauseTurnRestarts,
+    };
+    this.researchLlm = options.researchLlm ?? createLlm(app, app.llm.model, build);
+    const extractSpec = app.llm.extractModel ?? app.llm.model;
+    this.extractLlm =
+      options.extractLlm ??
+      (extractSpec === app.llm.model && !options.researchLlm ? this.researchLlm : createLlm(app, extractSpec, build));
     this.attempts = options.attempts ?? 2;
     this.maxWebSearches = options.maxWebSearches ?? app.llm.maxWebSearches ?? 6;
-    this.maxPauseTurnRestarts = options.maxPauseTurnRestarts ?? 3;
+    this.onUsage = (model, usage, costUsd) => {
+      this.tracker.add(model, usage, costUsd);
+    };
+  }
+
+  /** Model label a report carries: the research model, plus the extractor when it differs. */
+  private modelLabel(): string {
+    const research = this.researchLlm.model;
+    const extract = this.extractLlm.model;
+    return research === extract ? research : `${research}+${extract}`;
   }
 
   async research(
@@ -120,7 +137,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     _ctx: ResearchContext,
   ): Promise<ProvenanceReport> {
     const log = this.logger.child('analyst');
-    const model = this.app.llm.model;
+    const model = this.modelLabel();
     // The tracker lives for the whole run; a report carries only its own spend,
     // because the pipeline sums `usage.costUsd` across reports.
     const spentBefore = this.tracker.totalUsd;
@@ -173,60 +190,29 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     evidence: readonly EvidenceItem[],
     log: Logger,
   ): Promise<ResearchNotes> {
-    const model = this.app.llm.model;
-    const messages: Anthropic.MessageParam[] = [
-      { role: 'user', content: buildResearchPrompt(snapshot, chain, evidence) },
-    ];
-    const tools = [
-      { type: WEB_SEARCH_TOOL_TYPE, name: 'web_search', max_uses: this.maxWebSearches },
-    ] as unknown as Anthropic.ToolUnion[];
-
-    const notes: string[] = [];
-    const citations: string[] = [];
-    let searches = 0;
-    let paused = true;
-
-    for (let attempt = 0; attempt <= this.maxPauseTurnRestarts; attempt++) {
-      // Streamed so a long research turn cannot trip the HTTP read timeout.
-      const stream = this.client.messages.stream({
-        model,
-        max_tokens: this.app.llm.maxOutputTokens,
-        // Same cacheable prefix as the extraction pass, so the second call of
-        // every token reads the system prompt from cache rather than paying.
-        system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-        messages,
-        tools,
-      });
-      const message = await stream.finalMessage();
-      this.tracker.add(model, usageFromResponse(message.usage));
-
-      const code = searchErrorCode(message);
-      if (code) log.warn('web search stopped', { tokenId: snapshot.tokenId, code });
-
-      const batch = harvest(message);
-      notes.push(...batch.texts);
-      citations.push(...batch.citations);
-      searches += batch.searches;
-
-      if (message.stop_reason !== 'pause_turn') {
-        paused = false;
-        break;
-      }
-      // Resuming a paused turn means handing the assistant turn straight back.
-      messages.push({ role: 'assistant', content: message.content });
-    }
-
-    if (paused) {
-      log.warn('research turn still paused after restarts', {
+    if (!this.researchLlm.canSearch) {
+      log.warn('research model has no web search; notes come from recall', {
         tokenId: snapshot.tokenId,
-        restarts: this.maxPauseTurnRestarts,
+        provider: this.researchLlm.provider,
       });
     }
+    const found = await this.researchLlm.search(
+      {
+        system: SYSTEM_PROMPT,
+        prompt: buildResearchPrompt(snapshot, chain, evidence),
+        maxTokens: this.app.llm.maxOutputTokens,
+        maxSearches: this.maxWebSearches,
+        long: true,
+      },
+      this.onUsage,
+    );
+    if (found.searchError) log.warn('web search stopped', { tokenId: snapshot.tokenId, code: found.searchError });
+    if (found.paused) log.warn('research turn still paused after restarts', { tokenId: snapshot.tokenId });
 
     return {
-      notes: notes.filter((text) => text.trim() !== '').join('\n\n'),
-      citations: [...new Set(citations)],
-      searchesRun: searches,
+      notes: found.texts.filter((text) => text.trim() !== '').join('\n\n'),
+      citations: [...new Set(found.citations)],
+      searchesRun: found.searches,
     };
   }
 
@@ -240,36 +226,30 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     log: Logger,
     spentBefore: number,
   ): Promise<ProvenanceReport> {
-    const model = this.app.llm.model;
+    const model = this.modelLabel();
     const prompt = buildExtractionPrompt(snapshot, chain, found.notes, found.citations);
     let lastIssues: string[] = [];
 
     for (let attempt = 1; attempt <= this.attempts; attempt++) {
       try {
-        const response = await this.client.messages.create({
-          model,
-          max_tokens: this.app.llm.maxOutputTokens,
-          temperature: this.app.llm.temperature,
-          system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-          tools: [provenanceTool()],
-          tool_choice: { type: 'tool', name: PROVENANCE_TOOL_NAME },
-          messages: [{ role: 'user', content: prompt }],
-        });
-
-        const usage = usageFromResponse(response.usage);
-        this.tracker.add(model, usage);
-
-        const block = response.content.find(
-          (item): item is Anthropic.ToolUseBlock =>
-            item.type === 'tool_use' && item.name === PROVENANCE_TOOL_NAME,
+        const { input, usage } = await this.extractLlm.callTool(
+          {
+            system: SYSTEM_PROMPT,
+            prompt,
+            tool: provenanceTool(),
+            maxTokens: this.app.llm.maxOutputTokens,
+            temperature: this.app.llm.temperature,
+          },
+          this.onUsage,
         );
-        if (!block) {
+
+        if (input === undefined) {
           lastIssues = ['Model returned no tool call despite tool_choice.'];
           log.warn('no tool call in response', { tokenId: snapshot.tokenId, attempt });
           continue;
         }
 
-        const outcome = validateReportDraft(block.input);
+        const outcome = validateReportDraft(input);
         if (!outcome.draft) {
           lastIssues = outcome.issues;
           log.warn('tool call rejected by validator', {

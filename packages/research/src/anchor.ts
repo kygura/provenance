@@ -19,7 +19,7 @@
  * end of a search turn is where dexscanner's version failed to parse.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import {
   nowIso,
   type Anchor,
@@ -34,15 +34,14 @@ import {
   type ResearchContext,
   type TokenSnapshot,
 } from '@provenance/core';
-import { harvest, searchErrorCode } from './search';
-import { CostTracker, usageFromResponse } from './cost';
+import { CostTracker } from './cost';
+import { createLlm, parseModelSpec, providerApiKey, type CreateLlmOptions, type LlmClient, type ToolSpec, type UsageSink } from './llm';
 import { classify } from './lexicon';
 import { UNTRUSTED_POLICY, fence } from './untrusted';
 
 export const ANCHOR_PROMPT_VERSION = 'anchor-v1';
 export const ANCHOR_TOOL_NAME = 'record_anchor';
 
-const WEB_SEARCH_TOOL_TYPE = 'web_search_20260209' as const;
 const VERDICTS: readonly AnchorVerdict[] = ['anchored', 'forced', 'unclear'];
 const TYPES: readonly AnchorType[] = ['historical-meme', 'cultural-artifact', 'inciting-event', 'none'];
 const CONFIDENCE: readonly AnchorConfidence[] = ['high', 'medium', 'low'];
@@ -250,16 +249,19 @@ export function buildAnchorExtractionPrompt(notes: string, citations: readonly s
   ].join('\n');
 }
 
-export function anchorTool(): Anthropic.Tool {
+export function anchorTool(): ToolSpec {
   return {
     name: ANCHOR_TOOL_NAME,
     description: 'Record whether the token has a real anchor or is forced.',
-    input_schema: anchorSchema() as Anthropic.Tool['input_schema'],
+    schema: anchorSchema() as Record<string, unknown>,
   };
 }
 
 export interface AnchorOptions {
+  /** Injected Anthropic `messages` client, used when the triage model is Anthropic's. */
   client?: Pick<Anthropic, 'messages'>;
+  llm?: LlmClient;
+  fetch?: CreateLlmOptions['fetch'];
   tracker?: CostTracker;
   maxWebSearches?: number;
 }
@@ -269,7 +271,7 @@ function errorMessage(error: unknown): string {
 }
 
 export class WebSearchAnchorChecker implements AnchorChecker {
-  private readonly client: Pick<Anthropic, 'messages'>;
+  private readonly llm: LlmClient;
   private readonly maxWebSearches: number;
   readonly tracker: CostTracker;
 
@@ -278,17 +280,23 @@ export class WebSearchAnchorChecker implements AnchorChecker {
     private readonly logger: Logger,
     options: AnchorOptions = {},
   ) {
-    this.client = options.client ?? new Anthropic({ apiKey: app.anthropicApiKey ?? '', maxRetries: 3 });
-    this.tracker = options.tracker ?? new CostTracker(app.llm.maxCostUsdPerRun);
+    this.llm =
+      options.llm ?? createLlm(app, app.llm.triageModel, { anthropicClient: options.client, fetch: options.fetch });
+    this.tracker = options.tracker ?? new CostTracker(app.llm.maxCostUsdPerRun, app.llm.pricing);
     this.maxWebSearches = options.maxWebSearches ?? app.launches.maxAnchorSearches;
   }
 
   async check(snapshot: TokenSnapshot, _ctx: ResearchContext): Promise<AnchorCheck> {
     const log = this.logger.child('anchor');
-    const model = this.app.llm.triageModel;
+    const model = this.llm.model;
     const spentBefore = this.tracker.totalUsd;
     let inputTokens = 0;
     let outputTokens = 0;
+    const onUsage: UsageSink = (name, usage, costUsd) => {
+      inputTokens += usage.inputTokens;
+      outputTokens += usage.outputTokens;
+      this.tracker.add(name, usage, costUsd);
+    };
     const finish = (anchor: Anchor, citations: string[]): AnchorCheck => ({
       ...resolveAnchor(anchor, snapshot.metrics.poolCreatedAt, citations.length),
       model,
@@ -301,22 +309,16 @@ export class WebSearchAnchorChecker implements AnchorChecker {
     let notes = '';
     let citations: string[] = [];
     try {
-      const message = await this.client.messages.create({
-        model,
-        max_tokens: 1500,
-        system: [{ type: 'text', text: ANCHOR_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-        messages: [{ role: 'user', content: buildAnchorPrompt(snapshot) }],
-        tools: [
-          { type: WEB_SEARCH_TOOL_TYPE, name: 'web_search', max_uses: this.maxWebSearches },
-        ] as unknown as Anthropic.ToolUnion[],
-      });
-      const usage = usageFromResponse(message.usage);
-      inputTokens += usage.inputTokens;
-      outputTokens += usage.outputTokens;
-      this.tracker.add(model, usage);
-      const code = searchErrorCode(message);
-      if (code) log.warn('web search stopped', { tokenId: snapshot.tokenId, code });
-      const found = harvest(message);
+      const found = await this.llm.search(
+        {
+          system: ANCHOR_SYSTEM_PROMPT,
+          prompt: buildAnchorPrompt(snapshot),
+          maxTokens: 1500,
+          maxSearches: this.maxWebSearches,
+        },
+        onUsage,
+      );
+      if (found.searchError) log.warn('web search stopped', { tokenId: snapshot.tokenId, code: found.searchError });
       notes = found.texts.filter((part) => part.trim() !== '').join('\n\n');
       citations = [...new Set(found.citations)];
     } catch (error) {
@@ -327,24 +329,18 @@ export class WebSearchAnchorChecker implements AnchorChecker {
 
     // ---- pass 2: structure the notes, no tools -------------------------------
     try {
-      const response = await this.client.messages.create({
-        model,
-        max_tokens: 600,
-        temperature: 0,
-        system: [{ type: 'text', text: ANCHOR_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-        tools: [anchorTool()],
-        tool_choice: { type: 'tool', name: ANCHOR_TOOL_NAME },
-        messages: [{ role: 'user', content: buildAnchorExtractionPrompt(notes, citations) }],
-      });
-      const usage = usageFromResponse(response.usage);
-      inputTokens += usage.inputTokens;
-      outputTokens += usage.outputTokens;
-      this.tracker.add(model, usage);
-      const block = response.content.find(
-        (item): item is Anthropic.ToolUseBlock => item.type === 'tool_use' && item.name === ANCHOR_TOOL_NAME,
+      const { input } = await this.llm.callTool(
+        {
+          system: ANCHOR_SYSTEM_PROMPT,
+          prompt: buildAnchorExtractionPrompt(notes, citations),
+          tool: anchorTool(),
+          maxTokens: 600,
+          temperature: 0,
+        },
+        onUsage,
       );
-      if (!block) return finish(unresolvedAnchor('The model returned no verdict.'), citations);
-      return finish(parseAnchor(block.input), citations);
+      if (input === undefined) return finish(unresolvedAnchor('The model returned no verdict.'), citations);
+      return finish(parseAnchor(input), citations);
     } catch (error) {
       log.warn('anchor extraction failed', { tokenId: snapshot.tokenId, error: errorMessage(error) });
       return finish(unresolvedAnchor(`Anchor extraction failed: ${errorMessage(error)}`), citations);
@@ -384,6 +380,8 @@ export class StubAnchorChecker implements AnchorChecker {
 
 /** Real checker with a key and live data; the stub otherwise, never a throw. */
 export function createAnchorChecker(app: AppConfig, logger: Logger, options: AnchorOptions = {}): AnchorChecker {
-  if (app.pipeline.useFixtures || !app.anthropicApiKey) return new StubAnchorChecker(app);
+  if (app.pipeline.useFixtures) return new StubAnchorChecker(app);
+  const { provider } = parseModelSpec(app.llm.triageModel);
+  if (!providerApiKey(app, provider)) return new StubAnchorChecker(app);
   return new WebSearchAnchorChecker(app, logger, options);
 }

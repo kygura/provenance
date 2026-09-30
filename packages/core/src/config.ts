@@ -31,11 +31,40 @@ export interface PipelineConfig {
   useFixtures: boolean;
 }
 
+/**
+ * Where a model is served. `anthropic` uses the Messages API; everything else
+ * speaks the OpenAI chat-completions dialect, each with its own way (or none)
+ * of searching the web.
+ */
+export const LLM_PROVIDERS = ['anthropic', 'openai', 'openrouter', 'moonshot', 'deepseek', 'openai-compatible'] as const;
+export type LlmProvider = (typeof LLM_PROVIDERS)[number];
+
+export interface LlmProviderConfig {
+  apiKey?: string;
+  /** Override for the provider's default API root. Required for `openai-compatible`. */
+  baseUrl?: string;
+}
+
 export interface LlmConfig {
-  /** Model used for the deep provenance synthesis. */
+  /**
+   * Model used for the deep provenance synthesis, as `provider:model` or a bare
+   * id whose provider is inferred (`claude-*` -> anthropic, `gpt-*` -> openai,
+   * `kimi-*` -> moonshot, `deepseek-*` -> deepseek).
+   */
   model: string;
-  /** Cheaper model for triage/classification passes. */
+  /**
+   * Model for the extraction pass (notes -> typed report). No web search, so a
+   * cheap model does the job; defaults to `model`.
+   */
+  extractModel: string;
+  /** Cheaper model for triage/classification passes. Same spec format as `model`. */
   triageModel: string;
+  providers: Record<LlmProvider, LlmProviderConfig>;
+  /**
+   * Price overrides, USD per million tokens, keyed by model id (without the
+   * provider prefix). Parsed from `LLM_PRICING="gpt-5.4-mini=0.75/4.5,..."`.
+   */
+  pricing: Record<string, { inputPerMTok: number; outputPerMTok: number }>;
   maxOutputTokens: number;
   /** Hard ceiling on spend per run; the pipeline stops analysing past it. */
   maxCostUsdPerRun: number;
@@ -126,6 +155,21 @@ function bool(value: string | undefined, fallback: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
 }
 
+/** `id=in/out,id2=in/out` -> price table. Malformed entries are skipped, not guessed. */
+function pricing(value: string | undefined): LlmConfig['pricing'] {
+  const out: LlmConfig['pricing'] = {};
+  for (const entry of list(value)) {
+    const match = /^(.+?)=([\d.]+)\/([\d.]+)$/.exec(entry);
+    if (!match) continue;
+    const input = Number(match[2]);
+    const output = Number(match[3]);
+    if (Number.isFinite(input) && Number.isFinite(output)) {
+      out[(match[1] as string).trim()] = { inputPerMTok: input, outputPerMTok: output };
+    }
+  }
+  return out;
+}
+
 function list(value: string | undefined): string[] {
   if (!value) return [];
   return value
@@ -191,8 +235,24 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       useFixtures: bool(env.USE_FIXTURES, false),
     },
     llm: {
-      model: env.LLM_MODEL ?? 'claude-opus-5',
-      triageModel: env.LLM_TRIAGE_MODEL ?? 'claude-sonnet-5',
+      model: env.LLM_MODEL || 'claude-opus-5',
+      extractModel: env.LLM_EXTRACT_MODEL || env.LLM_MODEL || 'claude-opus-5',
+      triageModel: env.LLM_TRIAGE_MODEL || 'claude-sonnet-5',
+      providers: {
+        anthropic: { apiKey: env.ANTHROPIC_API_KEY || undefined, baseUrl: env.ANTHROPIC_BASE_URL || undefined },
+        openai: { apiKey: env.OPENAI_API_KEY || undefined, baseUrl: env.OPENAI_BASE_URL || undefined },
+        openrouter: { apiKey: env.OPENROUTER_API_KEY || undefined, baseUrl: env.OPENROUTER_BASE_URL || undefined },
+        moonshot: {
+          apiKey: env.MOONSHOT_API_KEY || env.KIMI_API_KEY || undefined,
+          baseUrl: env.MOONSHOT_BASE_URL || undefined,
+        },
+        deepseek: { apiKey: env.DEEPSEEK_API_KEY || undefined, baseUrl: env.DEEPSEEK_BASE_URL || undefined },
+        'openai-compatible': {
+          apiKey: env.OPENAI_COMPATIBLE_API_KEY || undefined,
+          baseUrl: env.OPENAI_COMPATIBLE_BASE_URL || undefined,
+        },
+      },
+      pricing: pricing(env.LLM_PRICING),
       maxOutputTokens: num(env.LLM_MAX_OUTPUT_TOKENS, 4096),
       maxCostUsdPerRun: num(env.LLM_MAX_COST_USD_PER_RUN, 5),
       temperature: num(env.LLM_TEMPERATURE, 0.2),

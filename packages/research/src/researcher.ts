@@ -27,6 +27,7 @@ import archetypeFixture from '../../../fixtures/research/stub-archetypes.json' w
 import { WebSearchAnalyst, type AnalystOptions } from './analyst';
 import { resolveAnchor } from './anchor';
 import { CostTracker } from './cost';
+import { parseModelSpec, providerApiKey, PROVIDER_KEY_ENV } from './llm';
 import { PROMPT_VERSION } from './prompt';
 import { buildQueries } from './queries';
 import { buildDegradedReport, validateReportDraft } from './schema';
@@ -138,20 +139,25 @@ export class StubResearcher implements ProvenanceResearcher {
 }
 
 /**
- * Picks the real researcher when an API key is present and fixtures are off.
- * Everything else falls back to the stub, so a missing key degrades the run
- * rather than failing it.
+ * Picks the real researcher when the configured provider has a key and
+ * fixtures are off. Everything else falls back to the stub, so a missing key
+ * degrades the run rather than failing it.
  */
 export function createResearcher(
   app: AppConfig,
   logger: Logger,
   options: ResearcherOptions = {},
 ): ProvenanceResearcher {
-  if (app.pipeline.useFixtures || !app.anthropicApiKey) {
-    if (!app.pipeline.useFixtures) {
-      logger.warn('ANTHROPIC_API_KEY not set — provenance reports will be offline stubs');
-    }
+  if (app.pipeline.useFixtures) return new StubResearcher(app, logger);
+  // The triage model belongs to the anchor checker, which degrades on its own.
+  const missing = [app.llm.model, app.llm.extractModel ?? app.llm.model]
+    .map(parseModelSpec)
+    .filter((spec) => !providerApiKey(app, spec.provider));
+  if (missing.length > 0) {
+    const names = [...new Set(missing.map((spec) => PROVIDER_KEY_ENV[spec.provider]))].join(', ');
+    logger.warn(`${names} not set — provenance reports will be offline stubs`);
     return new StubResearcher(app, logger);
   }
-  return new WebSearchAnalyst(app, logger, options.tracker ?? new CostTracker(app.llm.maxCostUsdPerRun), options);
+  const tracker = options.tracker ?? new CostTracker(app.llm.maxCostUsdPerRun, app.llm.pricing);
+  return new WebSearchAnalyst(app, logger, tracker, options);
 }

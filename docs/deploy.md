@@ -34,7 +34,12 @@ dispatch. Add the secrets under **Settings → Secrets and variables → Actions
 
 | Secret | Required | What it is |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | yes | the only paid credential in the system |
+| `ANTHROPIC_API_KEY` | one LLM key | default provider (`LLM_MODEL=claude-opus-5`) |
+| `OPENAI_API_KEY` | one LLM key | for `openai:` models |
+| `OPENROUTER_API_KEY` | one LLM key | for `openrouter:` models (Kimi, DeepSeek, GPT… through one key) |
+| `MOONSHOT_API_KEY` | one LLM key | for `moonshot:` Kimi models |
+| `DEEPSEEK_API_KEY` | one LLM key | for `deepseek:` models (no web search) |
+| `OPENAI_COMPATIBLE_API_KEY` / `OPENAI_COMPATIBLE_BASE_URL` | one LLM key | any other OpenAI-dialect endpoint (no web search) |
 | `DATABASE_URL` | yes | Turso database URL |
 | `DATABASE_AUTH_TOKEN` | yes | Turso token |
 | `TELEGRAM_BOT_TOKEN` | no | from @BotFather |
@@ -44,7 +49,19 @@ dispatch. Add the secrets under **Settings → Secrets and variables → Actions
 
 Tuning knobs (`MAX_TOKENS_PER_RUN`, `MIN_LIQUIDITY_USD`,
 `ALERT_SCORE_THRESHOLD`, `LLM_MAX_COST_USD_PER_RUN`, …) belong in **Variables**
-rather than Secrets; every one is listed in `.env.example`.
+rather than Secrets; every one is listed in `.env.example`. So do the model
+choices: `LLM_MODEL`, `LLM_EXTRACT_MODEL`, `LLM_TRIAGE_MODEL` and `LLM_PRICING`.
+Only the keys for the providers those models name are needed. A cheap setup
+that keeps web search, for example:
+
+```
+LLM_MODEL=openrouter:moonshotai/kimi-k2
+LLM_EXTRACT_MODEL=openrouter:deepseek/deepseek-chat
+LLM_TRIAGE_MODEL=openrouter:moonshotai/kimi-k2
+```
+
+A run refuses to start if a configured model has no key, or no price (OpenRouter
+excepted), naming the variable to set.
 
 Two things to know about the GitHub scheduler: it is best-effort and routinely
 fires late under load, and it stops running on repositories with no activity for
