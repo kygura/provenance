@@ -184,11 +184,19 @@ const JWT = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
  * Turso tokens are JWTs, and a JWT has no whitespace, quotes or `=`. A secret
  * pasted as a whole `NAME= eyJ...` line, quoted, or wrapped across lines
  * carries characters that are illegal in the Authorization header libsql
- * builds from it. When the value holds exactly one JWT, that JWT is the token.
+ * builds from it, and so does a look-alike dash a rich-text paste put in place
+ * of `-`. When the value holds exactly one JWT, that JWT is the token.
  */
 export function extractJwt(value: string | undefined): string | undefined {
   if (!value) return value;
-  const found = value.match(JWT) ?? value.replace(/\s+/g, '').match(JWT);
+  // Rich-text editors and chat apps swap `-` for a Unicode dash and pad with
+  // zero-width characters; NFKC plus the dash fold undoes both. A JWT is pure
+  // ASCII, so nothing a real token contains is changed by this.
+  const folded = value
+    .normalize('NFKC')
+    .replace(/[\u2010-\u2015\u2212\uFE63\uFF0D]/g, '-')
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '');
+  const found = folded.match(JWT) ?? folded.replace(/\s+/g, '').match(JWT);
   return found && found.length === 1 ? found[0] : value;
 }
 

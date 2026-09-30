@@ -180,6 +180,15 @@ describe('validateEnv', () => {
     expect(error).not.toContain('not a token');
   });
 
+  test('names non-ASCII characters in the token', () => {
+    const app = makeConfig({
+      anthropicApiKey: 'sk-test',
+      databaseUrl: 'libsql://provenance.turso.io',
+      databaseAuthToken: 'eyJabc\u00e9def',
+    });
+    expect(validateEnv('run', app, parseArgs(['run']))[0]).toContain('1 non-ASCII character(s)');
+  });
+
   test('alerts:test insists on at least one channel', () => {
     const errors = validateEnv('alerts:test', makeConfig(), parseArgs(['alerts:test']));
     expect(errors[0]).toContain('TELEGRAM_BOT_TOKEN');

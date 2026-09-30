@@ -36,3 +36,13 @@ describe('extractJwt', () => {
     expect(extractJwt('not a token')).toBe('not a token');
   });
 });
+
+describe('extractJwt with rich-text pastes', () => {
+  const jwt = 'eyJhbGciOiJFZERTQSJ9.eyJhIjoicncifQ.c2ln-bmF0-dXJl';
+
+  test('folds look-alike dashes and drops zero-width characters', () => {
+    expect(extractJwt(jwt.replaceAll('-', '‑'))).toBe(jwt);
+    expect(extractJwt(jwt.replaceAll('-', '–'))).toBe(jwt);
+    expect(extractJwt(`​${jwt.slice(0, 10)}​${jwt.slice(10)}`)).toBe(jwt);
+  });
+});

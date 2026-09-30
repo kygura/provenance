@@ -267,6 +267,7 @@ export function validateEnv(command: CommandName, app: AppConfig, parsed: Parsed
       /\s/.test(token) && 'whitespace',
       /["']/.test(token) && 'quotes',
       token.includes('=') && "'='",
+      /[^\x00-\x7F]/.test(token) && `${[...token].filter((ch) => ch > '\x7F').length} non-ASCII character(s), e.g. a look-alike dash`,
     ].filter(Boolean);
     errors.push(
       `DATABASE_AUTH_TOKEN is not a Turso token: it contains ${found.join(', ') || 'characters a token never has'}` +
