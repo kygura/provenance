@@ -168,6 +168,18 @@ describe('validateEnv', () => {
     expect(validateEnv('run', priced, parseArgs(['run']))).toEqual([]);
   });
 
+  test('a malformed DATABASE_AUTH_TOKEN is named without echoing it', () => {
+    const app = makeConfig({
+      anthropicApiKey: 'sk-test',
+      databaseUrl: 'libsql://provenance.turso.io',
+      databaseAuthToken: 'not a token',
+    });
+    const [error] = validateEnv('run', app, parseArgs(['run']));
+    expect(error).toContain('DATABASE_AUTH_TOKEN is not a Turso token');
+    expect(error).toContain('whitespace');
+    expect(error).not.toContain('not a token');
+  });
+
   test('alerts:test insists on at least one channel', () => {
     const errors = validateEnv('alerts:test', makeConfig(), parseArgs(['alerts:test']));
     expect(errors[0]).toContain('TELEGRAM_BOT_TOKEN');

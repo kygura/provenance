@@ -178,6 +178,20 @@ function pricing(value: string | undefined): LlmConfig['pricing'] {
   return out;
 }
 
+const JWT = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+
+/**
+ * Turso tokens are JWTs, and a JWT has no whitespace, quotes or `=`. A secret
+ * pasted as a whole `NAME= eyJ...` line, quoted, or wrapped across lines
+ * carries characters that are illegal in the Authorization header libsql
+ * builds from it. When the value holds exactly one JWT, that JWT is the token.
+ */
+export function extractJwt(value: string | undefined): string | undefined {
+  if (!value) return value;
+  const found = value.match(JWT) ?? value.replace(/\s+/g, '').match(JWT);
+  return found && found.length === 1 ? found[0] : value;
+}
+
 function list(value: string | undefined): string[] {
   if (!value) return [];
   return value
@@ -206,7 +220,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
 
   return {
     databaseUrl: env.DATABASE_URL ?? 'file:./data/provenance.db',
-    databaseAuthToken: env.DATABASE_AUTH_TOKEN,
+    databaseAuthToken: extractJwt(env.DATABASE_AUTH_TOKEN),
     anthropicApiKey: env.ANTHROPIC_API_KEY,
     etherscanApiKey: env.ETHERSCAN_API_KEY,
     dataDir: env.PROVENANCE_DATA_DIR ?? './data',
