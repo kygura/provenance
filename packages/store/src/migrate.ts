@@ -222,6 +222,33 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_watchlist_anchor_verdict ON watchlist (anchor_verdict, first_seen_at DESC)`,
     ],
   },
+  {
+    version: 4,
+    name: 'social-sightings',
+    statements: [
+      // ---- social_sightings ---------------------------------------------------
+      // Every contract a crypto-social trending feed has listed, one row per
+      // platform. Keyed by token, not by run, for the same reason as the
+      // watchlist: the first sighting is a standing fact later fetches must not
+      // move. It covers tokens we never catalogued too, so a launch judged
+      // after the crowd found it shows up as a negative lead, not as nothing.
+      `CREATE TABLE IF NOT EXISTS social_sightings (
+  token_id TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  chain TEXT NOT NULL,
+  address TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  peak_mentions INTEGER NOT NULL DEFAULT 0,
+  last_mentions INTEGER NOT NULL DEFAULT 0,
+  fetches INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (token_id, platform)
+)`,
+      `CREATE INDEX IF NOT EXISTS idx_social_sightings_first_seen_at ON social_sightings (first_seen_at DESC)`,
+      `ALTER TABLE watchlist ADD COLUMN social_at TEXT`,
+      `ALTER TABLE watchlist ADD COLUMN social_lead_hours REAL`,
+    ],
+  },
 ];
 
 const BOOKKEEPING = `CREATE TABLE IF NOT EXISTS schema_migrations (

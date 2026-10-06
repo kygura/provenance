@@ -54,6 +54,13 @@ export default async function WatchlistPage() {
                     <th scope="col" className="py-1.5 pr-3">Conf</th>
                     <th scope="col" className="py-1.5 pr-3">Judged</th>
                     <th scope="col" className="py-1.5 pr-3 text-right">To trend</th>
+                    <th
+                      scope="col"
+                      className="py-1.5 pr-3 text-right"
+                      title="Hours from our verdict to the first crypto-social trending sighting. Negative: the crowd had it first."
+                    >
+                      To social
+                    </th>
                     <th scope="col" className="py-1.5 pr-3 text-right">Liq at verdict</th>
                     <th scope="col" className="py-1.5">Trended on</th>
                   </tr>
@@ -88,6 +95,14 @@ export default async function WatchlistPage() {
                       </td>
                       <td className="num py-2 pr-3 text-right">
                         {entry.leadHours === undefined ? '—' : `${entry.leadHours.toFixed(1)}h`}
+                      </td>
+                      <td
+                        className="num py-2 pr-3 text-right"
+                        title={entry.socialOn?.length ? `Trending on ${entry.socialOn.join(', ')}` : undefined}
+                      >
+                        {entry.socialLeadHours === undefined
+                          ? '—'
+                          : `${entry.socialLeadHours >= 0 ? '+' : ''}${entry.socialLeadHours.toFixed(1)}h`}
                       </td>
                       <td className="num py-2 pr-3 text-right">{formatUsd(entry.liquidityUsdAtCatalog)}</td>
                       <td className="py-2 text-ink-muted">{entry.expressedOn?.join(', ') || '—'}</td>

@@ -2,6 +2,7 @@ import type { Alert, DeliveryResult } from './alerts';
 import type { TokenSnapshot } from './market';
 import type { ChainAnalysis } from './onchain';
 import type { ProvenanceReport, ProvenanceScore } from './provenance';
+import type { SocialFirstSeen, SocialSighting, SocialStats } from './social';
 import type { WatchEntry, WatchQuery } from './watchlist';
 
 export type RunStatus = 'running' | 'ok' | 'partial' | 'failed';
@@ -26,6 +27,8 @@ export interface RunStats {
   durationMs?: number;
   /** Launch-lane counters. Absent on runs from before the lane existed. */
   launches?: LaunchStats;
+  /** Crypto-social step. Absent on runs from before it existed. */
+  social?: SocialStats;
 }
 
 export interface LaunchStats {
@@ -103,6 +106,15 @@ export interface ProvenanceStore {
   saveWatch(entry: WatchEntry): Promise<void>;
   getWatch(tokenId: string): Promise<WatchEntry | null>;
   listWatch(query?: WatchQuery): Promise<WatchEntry[]>;
+
+  /**
+   * Crypto-social sightings, one row per token and platform. Upserts keep the
+   * earliest `seenAt`, so a token that drops off a feed and returns keeps its
+   * first sighting.
+   */
+  recordSocialSightings(sightings: SocialSighting[]): Promise<void>;
+  /** Earliest sighting per token, across platforms. Unsighted ids are absent. */
+  socialFirstSeen(tokenIds: string[]): Promise<SocialFirstSeen[]>;
 
   /** Cache for fetched evidence pages, keyed by URL hash. */
   getCachedEvidence(key: string, maxAgeHours: number): Promise<string | null>;

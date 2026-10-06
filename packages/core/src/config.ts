@@ -1,5 +1,6 @@
 import { type Chain, normalizeChain } from './chains';
 import type { SourceId } from './market';
+import { SOCIAL_PLATFORMS, type SocialPlatform } from './social';
 
 export interface SourceConfig {
   id: SourceId;
@@ -117,6 +118,27 @@ export interface LaunchConfig {
   researchAnchored: boolean;
 }
 
+/**
+ * Crypto-social sightings from Elfa's trending contract-address feeds. Optional:
+ * with no key the step is skipped and nothing else changes. Defaults fit Elfa's
+ * free tier (1,000 credits a month): two feeds at one credit each, every six
+ * hours, is about 240.
+ */
+export interface SocialConfig {
+  elfaApiKey?: string;
+  /**
+   * Minimum hours between fetches, measured across runs. Without it the
+   * 30-minute launch lane alone would spend about 2,900 credits a month.
+   */
+  minIntervalHours: number;
+  /** Elfa's `minMentions`: contracts below it are not returned. */
+  minMentions: number;
+  /** Rows per feed per fetch. One page is one credit. */
+  pageSize: number;
+  platforms: SocialPlatform[];
+  rateLimitMs: number;
+}
+
 export interface ChainRpcConfig {
   solana: string[];
   ethereum: string[];
@@ -144,6 +166,7 @@ export interface AppConfig {
   etherscanApiKey?: string;
   pipeline: PipelineConfig;
   launches: LaunchConfig;
+  social: SocialConfig;
   llm: LlmConfig;
   rpc: ChainRpcConfig;
   alerts: AlertConfig;
@@ -176,6 +199,13 @@ function pricing(value: string | undefined): LlmConfig['pricing'] {
     }
   }
   return out;
+}
+
+/** Unknown names are dropped; a blank or fully unknown list means every platform. */
+function socialPlatforms(value: string | undefined): SocialPlatform[] {
+  const wanted = list(value).map((part) => part.toLowerCase());
+  const known = SOCIAL_PLATFORMS.filter((platform) => wanted.includes(platform));
+  return known.length > 0 ? known : [...SOCIAL_PLATFORMS];
 }
 
 const JWT = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
@@ -311,6 +341,14 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       dormantAfterHours: num(env.LAUNCHES_DORMANT_AFTER_HOURS, 168),
       maxAnchorSearches: num(env.LAUNCHES_MAX_ANCHOR_SEARCHES, 3),
       researchAnchored: bool(env.LAUNCHES_RESEARCH_ANCHORED, true),
+    },
+    social: {
+      elfaApiKey: env.ELFA_API_KEY || undefined,
+      minIntervalHours: num(env.ELFA_MIN_INTERVAL_HOURS, 6),
+      minMentions: num(env.ELFA_MIN_MENTIONS, 5),
+      pageSize: num(env.ELFA_PAGE_SIZE, 50),
+      platforms: socialPlatforms(env.ELFA_PLATFORMS),
+      rateLimitMs: num(env.ELFA_RATE_MS, 1100),
     },
     rpc: {
       // Public, keyless, tried in order. api.mainnet-beta 429s under any load

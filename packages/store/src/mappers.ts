@@ -21,7 +21,9 @@ import type {
   RunStatus,
   ScoreComponents,
   ScoreTier,
+  SocialFirstSeen,
   SocialLinks,
+  SocialPlatform,
   TokenSnapshot,
   TrendingEntry,
   AnchorCheck,
@@ -31,7 +33,7 @@ import type {
   WatchEntry,
   WatchStatus,
 } from '@provenance/core';
-import { normalizeChain, parseTokenId, silentLogger } from '@provenance/core';
+import { normalizeChain, parseTokenId, SOCIAL_PLATFORMS, silentLogger } from '@provenance/core';
 
 /**
  * Row -> domain translation lives here, on its own, for two reasons: it is the
@@ -491,6 +493,11 @@ export function rowToWatch(row: SqlRow, logger: Logger = silentLogger): WatchEnt
   if (expressedAt) entry.expressedAt = expressedAt;
   if (leadHours !== undefined) entry.leadHours = leadHours;
   if (blob.expressedOn) entry.expressedOn = blob.expressedOn;
+  const socialAt = asText(row.social_at) ?? blob.socialAt;
+  if (socialAt) entry.socialAt = socialAt;
+  const socialLeadHours = asNumber(row.social_lead_hours) ?? blob.socialLeadHours;
+  if (socialLeadHours !== undefined) entry.socialLeadHours = socialLeadHours;
+  if (blob.socialOn) entry.socialOn = blob.socialOn;
   if (blob.liquidityUsdAtCatalog !== undefined) entry.liquidityUsdAtCatalog = blob.liquidityUsdAtCatalog;
   if (blob.researched !== undefined) entry.researched = blob.researched;
   return entry;
@@ -520,5 +527,27 @@ export function watchRowArgs(entry: WatchEntry): (string | number | null)[] {
     entry.anchor.verdict,
     entry.anchor.type,
     entry.anchor.anchorDate ?? null,
+    entry.socialAt ?? null,
+    entry.socialLeadHours ?? null,
   ];
+}
+
+// ---------------------------------------------------------------------------
+// social sightings
+// ---------------------------------------------------------------------------
+
+/** Row from the grouped `socialFirstSeen` query, not from the table itself. */
+export function rowToSocialFirstSeen(row: SqlRow): SocialFirstSeen {
+  const platforms = new Set(
+    text(row.platforms)
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part): part is SocialPlatform => (SOCIAL_PLATFORMS as readonly string[]).includes(part)),
+  );
+  return {
+    tokenId: text(row.token_id),
+    firstSeenAt: text(row.first_seen_at),
+    platforms: SOCIAL_PLATFORMS.filter((platform) => platforms.has(platform)),
+    peakMentions: num(row.peak_mentions),
+  };
 }

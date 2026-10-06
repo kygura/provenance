@@ -21,6 +21,9 @@ import {
   type RunStats,
   type RunStatus,
   type ScoringInput,
+  type SocialFetchResult,
+  type SocialFirstSeen,
+  type SocialSighting,
   type TokenDossier,
   type TokenSnapshot,
   type WatchEntry,
@@ -146,6 +149,7 @@ export class FakeStore implements ProvenanceStore {
   readonly priorScores = new Map<string, ProvenanceScore[]>();
   readonly evidenceCache = new Map<string, string>();
   readonly watch = new Map<string, WatchEntry>();
+  readonly sightings: SocialSighting[] = [];
   closed = false;
   /** Set to make a specific method reject, for failure-isolation tests. */
   failOn?: { method: string; times?: number };
@@ -290,6 +294,7 @@ export class FakeStore implements ProvenanceStore {
             ...entry,
             firstSeenAt: prior.firstSeenAt < entry.firstSeenAt ? prior.firstSeenAt : entry.firstSeenAt,
             ...(prior.expressedAt ? { expressedAt: prior.expressedAt, leadHours: prior.leadHours } : {}),
+            ...(prior.socialAt ? { socialAt: prior.socialAt, socialLeadHours: prior.socialLeadHours } : {}),
           }
         : entry,
     );
@@ -306,6 +311,27 @@ export class FakeStore implements ProvenanceStore {
       .filter((entry) => !query.status || entry.status === query.status)
       .sort((a, b) => b.firstSeenAt.localeCompare(a.firstSeenAt))
       .slice(0, query.limit ?? 200);
+  }
+
+  async recordSocialSightings(sightings: SocialSighting[]): Promise<void> {
+    this.guard('recordSocialSightings');
+    this.sightings.push(...sightings);
+  }
+
+  async socialFirstSeen(tokenIds: string[]): Promise<SocialFirstSeen[]> {
+    this.guard('socialFirstSeen');
+    const out: SocialFirstSeen[] = [];
+    for (const id of new Set(tokenIds)) {
+      const rows = this.sightings.filter((row) => row.tokenId === id);
+      if (rows.length === 0) continue;
+      out.push({
+        tokenId: id,
+        firstSeenAt: rows.map((row) => row.seenAt).sort()[0] as string,
+        platforms: (['twitter', 'telegram'] as const).filter((p) => rows.some((row) => row.platform === p)),
+        peakMentions: Math.max(...rows.map((row) => row.mentionCount)),
+      });
+    }
+    return out;
   }
 
   async close(): Promise<void> {
@@ -330,6 +356,8 @@ export interface HarnessOptions {
   anchor?: (snapshot: TokenSnapshot) => AnchorCheck;
   /** Launch lane: chain-gate verdict; defaults to pass. */
   chainGate?: (chain: ChainAnalysis | undefined) => { passed: boolean; reasons: string[] };
+  /** Social feeds; defaults to nothing sighted. */
+  social?: () => SocialFetchResult;
 }
 
 export function makeAnchor(overrides: Partial<AnchorCheck> = {}): AnchorCheck {
@@ -437,6 +465,10 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     async discoverTrending(): Promise<DiscoveryResult> {
       stages.push('discover');
       return { entries: [], errors: options.discoveryErrors ?? [] };
+    },
+    async fetchSocialTrending(): Promise<SocialFetchResult> {
+      stages.push('social');
+      return options.social ? options.social() : { sightings: [], errors: [] };
     },
     mergeToSnapshots(): TokenSnapshot[] {
       stages.push('merge');

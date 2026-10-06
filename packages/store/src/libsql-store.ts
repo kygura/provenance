@@ -12,6 +12,8 @@ import type {
   RunRecord,
   RunStats,
   RunStatus,
+  SocialFirstSeen,
+  SocialSighting,
   TokenDossier,
   TokenSnapshot,
   WatchEntry,
@@ -29,6 +31,7 @@ import {
   rowToRun,
   rowToScore,
   rowToSnapshot,
+  rowToSocialFirstSeen,
   rowToWatch,
   scoreRowArgs,
   snapshotRowArgs,
@@ -572,17 +575,17 @@ export class LibsqlStore implements ProvenanceStore {
   // -------------------------------------------------------------------------
 
   /**
-   * Upsert that never moves `first_seen_at` or an existing `expressed_at`:
-   * lead time is measured from the first catalogue, and a token that dipped
-   * off the lists and came back has not expressed twice.
+   * Upsert that never moves `first_seen_at`, an existing `expressed_at` or an
+   * existing `social_at`: lead time is measured from the first catalogue, and
+   * a token that dipped off the lists and came back has not expressed twice.
    */
   async saveWatch(entry: WatchEntry): Promise<void> {
     await this.write([
       {
         sql: `INSERT INTO watchlist (token_id, chain, address, symbol, name, status, first_seen_at,
                 launched_at, expressed_at, lead_hours, referent, referent_confidence, updated_at, entry_json,
-                anchor_verdict, anchor_type, anchor_date)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                anchor_verdict, anchor_type, anchor_date, social_at, social_lead_hours)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(token_id) DO UPDATE SET
                 symbol = excluded.symbol,
                 name = excluded.name,
@@ -597,7 +600,9 @@ export class LibsqlStore implements ProvenanceStore {
                 entry_json = excluded.entry_json,
                 anchor_verdict = excluded.anchor_verdict,
                 anchor_type = excluded.anchor_type,
-                anchor_date = excluded.anchor_date`,
+                anchor_date = excluded.anchor_date,
+                social_at = coalesce(watchlist.social_at, excluded.social_at),
+                social_lead_hours = coalesce(watchlist.social_lead_hours, excluded.social_lead_hours)`,
         args: watchRowArgs(entry),
       },
     ]);
@@ -630,6 +635,54 @@ export class LibsqlStore implements ProvenanceStore {
       args,
     });
     return rows.map((row) => rowToWatch(row as SqlRow, this.logger));
+  }
+
+  // -------------------------------------------------------------------------
+  // social sightings
+  // -------------------------------------------------------------------------
+
+  async recordSocialSightings(sightings: SocialSighting[]): Promise<void> {
+    await this.write(
+      sightings.map((sighting) => ({
+        sql: `INSERT INTO social_sightings (token_id, platform, chain, address, first_seen_at, last_seen_at,
+                peak_mentions, last_mentions, fetches)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+              ON CONFLICT(token_id, platform) DO UPDATE SET
+                first_seen_at = min(social_sightings.first_seen_at, excluded.first_seen_at),
+                last_seen_at = max(social_sightings.last_seen_at, excluded.last_seen_at),
+                peak_mentions = max(social_sightings.peak_mentions, excluded.peak_mentions),
+                last_mentions = excluded.last_mentions,
+                fetches = social_sightings.fetches + 1`,
+        args: [
+          sighting.tokenId,
+          sighting.platform,
+          sighting.chain,
+          sighting.tokenAddress,
+          sighting.seenAt,
+          sighting.seenAt,
+          sighting.mentionCount,
+          sighting.mentionCount,
+        ],
+      })),
+    );
+  }
+
+  async socialFirstSeen(tokenIds: string[]): Promise<SocialFirstSeen[]> {
+    const ids = [...new Set(tokenIds)];
+    const out: SocialFirstSeen[] = [];
+    // SQLite caps bound parameters per statement; stay well under it.
+    for (let start = 0; start < ids.length; start += 400) {
+      const chunk = ids.slice(start, start + 400);
+      const rows = await this.all({
+        sql: `SELECT token_id, min(first_seen_at) AS first_seen_at, group_concat(platform) AS platforms,
+                     max(peak_mentions) AS peak_mentions
+              FROM social_sightings WHERE token_id IN (${chunk.map(() => '?').join(', ')})
+              GROUP BY token_id`,
+        args: chunk,
+      });
+      out.push(...rows.map((row) => rowToSocialFirstSeen(row as SqlRow)));
+    }
+    return out;
   }
 
   // -------------------------------------------------------------------------

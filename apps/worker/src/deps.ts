@@ -32,6 +32,7 @@ import type {
   AnchorChecker,
   ResearchContext,
   ScoringInput,
+  SocialFetchResult,
   TokenSnapshot,
   TrendingEntry,
   WatchEntry,
@@ -56,6 +57,8 @@ export interface PipelineDeps {
   triageOrder(snapshots: TokenSnapshot[]): TokenSnapshot[];
   /** Launch-only snapshots go to the launch lane; everything else is trending. */
   splitLanes(snapshots: TokenSnapshot[]): { trending: TokenSnapshot[]; launches: TokenSnapshot[] };
+  /** Crypto-social trending feeds. Never throws; the caller decides when to call. */
+  fetchSocialTrending(app: AppConfig, logger: Logger): Promise<SocialFetchResult>;
 
   // @provenance/chain
   analyzeToken(snapshot: TokenSnapshot, ctx: AnalyzerContext): Promise<ChainAnalysis>;
@@ -107,7 +110,7 @@ async function loadModule<T>(specifier: string): Promise<T> {
 
 type SourcesModule = Pick<
   PipelineDeps,
-  'discoverTrending' | 'mergeToSnapshots' | 'filterSnapshots' | 'triageOrder' | 'splitLanes'
+  'discoverTrending' | 'mergeToSnapshots' | 'filterSnapshots' | 'triageOrder' | 'splitLanes' | 'fetchSocialTrending'
 >;
 type ChainModule = Pick<PipelineDeps, 'analyzeToken'>;
 type ResearchModule = Pick<PipelineDeps, 'collectEvidence' | 'createResearcher' | 'createAnchorChecker'> & {
@@ -147,6 +150,7 @@ export async function loadRuntimeDeps(): Promise<PipelineDeps> {
     filterSnapshots: sources.filterSnapshots,
     triageOrder: sources.triageOrder,
     splitLanes: sources.splitLanes,
+    fetchSocialTrending: sources.fetchSocialTrending,
     analyzeToken: chain.analyzeToken,
     collectEvidence: research.collectEvidence,
     createResearcher: research.createResearcher,

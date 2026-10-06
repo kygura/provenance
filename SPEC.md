@@ -37,6 +37,9 @@ Twice a day, in the cloud:
   keyless public endpoints — use them. DexTools has no free API, so it is scraped
   with Playwright driving the pre-installed Chromium.
 - **The only paid credential is `ANTHROPIC_API_KEY`**, for the LLM step.
+  Optional keys that work on a free tier are allowed when nothing depends on
+  them: `ETHERSCAN_API_KEY`, and `ELFA_API_KEY` for the social yardstick
+  (`docs/social.md`), which is throttled to fit Elfa's free plan.
 - **Never throw out of a source or analyser.** Partial data beats a failed run.
   Return what you have and record the failure in `notes` / `sourceErrors`.
 - **Every network call goes through `RateLimiter` + `retry`** from `@provenance/core`.

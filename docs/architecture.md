@@ -76,6 +76,7 @@ Every stage is allowed to return less, never to fail the run:
 | No `ANTHROPIC_API_KEY` | market + chain score only, no provenance report |
 | LLM cost ceiling hit mid-run | remaining tokens get a market-only score, recorded in run stats |
 | One token throws | isolated, recorded, run continues |
+| An Elfa feed fails, or no `ELFA_API_KEY` | no social sightings this run; recorded, but never enough to fail a run on its own |
 
 The run's status ends up `ok`, `partial` or `failed`. The dashboard renders
 partial data as a normal state, because it usually is one.

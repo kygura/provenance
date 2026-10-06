@@ -35,6 +35,7 @@ import {
 } from '@provenance/core';
 import { type PipelineDeps, loadRuntimeDeps } from './deps';
 import { BUDGET_SOURCE, type LlmBudget, emptyLaunchStats, reconcileWatchlist, runLaunchLane, spend, sweepDormant } from './launch-lane';
+import { collectSocial, emptySocialStats, isSocialSource, reconcileSocial } from './social';
 
 export interface RunOptions {
   /** `--no-llm`: run discovery, chain analysis and scoring, skip the model. */
@@ -93,6 +94,7 @@ export async function runPipeline(
     llmCostUsd: 0,
     sourceErrors: [],
     launches: emptyLaunchStats(),
+    social: emptySocialStats(),
   };
   const launchStats = stats.launches ?? emptyLaunchStats();
 
@@ -134,6 +136,15 @@ export async function runPipeline(
     } catch (error) {
       stats.sourceErrors.push({ source: 'watchlist', error: errorMessage(error) });
       log.error('watchlist reconciliation failed', { error: errorMessage(error) });
+    }
+
+    // Before the launch lane, so a launch judged this run is compared against
+    // sightings that already existed: the crowd may have been there first.
+    try {
+      await collectSocial(app, store, resolved, stats, log.child('social'));
+    } catch (error) {
+      stats.sourceErrors.push({ source: 'social', error: errorMessage(error) });
+      log.error('social collection failed', { error: errorMessage(error) });
     }
 
     const budget: LlmBudget = {
@@ -292,6 +303,13 @@ export async function runPipeline(
       log.warn('dormancy sweep failed', { error: errorMessage(error) });
     }
 
+    try {
+      await reconcileSocial(store, stats, log.child('social'));
+    } catch (error) {
+      stats.sourceErrors.push({ source: 'social', error: errorMessage(error) });
+      log.error('social reconciliation failed', { error: errorMessage(error) });
+    }
+
     // ---- Stage 6b: dispatch and persist -------------------------------------
     const alerts = [...outcomes.flatMap((outcome) => outcome.alerts), ...laneAlerts];
     stats.alertsFired = alerts.length;
@@ -353,8 +371,10 @@ export function resolveStatus(selectedCount: number, stats: RunStats): RunStatus
   // A catalogued launch is usable output too: a run whose trending sources all
   // failed but whose launch lane worked is degraded, not dead.
   const usable = stats.analysed + stats.reused + (stats.launches?.catalogued ?? 0);
+  // A failed social feed degrades a run but cannot fail a quiet one.
+  const fatal = stats.sourceErrors.filter((failure) => !isSocialSource(failure.source));
   if (selectedCount > 0 && usable === 0) return 'failed';
-  if (selectedCount === 0 && usable === 0 && stats.sourceErrors.length > 0) return 'failed';
+  if (selectedCount === 0 && usable === 0 && fatal.length > 0) return 'failed';
   if (stats.sourceErrors.length > 0) return 'partial';
   return 'ok';
 }

@@ -51,6 +51,7 @@ secrets under **Settings → Secrets and variables → Actions**:
 | `DISCORD_WEBHOOK_URL` | no | channel webhook |
 | `ALERT_WEBHOOK_URL` | no | any JSON endpoint |
 | `ETHERSCAN_API_KEY` | no | contract verification lookups |
+| `ELFA_API_KEY` | no | crypto-social sightings for the watchlist's social lead (`docs/social.md`); free tier is enough |
 
 Tuning knobs (`MAX_TOKENS_PER_RUN`, `MIN_LIQUIDITY_USD`,
 `ALERT_SCORE_THRESHOLD`, `LLM_MAX_COST_USD_PER_RUN`, …) belong in **Variables**
