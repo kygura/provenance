@@ -52,5 +52,7 @@ describe('launch lane against fixtures', () => {
     } finally {
       await store.close();
     }
-  });
+    // Real packages, a libSQL file and per-host rate limiters: ~2.4s locally,
+    // and a slow CI runner pushed it past bun's 5s default.
+  }, 20_000);
 });
