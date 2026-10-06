@@ -22,7 +22,7 @@ describe('loadConfig', () => {
   test('social sightings are off without a key and default to the free-tier cadence', () => {
     const social = loadConfig({}).social;
     expect(social.elfaApiKey).toBeUndefined();
-    expect(social.minIntervalHours).toBe(6);
+    expect(social.minIntervalHours).toBe(2);
     expect(social.platforms).toEqual(['twitter', 'telegram']);
   });
 

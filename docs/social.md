@@ -58,19 +58,30 @@ it inside the plan:
 
 | `ELFA_MIN_INTERVAL_HOURS` | Fetches/month | Credits (both feeds) |
 |---|---|---|
-| 6 (default) | ~120 | ~240 |
+| 6 | ~120 | ~240 |
 | 3 | ~240 | ~480 |
+| 2 (default) | ~360 | ~720 |
 | 1 | ~720 | ~1,440: over the free plan |
 
-GitHub Actions jobs keep no state, so the interval is measured from the
-`social.fetchedAt` recorded in past runs' stats. Each fetch asks for a window
-equal to the interval, rounded up to whole hours. Back-to-back fetches overlap
-slightly instead of leaving gaps, and the earliest-sighting upsert makes the
-overlap harmless.
+The key is meant to be shared with hypertrade, whose Elfa collector spends
+about 90 a month at its default 8h interval. At the 2h default the two come
+to about 810 of the 1,000. Lower this only if hypertrade gets its own key or
+is turned down.
 
-Resolution is the interval. With the default of 6 hours, `socialAt` can trail
-the true first trend by up to 6 hours. That biases `socialLeadHours` upward by
-up to the same amount. Read small positive leads with that in mind.
+GitHub Actions jobs keep no state, so the interval is measured from the
+`social.fetchedAt` recorded in past runs' stats. A run up to 10 minutes short
+of the interval still fetches (`THROTTLE_SLACK_HOURS`). Without that, cron
+drift on the 30-minute schedule would push a 2h interval to 2.5h in practice.
+At worst the slack adds one fetch a day, about 60 credits a month at the 2h
+default.
+
+Each fetch asks for a window equal to the interval, rounded up to whole hours.
+Back-to-back fetches overlap slightly instead of leaving gaps, and the
+earliest-sighting upsert makes the overlap harmless.
+
+Resolution is the interval. With the 2-hour default, `socialAt` can trail the
+true first trend by up to 2 hours. That biases `socialLeadHours` upward by up
+to the same amount. Read leads under 2 hours as roughly even.
 
 ## Failure
 
@@ -85,7 +96,7 @@ step measures the pipeline, it isn't output.
 | Variable | Default | Meaning |
 |---|---|---|
 | `ELFA_API_KEY` | unset | Off when blank. Fixture runs (`--fixtures`) read `fixtures/elfa/` instead |
-| `ELFA_MIN_INTERVAL_HOURS` | `6` | Minimum hours between fetches, across runs. `0` fetches every run |
+| `ELFA_MIN_INTERVAL_HOURS` | `2` | Minimum hours between fetches, across runs. `0` fetches every run |
 | `ELFA_MIN_MENTIONS` | `5` | Elfa's `minMentions` |
 | `ELFA_PAGE_SIZE` | `50` | Rows per feed per fetch |
 | `ELFA_PLATFORMS` | both | `twitter`, `telegram` or both |

@@ -121,8 +121,8 @@ export interface LaunchConfig {
 /**
  * Crypto-social sightings from Elfa's trending contract-address feeds. Optional:
  * with no key the step is skipped and nothing else changes. Defaults fit Elfa's
- * free tier (1,000 credits a month): two feeds at one credit each, every six
- * hours, is about 240.
+ * free tier (1,000 credits a month): two feeds at one credit each, every two
+ * hours, is about 720, leaving room for hypertrade's collector on the same key.
  */
 export interface SocialConfig {
   elfaApiKey?: string;
@@ -344,7 +344,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
     },
     social: {
       elfaApiKey: env.ELFA_API_KEY || undefined,
-      minIntervalHours: num(env.ELFA_MIN_INTERVAL_HOURS, 6),
+      minIntervalHours: num(env.ELFA_MIN_INTERVAL_HOURS, 2),
       minMentions: num(env.ELFA_MIN_MENTIONS, 5),
       pageSize: num(env.ELFA_PAGE_SIZE, 50),
       platforms: socialPlatforms(env.ELFA_PLATFORMS),

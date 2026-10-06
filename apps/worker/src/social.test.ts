@@ -98,6 +98,12 @@ describe('social step', () => {
     await runPipeline(keyed(), silentLogger, stale.deps, { runId: 'run_due' });
     expect(stale.stages).toContain('social');
 
+    // A run a few minutes short of the interval still fetches: cron drift.
+    const early = makeHarness({ snapshots: [], store: new FakeStore() });
+    priorFetch(early.store, 2 - 5 / 60);
+    await runPipeline(keyed(), silentLogger, early.deps, { runId: 'run_early' });
+    expect(early.stages).toContain('social');
+
     const unthrottled = makeHarness({ snapshots: [], store: new FakeStore() });
     priorFetch(unthrottled.store, 1);
     await runPipeline(keyed({ minIntervalHours: 0 }), silentLogger, unthrottled.deps, { runId: 'run_every' });

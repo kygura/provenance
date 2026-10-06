@@ -44,9 +44,16 @@ export function emptySocialStats(): SocialStats {
 }
 
 /**
+ * A run this close to the interval still fetches. GitHub's scheduler drifts by
+ * minutes, so without slack a 2h interval on a 30-minute cron would mostly
+ * fetch at 2.5h: a quarter fewer samples than the budget pays for.
+ */
+export const THROTTLE_SLACK_HOURS = 10 / 60;
+
+/**
  * Runs are stateless GitHub Actions jobs, so the interval is measured from the
  * last run that recorded a fetch. The 30-minute lane keeps about 48 runs a day;
- * 200 covers the default six hours with plenty to spare.
+ * 200 covers any sensible interval with plenty to spare.
  */
 async function lastFetchAt(store: ProvenanceStore): Promise<string | undefined> {
   let latest: string | undefined;
@@ -79,7 +86,7 @@ export async function collectSocial(
   }
 
   const last = await lastFetchAt(store);
-  if (last && app.social.minIntervalHours > 0 && hoursBetween(last) < app.social.minIntervalHours) {
+  if (last && hoursBetween(last) < app.social.minIntervalHours - THROTTLE_SLACK_HOURS) {
     social.skipped = 'throttled';
     log.debug('social fetch throttled', { lastFetchAt: last, minIntervalHours: app.social.minIntervalHours });
     return;
