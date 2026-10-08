@@ -18,6 +18,18 @@ describe('loadConfig', () => {
   test('a whitespace-only value counts as unset where a default exists', () => {
     expect(loadConfig({ LLM_MODEL: '  ' }).llm.model).toBe('claude-opus-5');
   });
+
+  test('social sightings are off without a key and default to the free-tier cadence', () => {
+    const social = loadConfig({}).social;
+    expect(social.elfaApiKey).toBeUndefined();
+    expect(social.minIntervalHours).toBe(2);
+    expect(social.platforms).toEqual(['twitter', 'telegram']);
+  });
+
+  test('ELFA_PLATFORMS keeps known names and falls back to both on nonsense', () => {
+    expect(loadConfig({ ELFA_PLATFORMS: 'Telegram, discord' }).social.platforms).toEqual(['telegram']);
+    expect(loadConfig({ ELFA_PLATFORMS: 'discord' }).social.platforms).toEqual(['twitter', 'telegram']);
+  });
 });
 
 describe('extractJwt', () => {

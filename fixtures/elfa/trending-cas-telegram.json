@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "data": {
+    "pageSize": 50,
+    "page": 1,
+    "total": 2,
+    "data": [
+      { "contractAddress": "0xE41D6a9B3c72F05e8D1A6B4C93F27E0d5A8c1B76", "chain": "ethereum", "mentionCount": 12 },
+      { "contractAddress": "0x5b3e7f2a9c14d8e06b71a4c2f9d3e8b1a7c50d42", "chain": "eth", "mentionCount": 6 }
+    ]
+  }
+}

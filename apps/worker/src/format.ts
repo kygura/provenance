@@ -121,12 +121,28 @@ export function watchTable(entries: WatchEntry[], style: Style): string {
     entry.status === 'expressed' ? style.green(entry.status) : style.dim(entry.status),
     entry.firstSeenAt.slice(0, 16).replace('T', ' '),
     entry.leadHours === undefined ? '-' : `${entry.leadHours.toFixed(1)}h`,
+    socialLead(entry.socialLeadHours, style),
   ]);
   return table(
-    ['SYMBOL', 'CHAIN', 'VERDICT', 'CONF', 'ANCHOR', 'DATED', 'BEFORE', 'STATUS', 'JUDGED', 'TO TREND'],
+    ['SYMBOL', 'CHAIN', 'VERDICT', 'CONF', 'ANCHOR', 'DATED', 'BEFORE', 'STATUS', 'JUDGED', 'TO TREND', 'TO SOCIAL'],
     rows,
     style,
   );
+}
+
+/** Signed: a negative lead means crypto-social had the token before we judged it. */
+function socialLead(hours: number | undefined, style: Style): string {
+  if (hours === undefined) return '-';
+  const text = `${hours >= 0 ? '+' : ''}${hours.toFixed(1)}h`;
+  return hours < 0 ? style.red(text) : text;
+}
+
+/** One line of social-step counters, or nothing when the step never ran. */
+export function socialSummary(stats: RunStats): string | undefined {
+  const s = stats.social;
+  if (!s || s.skipped === 'no-key') return undefined;
+  const fetched = s.skipped === 'throttled' ? 'throttled' : `sightings=${s.sightings} new=${s.newTokens}`;
+  return `social: ${fetched} matched=${s.matched}`;
 }
 
 /** One line of launch-lane counters, or nothing for runs from before the lane. */

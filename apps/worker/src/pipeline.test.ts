@@ -323,4 +323,22 @@ describe('RunStats and status', () => {
     expect(resolveStatus(2, { ...stats, sourceErrors: [], reused: 2 })).toBe('ok');
     expect(resolveStatus(2, stats)).toBe('failed');
   });
+
+  test('resolveStatus: social feed errors alone degrade a quiet run, never fail it', () => {
+    const stats = {
+      discovered: 0,
+      afterFilter: 0,
+      analysed: 0,
+      reused: 0,
+      alertsFired: 0,
+      llmCostUsd: 0,
+      sourceErrors: [
+        { source: 'elfa:twitter', error: '500' },
+        { source: 'social', error: 'db' },
+      ],
+    };
+    expect(resolveStatus(0, stats)).toBe('partial');
+    const withDex = { ...stats, sourceErrors: [...stats.sourceErrors, { source: 'dexscreener', error: '403' }] };
+    expect(resolveStatus(0, withDex)).toBe('failed');
+  });
 });

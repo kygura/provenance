@@ -106,6 +106,7 @@ shown safe", and that rejects.
 | `LAUNCHES_MAX_ANCHOR_SEARCHES` | `3` | Web searches per fast anchor check |
 | `LAUNCHES_RESEARCH_ANCHORED` | `true` | Run the full research on anchored launches, at launch |
 | `ETHERSCAN_API_KEY` | unset | Optional; enables `contractVerified` |
+| `ELFA_API_KEY` | unset | Optional; records each entry's lead over crypto-social (`socialLeadHours`, see `docs/social.md`) |
 
 `LAUNCHES_REQUIRE_LP_SECURED=true` means Uniswap V3 launches never pass, because
 V3 liquidity positions are NFTs and "LP burned" has no single number there.

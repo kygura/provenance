@@ -1,5 +1,6 @@
 import type { Chain } from './chains';
 import type { Anchor } from './provenance';
+import type { SocialPlatform } from './social';
 
 /**
  * The launch lane's record of every token it judged.
@@ -56,6 +57,19 @@ export interface WatchEntry {
   leadHours?: number;
   /** Trending sources it appeared on when it expressed. */
   expressedOn?: string[];
+  /**
+   * First time a crypto-social trending feed listed the contract. Can be
+   * earlier than `firstSeenAt`: the crowd sometimes gets there first.
+   */
+  socialAt?: string;
+  /**
+   * Hours from cataloguing to that first sighting. Positive means we judged
+   * the token before crypto-social noticed it; negative means it was already
+   * being talked about when we did.
+   */
+  socialLeadHours?: number;
+  /** Platforms it had trended on when first matched. */
+  socialOn?: SocialPlatform[];
   /** Liquidity at the moment of cataloguing, for later comparison. */
   liquidityUsdAtCatalog?: number;
   /** The fast verdict at launch. The full report, when run, is in `provenance`. */

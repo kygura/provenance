@@ -42,6 +42,7 @@ import {
   renderDossier,
   renderRun,
   snapshotTable,
+  socialSummary,
   statusColor,
   watchTable,
 } from './format';
@@ -131,6 +132,8 @@ async function cmdRun(
   );
   const lanes = launchSummary(record.stats);
   if (lanes) print(style.dim(lanes));
+  const social = socialSummary(record.stats);
+  if (social) print(style.dim(social));
   for (const failure of record.stats.sourceErrors) {
     print(style.yellow(`! ${failure.source}: ${failure.error}`));
   }

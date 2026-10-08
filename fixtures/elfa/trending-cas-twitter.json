@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "data": {
+    "pageSize": 50,
+    "page": 1,
+    "total": 4,
+    "data": [
+      { "contractAddress": "0x5b3e7F2A9C14D8E06b71a4c2F9D3e8b1a7C50d42", "chain": "ethereum", "mentionCount": 41 },
+      { "contractAddress": "BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx", "chain": "solana", "mentionCount": 18 },
+      { "contractAddress": "0x9f8e7d6c5b4a39281706f5e4d3c2b1a098765432", "chain": "zksync-era-legacy", "mentionCount": 9 },
+      { "chain": "ethereum", "mentionCount": 7 }
+    ]
+  }
+}

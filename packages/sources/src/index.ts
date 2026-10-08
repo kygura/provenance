@@ -88,6 +88,10 @@ export type {
   WalkResult,
 } from './launches';
 
+// Crypto-social sightings (not a trending source: a yardstick, see core/social.ts)
+export { fetchSocialTrending, parseElfaTrendingCas, elfaTimeWindow, ELFA_BASE_URL } from './elfa';
+export type { ElfaParseResult, SocialFetchOptions } from './elfa';
+
 // Shared building blocks other packages occasionally need
 export { readEnrichment, compactEnrichment } from './enrichment';
 export type { EnrichedTrendingEntry, TokenEnrichment } from './enrichment';

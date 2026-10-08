@@ -67,6 +67,7 @@ up on a list. See [`docs/launch-lane.md`](docs/launch-lane.md).
 | Database | libSQL / Turso (or a local SQLite file) | free tier |
 | Dashboard | Vercel | free tier |
 | LLM | Anthropic API | the only paid credential |
+| Social yardstick (optional) | Elfa trending-CA feeds, `ELFA_API_KEY` | free tier; ~720 of 1,000 monthly credits ([docs/social.md](docs/social.md)) |
 
 No paid market-data API keys. DexScreener and GeckoTerminal publish free keyless
 endpoints. DexTools has no free API, so it is scraped with Playwright driving
