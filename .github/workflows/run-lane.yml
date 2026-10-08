@@ -108,14 +108,19 @@ jobs:
           # ceiling; blank falls back to the shared one.
           LLM_MAX_COST_USD_PER_RUN: ${{ inputs.lane == 'launches' && vars.LAUNCHES_MAX_COST_USD_PER_RUN || vars.LLM_MAX_COST_USD_PER_RUN }}
           LLM_MAX_WEB_SEARCHES: ${{ vars.LLM_MAX_WEB_SEARCHES }}
-          # Chain data
+          # Chain data. RPC lists are comma-separated, tried in order; blank
+          # keeps the public defaults in packages/core/src/config.ts. A keyed
+          # URL (Helius, Alchemy) carries its key in the URL and error messages
+          # quote the URL, so set those as secrets: only secrets are masked in
+          # the log. A plain keyless list can stay a variable.
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM || vars.RPC_ETHEREUM }}
+          RPC_SOLANA: ${{ secrets.RPC_SOLANA || vars.RPC_SOLANA }}
           # Social yardstick (optional; docs/social.md)
           ELFA_API_KEY: ${{ secrets.ELFA_API_KEY }}
           ELFA_MIN_INTERVAL_HOURS: ${{ vars.ELFA_MIN_INTERVAL_HOURS }}
           ELFA_MIN_MENTIONS: ${{ vars.ELFA_MIN_MENTIONS }}
           ELFA_PLATFORMS: ${{ vars.ELFA_PLATFORMS }}
-          RPC_ETHEREUM: ${{ vars.RPC_ETHEREUM }}
           # Storage and alert delivery
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
