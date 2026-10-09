@@ -51,8 +51,9 @@ secrets under **Settings → Secrets and variables → Actions**:
 | `DISCORD_WEBHOOK_URL` | no | channel webhook |
 | `ALERT_WEBHOOK_URL` | no | any JSON endpoint |
 | `ETHERSCAN_API_KEY` | no | contract verification lookups |
+| `EXA_API_KEY` | no | finds DexTools pair pages through Exa search, one request per chain per run; without it DexTools needs the Playwright fallback |
 | `ELFA_API_KEY` | no | crypto-social sightings for the watchlist's social lead (`docs/social.md`); free tier is enough |
-| `RPC_ETHEREUM` / `RPC_SOLANA` | no | your own RPC endpoints, comma-separated and tried in order. A set list replaces the public defaults, so append a public endpoint as a fallback. A keyed URL (Alchemy, Helius) must be a secret so the logs mask it. Blank keeps the public defaults |
+| `RPC_ETHEREUM` / `RPC_SOLANA` | no | your own RPC endpoints, comma-separated and tried in order. A set list is tried first and the public defaults (Allnodes' publicnode.com, drpc, …) follow as fallbacks; set `RPC_PUBLIC_FALLBACK=false` to use only your list. A keyed URL (Alchemy, Helius) must be a secret so the logs mask it. Blank keeps the public defaults |
 
 Tuning knobs (`MAX_TOKENS_PER_RUN`, `MIN_LIQUIDITY_USD`,
 `ALERT_SCORE_THRESHOLD`, `LLM_MAX_COST_USD_PER_RUN`, …) belong in **Variables**
@@ -110,11 +111,12 @@ read-write database token is the obvious way to get this wrong.
 
 The worker is a plain Bun process with a CLI, so anything that can run a
 container on a schedule works: a VPS with cron, Fly.io, Railway, a Raspberry Pi.
-Two requirements: Chromium for the DexTools scraper (`bunx playwright install
---with-deps chromium`), and network access to the data hosts.
+One requirement: network access to the data hosts. Chromium (`bunx playwright
+install --with-deps chromium`, run in `packages/sources`) is optional; the
+DexTools source only reaches for it when Exa search finds nothing or `EXA_API_KEY` is unset.
 
-Vercel Cron cannot host the worker — the DexTools scraper needs a real browser
-and the run takes longer than a serverless function should.
+Vercel Cron cannot host the worker — the run takes longer than a serverless
+function should.
 
 ## Cost
 

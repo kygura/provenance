@@ -225,6 +225,31 @@ function sharedLimiter(endpoint: string, minGapMs: number): RateLimiter {
   return limiter;
 }
 
+/**
+ * Endpoints that refused a method, shared by every client in the process and
+ * keyed by endpoint + method. Without it each token's fresh client walks into
+ * the same 429 or range refusal first, spending its retries and its budget
+ * before failing over. A 400 on eth_getLogs says nothing about eth_call, hence
+ * the method in the key.
+ */
+const COOLDOWNS = new Map<string, number>();
+const COOLDOWN_MS = 5 * 60_000;
+
+function cooldownKey(endpoint: string, method: string | undefined): string {
+  return `${method ?? ''} ${endpoint}`;
+}
+
+/** An HTTP 4xx: the endpoint answered and said no. Repeating the call will not change that. */
+function isRefusal(error: unknown): boolean {
+  const code = error instanceof RpcError ? error.detail.code : undefined;
+  return code !== undefined && code >= 400 && code < 500;
+}
+
+/** Clears the shared cooldowns. Tests only. */
+export function resetRpcCooldowns(): void {
+  COOLDOWNS.clear();
+}
+
 /** How long to back off before retrying a rate-limited endpoint. */
 function rateLimitDelayMs(error: unknown): number {
   if (!(error instanceof RpcError) || error.detail.code !== 429) return 0;
@@ -314,7 +339,8 @@ export class RpcClient {
 
     const attempts = options.attempts ?? this.options.attempts ?? 2;
     const wanted = options.timeoutMs ?? this.options.timeoutMs ?? 10_000;
-    const order = options.singleEndpoint ? [this.preferred] : this.rotation();
+    const method = calls[0]?.method;
+    const order = options.singleEndpoint ? [this.preferred] : this.rotation(method);
     const failures: string[] = [];
 
     for (const index of order) {
@@ -329,7 +355,11 @@ export class RpcClient {
           baseDelayMs: 250,
           maxDelayMs: 2_000,
           minDelayMs: rateLimitDelayMs,
-          retryable: (error) => !(error instanceof RpcError && error.message === 'aborted by caller'),
+          // A 429 is worth one patient retry; any other 4xx is final for this
+          // endpoint, so fail over at once.
+          retryable: (error) =>
+            !(error instanceof RpcError && error.message === 'aborted by caller') &&
+            (!isRefusal(error) || (error as RpcError).detail.code === 429),
           onRetry: (error, attempt) => {
             this.options.logger.debug('rpc retry', {
               endpoint,
@@ -343,6 +373,9 @@ export class RpcClient {
         return results;
       } catch (error) {
         failures.push(`${endpoint}: ${describe(error)}`);
+        if (isRefusal(error) && this.endpoints.length > 1) {
+          COOLDOWNS.set(cooldownKey(endpoint, method), Date.now() + COOLDOWN_MS);
+        }
         this.options.logger.warn('rpc endpoint failed', {
           endpoint,
           method: calls[0]?.method,
@@ -376,8 +409,12 @@ export class RpcClient {
     }
   }
 
-  private rotation(): number[] {
-    return this.endpoints.map((_, offset) => (this.preferred + offset) % this.endpoints.length);
+  /** Preferred endpoint first; endpoints cooling off for this method go last, not away. */
+  private rotation(method?: string): number[] {
+    const order = this.endpoints.map((_, offset) => (this.preferred + offset) % this.endpoints.length);
+    const now = Date.now();
+    const cooling = (index: number) => (COOLDOWNS.get(cooldownKey(this.endpoints[index] ?? '', method)) ?? 0) > now;
+    return [...order.filter((index) => !cooling(index)), ...order.filter(cooling)];
   }
 
   private async sendTo(endpoint: string, calls: readonly JsonRpcCall[], timeoutMs: number): Promise<JsonRpcResult[]> {

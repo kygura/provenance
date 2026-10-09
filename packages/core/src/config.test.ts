@@ -2,6 +2,18 @@ import { describe, expect, test } from 'bun:test';
 import { extractJwt, loadConfig } from './config';
 
 describe('loadConfig', () => {
+  test('a configured RPC leads and the public nodes follow it', () => {
+    const app = loadConfig({ RPC_ETHEREUM: 'https://eth-mainnet.g.alchemy.com/v2/key, https://ethereum-rpc.publicnode.com' });
+    expect(app.rpc.ethereum[0]).toBe('https://eth-mainnet.g.alchemy.com/v2/key');
+    expect(app.rpc.ethereum).toContain('https://eth.drpc.org');
+    expect(app.rpc.ethereum.filter((url) => url === 'https://ethereum-rpc.publicnode.com')).toHaveLength(1);
+  });
+
+  test('RPC_PUBLIC_FALLBACK=false keeps only the configured RPC list', () => {
+    const app = loadConfig({ RPC_ETHEREUM: 'https://eth-mainnet.g.alchemy.com/v2/key', RPC_PUBLIC_FALLBACK: 'false' });
+    expect(app.rpc.ethereum).toEqual(['https://eth-mainnet.g.alchemy.com/v2/key']);
+  });
+
   test('strips whitespace pasted around secrets', () => {
     const app = loadConfig({
       DATABASE_URL: ' libsql://db.turso.io\n',

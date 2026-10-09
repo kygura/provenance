@@ -45,6 +45,11 @@ export class JsonClient {
     return this.request<T>('GET', path, undefined, signal);
   }
 
+  /** GET the raw body, for pages and endpoints whose shape is not known up front. */
+  async getText(path: string, signal?: AbortSignal): Promise<string> {
+    return this.request<string>('GET', path, undefined, signal, 'text');
+  }
+
   /**
    * POST a JSON body and parse a JSON reply. JSON-RPC is the only caller; it
    * rides the same limiter and retry policy as every GET so public nodes see
@@ -54,11 +59,20 @@ export class JsonClient {
     return this.request<T>('POST', path, body, signal);
   }
 
-  private async request<T>(method: 'GET' | 'POST', path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  private async request<T>(
+    method: 'GET' | 'POST',
+    path: string,
+    body: unknown,
+    signal?: AbortSignal,
+    as: 'json' | 'text' = 'json',
+  ): Promise<T> {
     const url = path.startsWith('http') ? path : `${this.options.baseUrl}${path}`;
     const attempts = this.options.attempts ?? 3;
     const timeoutMs = this.options.timeoutMs ?? 20_000;
-    const headers: Record<string, string> = { accept: 'application/json', ...(this.options.headers ?? {}) };
+    const headers: Record<string, string> = {
+      accept: as === 'json' ? 'application/json' : 'text/html,application/json;q=0.9,*/*;q=0.8',
+      ...(this.options.headers ?? {}),
+    };
     if (method === 'POST') headers['content-type'] = 'application/json';
 
     return retry(
@@ -78,7 +92,7 @@ export class JsonClient {
             if (!response.ok) {
               throw new HttpError(`${method} ${url} -> ${response.status}`, response.status, url);
             }
-            return (await response.json()) as T;
+            return (as === 'json' ? await response.json() : await response.text()) as T;
           } finally {
             clearTimeout(timer);
             signal?.removeEventListener('abort', onAbort);

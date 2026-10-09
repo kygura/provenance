@@ -13,8 +13,11 @@ import {
   nowIso,
 } from '@provenance/core';
 
+import { DEXSCREENER_BASE_URL, DEXSCREENER_BATCH_SIZE, chunk, parseDexScreenerPairs, type DexScreenerPairRow } from './dexscreener';
+import { entryFromHydratedPair, extractPairLinks, type DexToolsPairHit } from './dextools-search';
 import type { EnrichedTrendingEntry } from './enrichment';
 import { readJsonFixtures, readTextFixtures } from './fixtures';
+import { JsonClient } from './http';
 import {
   dextoolsSlugFor,
   looksLikeDexToolsPayload,
@@ -31,6 +34,16 @@ export const DEXTOOLS_BASE_URL = 'https://www.dextools.io';
  */
 export const DEXTOOLS_XHR_PATTERN = /\/api\/(pair|token|ranking|hotpairs)/i;
 
+export const EXA_BASE_URL = 'https://api.exa.ai';
+
+/**
+ * `{chain}` is the chain's name (`ethereum`, `solana`, …); the cross-chain run
+ * drops it. Exa ranks by meaning, so this reads as a description of the page
+ * wanted rather than search-engine operators. Override with
+ * PROVENANCE_DEXTOOLS_SEARCH_QUERY.
+ */
+export const DEXTOOLS_SEARCH_QUERY = 'trending new {chain} meme token pair on DexTools pair explorer';
+
 /** Ordinary, current desktop Chrome. No spoofing beyond looking like a real browser. */
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
@@ -42,6 +55,16 @@ export interface DexToolsSourceOptions {
   navigationTimeoutMs?: number;
   /** How long to wait after DOMContentLoaded for the app's data calls. */
   dataWaitMs?: number;
+  /** Where pair links are resolved to tokens. */
+  dexscreenerBaseUrl?: string;
+  /** Exa endpoint; a test server in tests. */
+  exaBaseUrl?: string;
+  /** Query template; see DEXTOOLS_SEARCH_QUERY. */
+  searchQuery?: string;
+  /** Results asked of Exa per chain. */
+  searchResults?: number;
+  /** False skips the Playwright fallback even when search finds nothing. */
+  browser?: boolean;
 }
 
 export class DexToolsSource implements TrendingSource {
@@ -73,7 +96,7 @@ export class DexToolsSource implements TrendingSource {
     try {
       const entries = ctx.app.pipeline.useFixtures
         ? await this.fromFixtures(capturedAt)
-        : await this.fromBrowser(ctx, config, capturedAt, logger);
+        : await this.fromNetwork(ctx, config, capturedAt, logger);
       const limited = dedupeByToken(entries).slice(0, Math.max(0, config.limit));
       logger.info('hot pairs parsed', { count: limited.length, fixtures: ctx.app.pipeline.useFixtures });
       return limited;
@@ -113,6 +136,150 @@ export class DexToolsSource implements TrendingSource {
       entries.push(...parseDexToolsHtml(file.data, { capturedAt, startRank: entries.length + 1 }));
     }
     return entries;
+  }
+
+  /**
+   * Exa first: it never touches DexTools, so Cloudflare cannot refuse it and
+   * there is no browser to install. Playwright runs only when search comes
+   * back empty (or there is no EXA_API_KEY), and search's errors are kept only
+   * then.
+   */
+  private async fromNetwork(
+    ctx: SourceContext,
+    config: SourceConfig,
+    capturedAt: string,
+    logger: SourceContext['logger'],
+  ): Promise<EnrichedTrendingEntry[]> {
+    const searchErrors: { source: string; error: string }[] = [];
+    const apiKey = ctx.app.exaApiKey;
+    if (apiKey) {
+      const found = await this.fromExa(apiKey, ctx, config, capturedAt, logger, searchErrors);
+      if (found.length > 0) return found;
+    } else {
+      logger.info('no EXA_API_KEY; skipping search');
+    }
+
+    const browserAllowed = this.options.browser ?? process.env.SOURCE_DEXTOOLS_BROWSER !== 'false';
+    if (!browserAllowed) {
+      this.errors.push(...searchErrors);
+      if (!apiKey) this.errors.push({ source: this.id, error: 'no EXA_API_KEY and the browser fallback is off' });
+      return [];
+    }
+    logger.info('search found nothing; trying the browser', { searchErrors: searchErrors.length });
+    try {
+      const fromBrowser = await this.fromBrowser(ctx, config, capturedAt, logger);
+      if (fromBrowser.length === 0) this.errors.push(...searchErrors);
+      return fromBrowser;
+    } catch (error) {
+      this.errors.push(...searchErrors);
+      throw error;
+    }
+  }
+
+  private searchQuery(chain: Chain | undefined): string {
+    return (process.env.PROVENANCE_DEXTOOLS_SEARCH_QUERY || this.options.searchQuery || DEXTOOLS_SEARCH_QUERY)
+      .replace('{chain}', chain ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private async fromExa(
+    apiKey: string,
+    ctx: SourceContext,
+    config: SourceConfig,
+    capturedAt: string,
+    logger: SourceContext['logger'],
+    errors: { source: string; error: string }[],
+  ): Promise<EnrichedTrendingEntry[]> {
+    const client = new JsonClient({
+      baseUrl: this.options.exaBaseUrl ?? EXA_BASE_URL,
+      rateLimitMs: Math.max(0, config.rateLimitMs),
+      logger,
+      timeoutMs: 30_000,
+      attempts: 2,
+      headers: { 'x-api-key': apiKey },
+    });
+    const numResults = Math.min(100, this.options.searchResults ?? Math.max(10, config.limit));
+
+    const hits: DexToolsPairHit[] = [];
+    const seen = new Set<string>();
+
+    for (const slug of this.chainSlugs(ctx.app.pipeline.chains)) {
+      const chain = slug === '' ? undefined : normalizeSlug(slug);
+      try {
+        const reply = await client.postJson(
+          '/search',
+          { query: this.searchQuery(chain), type: 'auto', numResults, includeDomains: ['dextools.io'] },
+          ctx.signal,
+        );
+        const urls = exaResultUrls(reply);
+        // Exa returns pages, one link each; the same extractor reads them.
+        // A chain's query can still surface other chains; keep only its own.
+        const links = extractPairLinks(urls.join('\n')).filter((hit) => chain === undefined || hit.chain === chain);
+        logger.info('dextools search', {
+          chain: slug || 'all',
+          results: urls.length,
+          pairLinks: links.length,
+          costUsd: exaCost(reply),
+        });
+        for (const hit of links) {
+          const key = `${hit.chain}:${hit.pairAddress.toLowerCase()}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          hits.push({ ...hit, rank: hits.length + 1 });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push({ source: `${this.id}:search:${slug || 'all'}`, error: message });
+        logger.warn('dextools search failed', { chain: slug || 'all', error: message });
+      }
+    }
+
+    if (hits.length === 0) return [];
+    // Hydrate a little past the limit: some pairs will not resolve.
+    const wanted = hits.slice(0, Math.max(0, config.limit) + DEXSCREENER_BATCH_SIZE);
+    return this.hydratePairs(wanted, ctx, capturedAt, logger, errors);
+  }
+
+  /** Pair links name a pool, not a token; DexScreener's pairs endpoint resolves them. */
+  private async hydratePairs(
+    hits: DexToolsPairHit[],
+    ctx: SourceContext,
+    capturedAt: string,
+    logger: SourceContext['logger'],
+    errors: { source: string; error: string }[],
+  ): Promise<EnrichedTrendingEntry[]> {
+    const client = new JsonClient({
+      baseUrl: this.options.dexscreenerBaseUrl ?? DEXSCREENER_BASE_URL,
+      rateLimitMs: 250,
+      logger,
+    });
+    const byChain = new Map<Chain, DexToolsPairHit[]>();
+    for (const hit of hits) byChain.set(hit.chain, [...(byChain.get(hit.chain) ?? []), hit]);
+
+    const out: EnrichedTrendingEntry[] = [];
+    for (const [chain, chainHits] of byChain) {
+      for (const batch of chunk(chainHits, DEXSCREENER_BATCH_SIZE)) {
+        const addresses = batch.map((hit) => hit.pairAddress).join(',');
+        try {
+          const payload = await client.getJson(`/latest/dex/pairs/${chain}/${addresses}`, ctx.signal);
+          const rows = new Map<string, DexScreenerPairRow>();
+          for (const row of parseDexScreenerPairs(payload, new Date(capturedAt))) {
+            rows.set(row.pair.pairAddress.toLowerCase(), row);
+          }
+          for (const hit of batch) {
+            const row = rows.get(hit.pairAddress.toLowerCase());
+            if (row) out.push(entryFromHydratedPair(hit, row, capturedAt));
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          errors.push({ source: `${this.id}:hydrate:${chain}`, error: message });
+          logger.warn('dextools pair hydration failed', { chain, size: batch.length, error: message });
+        }
+      }
+    }
+    logger.debug('dextools pair links hydrated', { links: hits.length, resolved: out.length });
+    return out;
   }
 
   /**
@@ -296,4 +463,18 @@ function normalizeSlug(slug: string): Chain | undefined {
     sui: 'sui',
   }) as [string, Chain][];
   return entries.find(([key]) => key === slug.toLowerCase())?.[1];
+}
+
+function exaResultUrls(reply: unknown): string[] {
+  if (!reply || typeof reply !== 'object') return [];
+  const results = (reply as { results?: unknown }).results;
+  if (!Array.isArray(results)) return [];
+  return results
+    .map((result) => (result && typeof result === 'object' ? (result as { url?: unknown }).url : undefined))
+    .filter((url): url is string => typeof url === 'string');
+}
+
+function exaCost(reply: unknown): number | undefined {
+  const total = (reply as { costDollars?: { total?: unknown } } | null)?.costDollars?.total;
+  return typeof total === 'number' ? total : undefined;
 }

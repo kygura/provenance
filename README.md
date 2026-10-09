@@ -70,13 +70,15 @@ up on a list. See [`docs/launch-lane.md`](docs/launch-lane.md).
 | Social yardstick (optional) | Elfa trending-CA feeds, `ELFA_API_KEY` | free tier; ~720 of 1,000 monthly credits ([docs/social.md](docs/social.md)) |
 
 No paid market-data API keys. DexScreener and GeckoTerminal publish free keyless
-endpoints. DexTools has no free API, so it is scraped with Playwright driving
-headless Chromium.
+endpoints. DexTools has no free API and sits behind Cloudflare, so it is read
+through Exa search (`EXA_API_KEY`): results restricted to its `pair-explorer`
+pages, resolved to tokens through DexScreener, with Playwright and headless
+Chromium as the fallback when search finds nothing.
 
 ## Pipeline
 
 ```
-discover ─┬─ dextools      (playwright, XHR interception w/ DOM fallback)
+discover ─┬─ dextools      (exa search for pair pages, playwright fallback)
           ├─ dexscreener   (free public API: boosts, profiles, pairs)
           ├─ geckoterminal (free public API: trending pools)
           └─ launches      (factory PairCreated/PoolCreated over public RPC)

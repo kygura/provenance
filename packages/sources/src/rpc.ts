@@ -1,6 +1,6 @@
 import type { Logger } from '@provenance/core';
 
-import { JsonClient } from './http';
+import { HttpError, JsonClient } from './http';
 import { isRecord } from './normalize';
 
 /**
@@ -42,6 +42,8 @@ export interface JsonRpcClientOptions {
 export class JsonRpcClient {
   private readonly clients: { endpoint: string; client: JsonClient }[];
   private nextId = 1;
+  /** `method endpoint` pairs that answered with an HTTP 4xx; tried last from then on. */
+  private readonly refused = new Set<string>();
 
   constructor(private readonly options: JsonRpcClientOptions) {
     this.clients = options.endpoints.map((endpoint) => ({
@@ -60,7 +62,14 @@ export class JsonRpcClient {
     if (this.clients.length === 0) throw new Error('no RPC endpoints configured');
     let lastError: unknown;
 
-    for (const { endpoint, client } of this.clients) {
+    // A keyed node that rate-limits or caps eth_getLogs would otherwise be
+    // asked first for every chunk of the walk, and refuse every time.
+    const ordered = [
+      ...this.clients.filter(({ endpoint }) => !this.refused.has(`${method} ${endpoint}`)),
+      ...this.clients.filter(({ endpoint }) => this.refused.has(`${method} ${endpoint}`)),
+    ];
+
+    for (const { endpoint, client } of ordered) {
       try {
         const reply = await client.postJson(endpoint, { jsonrpc: '2.0', id: this.nextId++, method, params }, signal);
         if (!isRecord(reply)) throw new JsonRpcError(`${method}: malformed reply`, endpoint);
@@ -74,6 +83,9 @@ export class JsonRpcClient {
         return reply.result;
       } catch (error) {
         lastError = error;
+        if (error instanceof HttpError && error.status >= 400 && error.status < 500) {
+          this.refused.add(`${method} ${endpoint}`);
+        }
         this.options.logger.debug('rpc endpoint failed, trying next', {
           endpoint,
           method,
