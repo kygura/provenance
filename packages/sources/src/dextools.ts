@@ -14,7 +14,7 @@ import {
 } from '@provenance/core';
 
 import { DEXSCREENER_BASE_URL, DEXSCREENER_BATCH_SIZE, chunk, parseDexScreenerPairs, type DexScreenerPairRow } from './dexscreener';
-import { entryFromHydratedPair, extractDexToolsRaw, type DexToolsPairHit } from './dextools-raw';
+import { entryFromHydratedPair, extractPairLinks, type DexToolsPairHit } from './dextools-search';
 import type { EnrichedTrendingEntry } from './enrichment';
 import { readJsonFixtures, readTextFixtures } from './fixtures';
 import { JsonClient } from './http';
@@ -35,15 +35,21 @@ export const DEXTOOLS_BASE_URL = 'https://www.dextools.io';
 export const DEXTOOLS_XHR_PATTERN = /\/api\/(pair|token|ranking|hotpairs)/i;
 
 /**
- * What the raw lane fetches per chain, `{chain}` being the DexTools slug
- * (`ether`, `solana`, …; blank for the cross-chain page). The page carries
- * pair links in any form it is served; the JSON path is the app's own hot-pairs
- * call. Override with PROVENANCE_DEXTOOLS_RAW_URLS (comma-separated).
+ * Keyless HTML search endpoints, tried in order until one yields pair links.
+ * `{q}` is the encoded query. Both are restricted to the past day: a pair page
+ * indexed today is one people are looking at today. Override with
+ * PROVENANCE_DEXTOOLS_SEARCH_URLS (comma-separated).
  */
-export const DEXTOOLS_RAW_URLS = [
-  '/app/en/{chain}/hot-pairs',
-  '/shared/hotpairs/hot?chain={chain}',
+export const DEXTOOLS_SEARCH_URLS = [
+  'https://html.duckduckgo.com/html/?q={q}&df=d',
+  'https://www.bing.com/search?q={q}&filters=ex1%3a%22ez1%22&count=50',
 ] as const;
+
+/**
+ * `{chain}` is the DexTools slug (`ether`, `solana`, …). The cross-chain run
+ * drops it. Override with PROVENANCE_DEXTOOLS_SEARCH_QUERY.
+ */
+export const DEXTOOLS_SEARCH_QUERY = 'site:dextools.io inurl:pair-explorer {chain}';
 
 /** Ordinary, current desktop Chrome. No spoofing beyond looking like a real browser. */
 const USER_AGENT =
@@ -56,11 +62,13 @@ export interface DexToolsSourceOptions {
   navigationTimeoutMs?: number;
   /** How long to wait after DOMContentLoaded for the app's data calls. */
   dataWaitMs?: number;
-  /** Where bare pair links are resolved to tokens. */
+  /** Where pair links are resolved to tokens. */
   dexscreenerBaseUrl?: string;
-  /** Raw-lane URL templates; see DEXTOOLS_RAW_URLS. */
-  rawUrls?: readonly string[];
-  /** False skips the Playwright fallback even when the raw lane finds nothing. */
+  /** Search endpoint templates; see DEXTOOLS_SEARCH_URLS. */
+  searchUrls?: readonly string[];
+  /** Query template; see DEXTOOLS_SEARCH_QUERY. */
+  searchQuery?: string;
+  /** False skips the Playwright fallback even when search finds nothing. */
   browser?: boolean;
 }
 
@@ -136,9 +144,9 @@ export class DexToolsSource implements TrendingSource {
   }
 
   /**
-   * Raw HTTP first: no browser to install, nothing to render, and a page that
-   * blocks scripts still prints its pair links. Playwright runs only when the
-   * raw lane comes back empty, and the raw lane's errors are kept only then.
+   * Web search first: it never touches DexTools, so Cloudflare cannot refuse
+   * it and there is no browser to install. Playwright runs only when search
+   * comes back empty, and search's errors are kept only then.
    */
   private async fromNetwork(
     ctx: SourceContext,
@@ -146,45 +154,42 @@ export class DexToolsSource implements TrendingSource {
     capturedAt: string,
     logger: SourceContext['logger'],
   ): Promise<EnrichedTrendingEntry[]> {
-    const rawErrors: { source: string; error: string }[] = [];
-    const raw = await this.fromRaw(ctx, config, capturedAt, logger, rawErrors);
-    if (raw.length > 0) return raw;
+    const searchErrors: { source: string; error: string }[] = [];
+    const found = await this.fromSearch(ctx, config, capturedAt, logger, searchErrors);
+    if (found.length > 0) return found;
 
     const browserAllowed = this.options.browser ?? process.env.SOURCE_DEXTOOLS_BROWSER !== 'false';
     if (!browserAllowed) {
-      this.errors.push(...rawErrors);
+      this.errors.push(...searchErrors);
       return [];
     }
-    logger.info('raw lane found nothing; trying the browser', { rawErrors: rawErrors.length });
+    logger.info('search found nothing; trying the browser', { searchErrors: searchErrors.length });
     try {
       const fromBrowser = await this.fromBrowser(ctx, config, capturedAt, logger);
-      if (fromBrowser.length === 0) this.errors.push(...rawErrors);
+      if (fromBrowser.length === 0) this.errors.push(...searchErrors);
       return fromBrowser;
     } catch (error) {
-      this.errors.push(...rawErrors);
+      this.errors.push(...searchErrors);
       throw error;
     }
   }
 
-  private rawUrlTemplates(): string[] {
-    const override = (process.env.PROVENANCE_DEXTOOLS_RAW_URLS ?? '')
+  private searchUrlTemplates(): string[] {
+    const override = (process.env.PROVENANCE_DEXTOOLS_SEARCH_URLS ?? '')
       .split(',')
       .map((part) => part.trim())
       .filter(Boolean);
-    return override.length > 0 ? override : [...(this.options.rawUrls ?? DEXTOOLS_RAW_URLS)];
+    return override.length > 0 ? override : [...(this.options.searchUrls ?? DEXTOOLS_SEARCH_URLS)];
   }
 
-  private rawUrl(template: string, slug: string): string {
-    const base = this.options.baseUrl ?? DEXTOOLS_BASE_URL;
-    // The cross-chain page has no chain segment and the JSON call no chain param.
-    const path =
-      slug === ''
-        ? template.replace('/{chain}/', '/').replace(/[?&]chain=\{chain\}/, '')
-        : template.replace('{chain}', encodeURIComponent(slug));
-    return path.startsWith('http') ? path : `${base}${path}`;
+  private searchUrl(template: string, slug: string): string {
+    const query = (process.env.PROVENANCE_DEXTOOLS_SEARCH_QUERY || this.options.searchQuery || DEXTOOLS_SEARCH_QUERY)
+      .replace('{chain}', slug)
+      .trim();
+    return template.replace('{q}', encodeURIComponent(query));
   }
 
-  private async fromRaw(
+  private async fromSearch(
     ctx: SourceContext,
     config: SourceConfig,
     capturedAt: string,
@@ -192,46 +197,47 @@ export class DexToolsSource implements TrendingSource {
     errors: { source: string; error: string }[],
   ): Promise<EnrichedTrendingEntry[]> {
     const client = new JsonClient({
-      baseUrl: this.options.baseUrl ?? DEXTOOLS_BASE_URL,
+      baseUrl: '',
       rateLimitMs: Math.max(0, config.rateLimitMs),
       logger,
       timeoutMs: 20_000,
       attempts: 2,
-      headers: { 'user-agent': USER_AGENT, 'accept-language': 'en-US,en;q=0.9', referer: `${DEXTOOLS_BASE_URL}/` },
+      headers: { 'user-agent': USER_AGENT, 'accept-language': 'en-US,en;q=0.9' },
     });
 
-    const entries: EnrichedTrendingEntry[] = [];
     const hits: DexToolsPairHit[] = [];
     const seen = new Set<string>();
 
     for (const slug of this.chainSlugs(ctx.app.pipeline.chains)) {
       const chain = slug === '' ? undefined : normalizeSlug(slug);
-      for (const template of this.rawUrlTemplates()) {
-        const url = this.rawUrl(template, slug);
+      for (const template of this.searchUrlTemplates()) {
+        const url = this.searchUrl(template, slug);
         try {
           const body = await client.getText(url, ctx.signal);
-          const found = extractDexToolsRaw(body, { capturedAt, chain, startRank: entries.length + hits.length + 1 });
-          // Logged at info on purpose: which URL yields what is the thing to
-          // read off a CI log when DexTools changes shape.
-          logger.info('dextools raw fetch', { url, bytes: body.length, rows: found.entries.length, pairLinks: found.pairs.length });
-          entries.push(...found.entries);
-          for (const hit of found.pairs) {
+          // A chain's query still turns up other chains' pages; keep only its own.
+          const links = extractPairLinks(body).filter((hit) => chain === undefined || hit.chain === chain);
+          // Logged at info on purpose: which engine yields what is the thing to
+          // read off a CI log when an engine starts refusing.
+          logger.info('dextools search', { engine: new URL(url).hostname, chain: slug || 'all', bytes: body.length, pairLinks: links.length });
+          for (const hit of links) {
             const key = `${hit.chain}:${hit.pairAddress.toLowerCase()}`;
             if (seen.has(key)) continue;
             seen.add(key);
-            hits.push({ ...hit, rank: entries.length + hits.length + 1 });
+            hits.push({ ...hit, rank: hits.length + 1 });
           }
-          if (found.entries.length > 0 || found.pairs.length > 0) break;
+          if (links.length > 0) break;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          errors.push({ source: `${this.id}:raw:${slug || 'all'}`, error: message });
-          logger.info('dextools raw fetch failed', { url, error: message });
+          errors.push({ source: `${this.id}:search:${slug || 'all'}`, error: message });
+          logger.info('dextools search failed', { engine: new URL(url).hostname, chain: slug || 'all', error: message });
         }
       }
     }
 
-    if (hits.length > 0) entries.push(...(await this.hydratePairs(hits, ctx, capturedAt, logger, errors)));
-    return entries;
+    if (hits.length === 0) return [];
+    // Hydrate a little past the limit: some pairs will not resolve.
+    const wanted = hits.slice(0, Math.max(0, config.limit) + DEXSCREENER_BATCH_SIZE);
+    return this.hydratePairs(wanted, ctx, capturedAt, logger, errors);
   }
 
   /** Pair links name a pool, not a token; DexScreener's pairs endpoint resolves them. */

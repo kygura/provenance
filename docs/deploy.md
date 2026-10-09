@@ -112,7 +112,7 @@ The worker is a plain Bun process with a CLI, so anything that can run a
 container on a schedule works: a VPS with cron, Fly.io, Railway, a Raspberry Pi.
 One requirement: network access to the data hosts. Chromium (`bunx playwright
 install --with-deps chromium`, run in `packages/sources`) is optional; the
-DexTools scraper only reaches for it when a plain fetch finds nothing.
+DexTools source only reaches for it when web search finds nothing.
 
 Vercel Cron cannot host the worker — the run takes longer than a serverless
 function should.
