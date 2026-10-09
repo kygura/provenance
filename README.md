@@ -71,14 +71,14 @@ up on a list. See [`docs/launch-lane.md`](docs/launch-lane.md).
 
 No paid market-data API keys. DexScreener and GeckoTerminal publish free keyless
 endpoints. DexTools has no free API and sits behind Cloudflare, so it is read
-through web search: past-day DuckDuckGo/Bing results for its `pair-explorer`
+through Exa search (`EXA_API_KEY`): results restricted to its `pair-explorer`
 pages, resolved to tokens through DexScreener, with Playwright and headless
 Chromium as the fallback when search finds nothing.
 
 ## Pipeline
 
 ```
-discover ─┬─ dextools      (web search for pair pages, playwright fallback)
+discover ─┬─ dextools      (exa search for pair pages, playwright fallback)
           ├─ dexscreener   (free public API: boosts, profiles, pairs)
           ├─ geckoterminal (free public API: trending pools)
           └─ launches      (factory PairCreated/PoolCreated over public RPC)

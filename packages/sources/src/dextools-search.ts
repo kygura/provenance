@@ -5,11 +5,10 @@ import { DEXTOOLS_CHAIN_SLUGS } from './dextools-parse';
 import { compactEnrichment, type EnrichedTrendingEntry } from './enrichment';
 
 /**
- * DexTools via web search. DexTools sits behind Cloudflare and has no free
- * API, but search engines index its `pair-explorer/<address>` pages, and a
- * result page restricted to the past day is a fair proxy for what is being
- * looked at now. Only the result URLs are read: chain slug and pair address,
- * which DexScreener then resolves to a token.
+ * DexTools via Exa search. DexTools sits behind Cloudflare and has no free
+ * API, but its `pair-explorer/<address>` pages are indexed. Only the result
+ * URLs are read: chain slug and pair address, which DexScreener then resolves
+ * to a token.
  */
 
 export interface DexToolsPairHit {
@@ -34,9 +33,9 @@ const PAIR_LINK =
   /\/app\/(?:[a-z]{2}\/)?([a-z0-9-]+)\/pair-explorer\/(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z0-9_-]{48})(?![0-9A-Za-z_-])/g;
 
 /**
- * Every DexTools pair link in a result page, deduped, in page order. Engines
- * wrap result URLs in redirects with the target percent-encoded, and some
- * JSON-escape slashes, so both are undone before matching.
+ * Every DexTools pair link in a block of text, deduped, in order. Percent
+ * encoding and JSON-escaped slashes are undone first, so a URL in any of the
+ * forms an API or page hands back still matches.
  */
 export function extractPairLinks(body: string, fallbackChain?: Chain): DexToolsPairHit[] {
   const text = body

@@ -34,22 +34,15 @@ export const DEXTOOLS_BASE_URL = 'https://www.dextools.io';
  */
 export const DEXTOOLS_XHR_PATTERN = /\/api\/(pair|token|ranking|hotpairs)/i;
 
-/**
- * Keyless HTML search endpoints, tried in order until one yields pair links.
- * `{q}` is the encoded query. Both are restricted to the past day: a pair page
- * indexed today is one people are looking at today. Override with
- * PROVENANCE_DEXTOOLS_SEARCH_URLS (comma-separated).
- */
-export const DEXTOOLS_SEARCH_URLS = [
-  'https://html.duckduckgo.com/html/?q={q}&df=d',
-  'https://www.bing.com/search?q={q}&filters=ex1%3a%22ez1%22&count=50',
-] as const;
+export const EXA_BASE_URL = 'https://api.exa.ai';
 
 /**
- * `{chain}` is the DexTools slug (`ether`, `solana`, …). The cross-chain run
- * drops it. Override with PROVENANCE_DEXTOOLS_SEARCH_QUERY.
+ * `{chain}` is the chain's name (`ethereum`, `solana`, …); the cross-chain run
+ * drops it. Exa ranks by meaning, so this reads as a description of the page
+ * wanted rather than search-engine operators. Override with
+ * PROVENANCE_DEXTOOLS_SEARCH_QUERY.
  */
-export const DEXTOOLS_SEARCH_QUERY = 'site:dextools.io inurl:pair-explorer {chain}';
+export const DEXTOOLS_SEARCH_QUERY = 'trending new {chain} meme token pair on DexTools pair explorer';
 
 /** Ordinary, current desktop Chrome. No spoofing beyond looking like a real browser. */
 const USER_AGENT =
@@ -64,10 +57,12 @@ export interface DexToolsSourceOptions {
   dataWaitMs?: number;
   /** Where pair links are resolved to tokens. */
   dexscreenerBaseUrl?: string;
-  /** Search endpoint templates; see DEXTOOLS_SEARCH_URLS. */
-  searchUrls?: readonly string[];
+  /** Exa endpoint; a test server in tests. */
+  exaBaseUrl?: string;
   /** Query template; see DEXTOOLS_SEARCH_QUERY. */
   searchQuery?: string;
+  /** Results asked of Exa per chain. */
+  searchResults?: number;
   /** False skips the Playwright fallback even when search finds nothing. */
   browser?: boolean;
 }
@@ -144,9 +139,10 @@ export class DexToolsSource implements TrendingSource {
   }
 
   /**
-   * Web search first: it never touches DexTools, so Cloudflare cannot refuse
-   * it and there is no browser to install. Playwright runs only when search
-   * comes back empty, and search's errors are kept only then.
+   * Exa first: it never touches DexTools, so Cloudflare cannot refuse it and
+   * there is no browser to install. Playwright runs only when search comes
+   * back empty (or there is no EXA_API_KEY), and search's errors are kept only
+   * then.
    */
   private async fromNetwork(
     ctx: SourceContext,
@@ -155,12 +151,18 @@ export class DexToolsSource implements TrendingSource {
     logger: SourceContext['logger'],
   ): Promise<EnrichedTrendingEntry[]> {
     const searchErrors: { source: string; error: string }[] = [];
-    const found = await this.fromSearch(ctx, config, capturedAt, logger, searchErrors);
-    if (found.length > 0) return found;
+    const apiKey = ctx.app.exaApiKey;
+    if (apiKey) {
+      const found = await this.fromExa(apiKey, ctx, config, capturedAt, logger, searchErrors);
+      if (found.length > 0) return found;
+    } else {
+      logger.info('no EXA_API_KEY; skipping search');
+    }
 
     const browserAllowed = this.options.browser ?? process.env.SOURCE_DEXTOOLS_BROWSER !== 'false';
     if (!browserAllowed) {
       this.errors.push(...searchErrors);
+      if (!apiKey) this.errors.push({ source: this.id, error: 'no EXA_API_KEY and the browser fallback is off' });
       return [];
     }
     logger.info('search found nothing; trying the browser', { searchErrors: searchErrors.length });
@@ -174,22 +176,15 @@ export class DexToolsSource implements TrendingSource {
     }
   }
 
-  private searchUrlTemplates(): string[] {
-    const override = (process.env.PROVENANCE_DEXTOOLS_SEARCH_URLS ?? '')
-      .split(',')
-      .map((part) => part.trim())
-      .filter(Boolean);
-    return override.length > 0 ? override : [...(this.options.searchUrls ?? DEXTOOLS_SEARCH_URLS)];
-  }
-
-  private searchUrl(template: string, slug: string): string {
-    const query = (process.env.PROVENANCE_DEXTOOLS_SEARCH_QUERY || this.options.searchQuery || DEXTOOLS_SEARCH_QUERY)
-      .replace('{chain}', slug)
+  private searchQuery(chain: Chain | undefined): string {
+    return (process.env.PROVENANCE_DEXTOOLS_SEARCH_QUERY || this.options.searchQuery || DEXTOOLS_SEARCH_QUERY)
+      .replace('{chain}', chain ?? '')
+      .replace(/\s+/g, ' ')
       .trim();
-    return template.replace('{q}', encodeURIComponent(query));
   }
 
-  private async fromSearch(
+  private async fromExa(
+    apiKey: string,
     ctx: SourceContext,
     config: SourceConfig,
     capturedAt: string,
@@ -197,40 +192,46 @@ export class DexToolsSource implements TrendingSource {
     errors: { source: string; error: string }[],
   ): Promise<EnrichedTrendingEntry[]> {
     const client = new JsonClient({
-      baseUrl: '',
+      baseUrl: this.options.exaBaseUrl ?? EXA_BASE_URL,
       rateLimitMs: Math.max(0, config.rateLimitMs),
       logger,
-      timeoutMs: 20_000,
+      timeoutMs: 30_000,
       attempts: 2,
-      headers: { 'user-agent': USER_AGENT, 'accept-language': 'en-US,en;q=0.9' },
+      headers: { 'x-api-key': apiKey },
     });
+    const numResults = Math.min(100, this.options.searchResults ?? Math.max(10, config.limit));
 
     const hits: DexToolsPairHit[] = [];
     const seen = new Set<string>();
 
     for (const slug of this.chainSlugs(ctx.app.pipeline.chains)) {
       const chain = slug === '' ? undefined : normalizeSlug(slug);
-      for (const template of this.searchUrlTemplates()) {
-        const url = this.searchUrl(template, slug);
-        try {
-          const body = await client.getText(url, ctx.signal);
-          // A chain's query still turns up other chains' pages; keep only its own.
-          const links = extractPairLinks(body).filter((hit) => chain === undefined || hit.chain === chain);
-          // Logged at info on purpose: which engine yields what is the thing to
-          // read off a CI log when an engine starts refusing.
-          logger.info('dextools search', { engine: new URL(url).hostname, chain: slug || 'all', bytes: body.length, pairLinks: links.length });
-          for (const hit of links) {
-            const key = `${hit.chain}:${hit.pairAddress.toLowerCase()}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            hits.push({ ...hit, rank: hits.length + 1 });
-          }
-          if (links.length > 0) break;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          errors.push({ source: `${this.id}:search:${slug || 'all'}`, error: message });
-          logger.info('dextools search failed', { engine: new URL(url).hostname, chain: slug || 'all', error: message });
+      try {
+        const reply = await client.postJson(
+          '/search',
+          { query: this.searchQuery(chain), type: 'auto', numResults, includeDomains: ['dextools.io'] },
+          ctx.signal,
+        );
+        const urls = exaResultUrls(reply);
+        // Exa returns pages, one link each; the same extractor reads them.
+        // A chain's query can still surface other chains; keep only its own.
+        const links = extractPairLinks(urls.join('\n')).filter((hit) => chain === undefined || hit.chain === chain);
+        logger.info('dextools search', {
+          chain: slug || 'all',
+          results: urls.length,
+          pairLinks: links.length,
+          costUsd: exaCost(reply),
+        });
+        for (const hit of links) {
+          const key = `${hit.chain}:${hit.pairAddress.toLowerCase()}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          hits.push({ ...hit, rank: hits.length + 1 });
         }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push({ source: `${this.id}:search:${slug || 'all'}`, error: message });
+        logger.warn('dextools search failed', { chain: slug || 'all', error: message });
       }
     }
 
@@ -462,4 +463,18 @@ function normalizeSlug(slug: string): Chain | undefined {
     sui: 'sui',
   }) as [string, Chain][];
   return entries.find(([key]) => key === slug.toLowerCase())?.[1];
+}
+
+function exaResultUrls(reply: unknown): string[] {
+  if (!reply || typeof reply !== 'object') return [];
+  const results = (reply as { results?: unknown }).results;
+  if (!Array.isArray(results)) return [];
+  return results
+    .map((result) => (result && typeof result === 'object' ? (result as { url?: unknown }).url : undefined))
+    .filter((url): url is string => typeof url === 'string');
+}
+
+function exaCost(reply: unknown): number | undefined {
+  const total = (reply as { costDollars?: { total?: unknown } } | null)?.costDollars?.total;
+  return typeof total === 'number' ? total : undefined;
 }

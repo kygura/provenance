@@ -164,6 +164,8 @@ export interface AppConfig {
   anthropicApiKey?: string;
   /** Optional: enables `contractVerified`. Every other EVM read is keyless. */
   etherscanApiKey?: string;
+  /** Exa search, used to find DexTools pair pages without fetching DexTools. */
+  exaApiKey?: string;
   pipeline: PipelineConfig;
   launches: LaunchConfig;
   social: SocialConfig;
@@ -267,6 +269,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
     databaseAuthToken: extractJwt(env.DATABASE_AUTH_TOKEN),
     anthropicApiKey: env.ANTHROPIC_API_KEY,
     etherscanApiKey: env.ETHERSCAN_API_KEY,
+    exaApiKey: env.EXA_API_KEY || undefined,
     dataDir: env.PROVENANCE_DATA_DIR ?? './data',
     logLevel: (env.LOG_LEVEL as AppConfig['logLevel']) ?? 'info',
     pipeline: {

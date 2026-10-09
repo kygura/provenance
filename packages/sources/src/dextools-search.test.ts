@@ -11,8 +11,8 @@ const PAIR_BASE = '0x3333333333333333333333333333333333333333';
 const TOKEN_A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const SOL_PAIR = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU';
 
-/** DuckDuckGo's HTML results: targets percent-encoded inside a redirect, and shown as text. */
-const duckduckgo = `<html><body>
+/** Links wrapped in a redirect with the target percent-encoded, as search pages serve them. */
+const redirectPage = `<html><body>
   <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.dextools.io%2Fapp%2Fen%2Fether%2Fpair%2Dexplorer%2F${PAIR_A}&rut=x">AAA</a>
   <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.dextools.io%2Fapp%2Fen%2Fbase%2Fpair-explorer%2F${PAIR_BASE}">base</a>
   <a class="result__a" href="https://www.dextools.io/app/en/ether/pair-explorer/${PAIR_B}?t=1">BBB</a>
@@ -20,7 +20,7 @@ const duckduckgo = `<html><body>
 
 describe('extractPairLinks', () => {
   test('reads percent-encoded redirect targets, dedupes, keeps page order', () => {
-    expect(extractPairLinks(duckduckgo).map(({ chain, pairAddress }) => `${chain}:${pairAddress}`)).toEqual([
+    expect(extractPairLinks(redirectPage).map(({ chain, pairAddress }) => `${chain}:${pairAddress}`)).toEqual([
       `ethereum:${PAIR_A}`,
       `base:${PAIR_BASE}`,
       `ethereum:${PAIR_B}`,
@@ -37,22 +37,32 @@ describe('extractPairLinks', () => {
   });
 });
 
-describe('DexToolsSource search lane', () => {
+describe('DexToolsSource Exa lane', () => {
   let server: ReturnType<typeof Bun.serve>;
-  let requests: string[] = [];
-  let ddgStatus = 200;
+  let searches: { apiKey: string | null; body: Record<string, unknown> }[] = [];
+  let hydrations: string[] = [];
+  let exaStatus = 200;
 
   beforeAll(() => {
     server = Bun.serve({
       port: 0,
-      fetch(request) {
+      async fetch(request) {
         const url = new URL(request.url);
-        requests.push(url.pathname + url.search);
-        if (url.pathname === '/ddg') {
-          return ddgStatus === 200 ? new Response(duckduckgo, { headers: { 'content-type': 'text/html' } }) : new Response('anomaly', { status: ddgStatus });
+        if (url.pathname === '/search' && request.method === 'POST') {
+          searches.push({ apiKey: request.headers.get('x-api-key'), body: (await request.json()) as Record<string, unknown> });
+          if (exaStatus !== 200) return new Response('{"error":"nope"}', { status: exaStatus });
+          return Response.json({
+            results: [
+              { url: `https://www.dextools.io/app/en/ether/pair-explorer/${PAIR_A}` },
+              { url: `https://www.dextools.io/app/en/base/pair-explorer/${PAIR_BASE}` },
+              { url: 'https://www.dextools.io/app/en/ether/hot-pairs' },
+              { url: `https://www.dextools.io/app/en/ether/pair-explorer/${PAIR_A}?t=2` },
+            ],
+            costDollars: { total: 0.005 },
+          });
         }
-        if (url.pathname === '/bing') return new Response(`<a href="https://www.dextools.io/app/en/ether/pair-explorer/${PAIR_B}">B</a>`);
-        if (url.pathname === `/latest/dex/pairs/ethereum/${PAIR_A},${PAIR_B}` || url.pathname === `/latest/dex/pairs/ethereum/${PAIR_B}`) {
+        if (url.pathname.startsWith('/latest/dex/pairs/')) {
+          hydrations.push(url.pathname);
           return Response.json({
             pairs: [
               {
@@ -78,22 +88,24 @@ describe('DexToolsSource search lane', () => {
     return { ...app.pipeline.sources.find((source) => source.id === 'dextools')!, rateLimitMs: 0 };
   }
 
-  function source(): DexToolsSource {
+  function source(app: AppConfig): DexToolsSource {
     const base = `http://127.0.0.1:${server.port}`;
-    return new DexToolsSource(dextoolsConfig(loadConfig({})), {
-      dexscreenerBaseUrl: base,
-      searchUrls: [`${base}/ddg?q={q}`, `${base}/bing?q={q}`],
-      browser: false,
-    });
+    return new DexToolsSource(dextoolsConfig(app), { exaBaseUrl: base, dexscreenerBaseUrl: base, browser: false });
   }
 
-  test('result links are resolved to tokens, other chains dropped, no second engine needed', async () => {
-    requests = [];
-    ddgStatus = 200;
-    const app = loadConfig({ PROVENANCE_CHAINS: 'ethereum' });
-    const dextools = source();
+  test('Exa result URLs become tokens: own chain only, deduped, hydrated through DexScreener', async () => {
+    searches = [];
+    hydrations = [];
+    exaStatus = 200;
+    const app = loadConfig({ PROVENANCE_CHAINS: 'ethereum', EXA_API_KEY: 'exa-key' });
+    const dextools = source(app);
     const entries = await dextools.fetchTrending({ config: dextoolsConfig(app), app, logger: silentLogger });
 
+    expect(searches).toHaveLength(1);
+    expect(searches[0]?.apiKey).toBe('exa-key');
+    expect(searches[0]?.body).toMatchObject({ includeDomains: ['dextools.io'], type: 'auto' });
+    expect(String(searches[0]?.body.query)).toContain('ethereum');
+    expect(hydrations).toEqual([`/latest/dex/pairs/ethereum/${PAIR_A}`]);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       source: 'dextools',
@@ -102,42 +114,31 @@ describe('DexToolsSource search lane', () => {
       pairAddress: PAIR_A,
       symbol: 'AAA',
       rank: 1,
-      url: `https://www.dextools.io/app/en/ether/pair-explorer/${PAIR_A}`,
     });
-    expect(requests[0]).toBe(`/ddg?q=${encodeURIComponent('site:dextools.io inurl:pair-explorer ether')}`);
-    expect(requests.some((path) => path.startsWith('/bing'))).toBe(false);
-    expect(requests.some((path) => path.includes(PAIR_BASE))).toBe(false);
     expect(dextools.drainErrors()).toEqual([]);
   });
 
-  test('a refusing engine falls through to the next', async () => {
-    requests = [];
-    ddgStatus = 403;
+  test('without EXA_API_KEY nothing is searched and the gap is reported', async () => {
+    searches = [];
     const app = loadConfig({ PROVENANCE_CHAINS: 'ethereum' });
-    const dextools = source();
+    const dextools = source(app);
     const entries = await dextools.fetchTrending({ config: dextoolsConfig(app), app, logger: silentLogger });
 
-    expect(requests.some((path) => path.startsWith('/bing'))).toBe(true);
-    expect(requests).toContain(`/latest/dex/pairs/ethereum/${PAIR_B}`);
-    // The stand-in answers for PAIR_A only, so nothing resolves; the point is the fall-through.
     expect(entries).toEqual([]);
+    expect(searches).toEqual([]);
+    expect(dextools.drainErrors()[0]?.error).toContain('EXA_API_KEY');
   });
 
-  test('when every engine refuses the errors are kept', async () => {
-    ddgStatus = 403;
-    const base = `http://127.0.0.1:${server.port}`;
-    const app = loadConfig({ PROVENANCE_CHAINS: 'base' });
-    const dextools = new DexToolsSource(dextoolsConfig(app), {
-      dexscreenerBaseUrl: base,
-      searchUrls: [`${base}/ddg?q={q}`],
-      browser: false,
-    });
+  test('an Exa refusal is kept as an error', async () => {
+    exaStatus = 401;
+    const app = loadConfig({ PROVENANCE_CHAINS: 'base', EXA_API_KEY: 'bad' });
+    const dextools = source(app);
     const entries = await dextools.fetchTrending({ config: dextoolsConfig(app), app, logger: silentLogger });
 
     expect(entries).toEqual([]);
     const errors = dextools.drainErrors();
     expect(errors).toHaveLength(1);
     expect(errors[0]?.source).toBe('dextools:search:base');
-    expect(errors[0]?.error).toContain('403');
+    expect(errors[0]?.error).toContain('401');
   });
 });
