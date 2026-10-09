@@ -251,9 +251,15 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
   const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(raw)) env[key] = value?.trim();
   const chains = list(env.PROVENANCE_CHAINS).map(normalizeChain);
+  // Your own endpoints lead and the public ones follow, so a keyed node that
+  // rate-limits or refuses a range (Alchemy's free eth_getLogs cap) still has
+  // somewhere to fail over to. RPC_PUBLIC_FALLBACK=false keeps only your list.
+  const publicFallback = bool(env.RPC_PUBLIC_FALLBACK, true);
   const rpcOr = (key: string, fallback: string[]): string[] => {
     const configured = list(env[key]);
-    return configured.length > 0 ? configured : fallback;
+    if (configured.length === 0) return fallback;
+    if (!publicFallback) return configured;
+    return [...new Set([...configured, ...fallback])];
   };
 
   return {
@@ -351,8 +357,9 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       rateLimitMs: num(env.ELFA_RATE_MS, 1100),
     },
     rpc: {
-      // Public, keyless, tried in order. api.mainnet-beta 429s under any load
-      // and Ankr now requires a key, so neither can lead.
+      // Public, keyless, tried in order after any configured endpoint.
+      // publicnode.com is Allnodes' open tier. api.mainnet-beta 429s under any
+      // load and Ankr now requires a key, so neither can lead.
       solana: rpcOr('RPC_SOLANA', [
         'https://solana-rpc.publicnode.com',
         'https://solana.drpc.org',

@@ -120,6 +120,7 @@ jobs:
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
           RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM || vars.RPC_ETHEREUM }}
           RPC_SOLANA: ${{ secrets.RPC_SOLANA || vars.RPC_SOLANA }}
+          RPC_PUBLIC_FALLBACK: ${{ vars.RPC_PUBLIC_FALLBACK }}
           # Social yardstick (optional; docs/social.md)
           ELFA_API_KEY: ${{ secrets.ELFA_API_KEY }}
           ELFA_MIN_INTERVAL_HOURS: ${{ vars.ELFA_MIN_INTERVAL_HOURS }}
