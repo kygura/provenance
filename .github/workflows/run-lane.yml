@@ -60,9 +60,13 @@ jobs:
         run: bun install --frozen-lockfile
 
       # The DexTools source drives a real browser; the other sources are plain
-      # HTTP and keep working if this step fails.
+      # HTTP and keep working if this step fails. Run from the package that
+      # depends on Playwright: the workspace links its bin there, not at the
+      # root, and a root `bunx` fetches whatever Playwright is current on npm,
+      # whose browser build the locked version then cannot find.
       - name: Install Chromium
         if: inputs.browser
+        working-directory: packages/sources
         run: bunx playwright install --with-deps chromium
 
       - name: Migrate database

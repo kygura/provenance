@@ -189,6 +189,29 @@ function ageHours(fetchedAt: string, now: number): number {
 }
 
 /**
+ * Bun's fetch keeps idle sockets to remote libSQL (Turso) and hands one back
+ * after the server has already closed it; the request then fails before it
+ * reaches the database. These are the messages that failure surfaces as. A
+ * statement error (constraint, syntax) never matches, so it is not retried.
+ */
+const TRANSIENT_TRANSPORT_ERROR =
+  /socket connection was closed|ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|fetch failed|other side closed|socket hang up/i;
+
+const TRANSPORT_ATTEMPTS = 3;
+
+function isTransientTransportError(error: unknown): boolean {
+  for (let current: unknown = error, depth = 0; current && depth < 4; depth += 1) {
+    const message = current instanceof Error ? current.message : String(current);
+    const code = (current as { code?: unknown }).code;
+    if (TRANSIENT_TRANSPORT_ERROR.test(message) || (typeof code === 'string' && TRANSIENT_TRANSPORT_ERROR.test(code))) {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
  * libSQL-backed `ProvenanceStore`. One class covers all three deployments —
  * the Bun worker on a local file, the Vercel dashboard on remote Turso over
  * HTTP, and `:memory:` in tests — because `@libsql/client` hides the transport
@@ -226,9 +249,26 @@ export class LibsqlStore implements ProvenanceStore {
     return this.readied;
   }
 
+  /**
+   * Runs one client call, retrying a dropped connection. Safe for writes
+   * because every write here is an `ON CONFLICT` upsert: replaying one that
+   * did land leaves the same row (social_sightings.fetches can count one extra).
+   */
+  private async withRetry<T>(call: () => Promise<T>): Promise<T> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await call();
+      } catch (error) {
+        if (attempt >= TRANSPORT_ATTEMPTS || this.isClosed || !isTransientTransportError(error)) throw error;
+        this.logger.warn('database connection dropped, retrying', { attempt, error: String(error) });
+        await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+      }
+    }
+  }
+
   private async all(stmt: InStatement): Promise<Row[]> {
     await this.ready();
-    const result = await this.client.execute(stmt);
+    const result = await this.withRetry(() => this.client.execute(stmt));
     return result.rows;
   }
 
@@ -242,10 +282,10 @@ export class LibsqlStore implements ProvenanceStore {
     if (stmts.length === 0) return;
     if (stmts.length === 1) {
       // `batch` would wrap a single statement in a pointless transaction.
-      await this.client.execute(stmts[0] as InStatement);
+      await this.withRetry(() => this.client.execute(stmts[0] as InStatement));
       return;
     }
-    await this.client.batch(stmts, 'write');
+    await this.withRetry(() => this.client.batch(stmts, 'write'));
   }
 
   // -------------------------------------------------------------------------
@@ -510,7 +550,7 @@ export class LibsqlStore implements ProvenanceStore {
       );
     }
 
-    const results = await this.client.batch(stmts, 'read');
+    const results = await this.withRetry(() => this.client.batch(stmts, 'read'));
 
     const snapshots = new Map<string, TokenSnapshot>();
     const chains = new Map<string, ChainAnalysis>();
