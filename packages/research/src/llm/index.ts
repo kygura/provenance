@@ -22,6 +22,7 @@ export function createLlm(app: AppConfig, spec: string, options: CreateLlmOption
       client: options.anthropicClient,
       apiKey,
       baseUrl,
+      workspaceId: app.llm.providers?.anthropic?.workspaceId,
       maxPauseTurnRestarts: options.maxPauseTurnRestarts,
     });
   }

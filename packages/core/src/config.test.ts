@@ -42,6 +42,10 @@ describe('loadConfig', () => {
     expect([llm.model, llm.extractModel, llm.triageModel]).toEqual(['claude-opus-5', 'claude-opus-5', 'claude-sonnet-5']);
   });
 
+  test('ANTHROPIC_WORKSPACE_ID is carried on the anthropic provider', () => {
+    expect(loadConfig({ ANTHROPIC_WORKSPACE_ID: 'wrkspc_1' }).llm.providers.anthropic.workspaceId).toBe('wrkspc_1');
+  });
+
   test('Anthropic-first keeps a Claude model the user picked', () => {
     const llm = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant', LLM_MODEL: 'claude-fable-5-1', LLM_TRIAGE_MODEL: 'gpt-6' }).llm;
     expect([llm.model, llm.extractModel, llm.triageModel]).toEqual(['claude-fable-5-1', 'claude-fable-5-1', 'claude-sonnet-5']);

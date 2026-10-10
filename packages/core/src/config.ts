@@ -111,6 +111,8 @@ export interface LlmProviderConfig {
   apiKey?: string;
   /** Override for the provider's default API root. Required for `openai-compatible`. */
   baseUrl?: string;
+  /** Anthropic only: sent as anthropic-workspace-id, required by keys not scoped to a workspace (sk-ant-usr-…). */
+  workspaceId?: string;
 }
 
 export interface LlmConfig {
@@ -378,7 +380,11 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
         return env.ANTHROPIC_API_KEY && bool(env.LLM_ANTHROPIC_FIRST, true) ? anthropicFirst(configured) : configured;
       })(),
       providers: {
-        anthropic: { apiKey: env.ANTHROPIC_API_KEY || undefined, baseUrl: env.ANTHROPIC_BASE_URL || undefined },
+        anthropic: {
+          apiKey: env.ANTHROPIC_API_KEY || undefined,
+          baseUrl: env.ANTHROPIC_BASE_URL || undefined,
+          workspaceId: env.ANTHROPIC_WORKSPACE_ID || undefined,
+        },
         openai: { apiKey: env.OPENAI_API_KEY || undefined, baseUrl: env.OPENAI_BASE_URL || undefined },
         openrouter: { apiKey: env.OPENROUTER_API_KEY || undefined, baseUrl: env.OPENROUTER_BASE_URL || undefined },
         moonshot: {
