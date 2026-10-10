@@ -31,6 +31,28 @@ describe('loadConfig', () => {
     expect(loadConfig({ LLM_MODEL: '  ' }).llm.model).toBe('claude-opus-5');
   });
 
+  test('with an Anthropic key, every LLM role runs on Anthropic first', () => {
+    const llm = loadConfig({
+      ANTHROPIC_API_KEY: 'sk-ant',
+      OPENROUTER_API_KEY: 'sk-or',
+      LLM_MODEL: 'openrouter:qwen/qwen3-max',
+      LLM_EXTRACT_MODEL: 'deepseek-v4',
+      LLM_TRIAGE_MODEL: 'kimi-k3',
+    }).llm;
+    expect([llm.model, llm.extractModel, llm.triageModel]).toEqual(['claude-opus-5', 'claude-opus-5', 'claude-sonnet-5']);
+  });
+
+  test('Anthropic-first keeps a Claude model the user picked', () => {
+    const llm = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant', LLM_MODEL: 'claude-fable-5-1', LLM_TRIAGE_MODEL: 'gpt-6' }).llm;
+    expect([llm.model, llm.extractModel, llm.triageModel]).toEqual(['claude-fable-5-1', 'claude-fable-5-1', 'claude-sonnet-5']);
+  });
+
+  test('other providers apply without an Anthropic key, or with LLM_ANTHROPIC_FIRST=false', () => {
+    expect(loadConfig({ LLM_MODEL: 'openrouter:qwen/qwen3-max' }).llm.model).toBe('openrouter:qwen/qwen3-max');
+    const off = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant', LLM_ANTHROPIC_FIRST: 'false', LLM_MODEL: 'deepseek-v4' });
+    expect(off.llm.model).toBe('deepseek-v4');
+  });
+
   test('social sightings are off without a key and default to the free-tier cadence', () => {
     const social = loadConfig({}).social;
     expect(social.elfaApiKey).toBeUndefined();

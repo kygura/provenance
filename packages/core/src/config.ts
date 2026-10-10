@@ -48,6 +48,65 @@ export const LLM_PROVIDERS = [
 ] as const;
 export type LlmProvider = (typeof LLM_PROVIDERS)[number];
 
+export interface ModelSpec {
+  provider: LlmProvider;
+  model: string;
+}
+
+const INFERRED: ReadonlyArray<[RegExp, LlmProvider]> = [
+  [/^claude-/, 'anthropic'],
+  [/^(gpt-|o\d|chatgpt-)/, 'openai'],
+  [/^(kimi-|moonshot-)/, 'moonshot'],
+  [/^qwen/, 'qwen'],
+  [/^deepseek-/, 'deepseek'],
+];
+
+/**
+ * `provider:model` parsing. A bare id keeps working (`LLM_MODEL=claude-opus-5`
+ * predates provider prefixes), with the provider inferred from well-known
+ * prefixes.
+ */
+export function parseModelSpec(spec: string): ModelSpec {
+  const trimmed = spec.trim();
+  const colon = trimmed.indexOf(':');
+  if (colon > 0) {
+    const prefix = trimmed.slice(0, colon).toLowerCase();
+    if ((LLM_PROVIDERS as readonly string[]).includes(prefix)) {
+      return { provider: prefix as LlmProvider, model: trimmed.slice(colon + 1).trim() };
+    }
+  }
+  for (const [pattern, provider] of INFERRED) {
+    if (pattern.test(trimmed)) return { provider, model: trimmed };
+  }
+  // An `org/model` id is OpenRouter's naming; nothing else in the list uses it.
+  if (trimmed.includes('/')) return { provider: 'openrouter', model: trimmed };
+  return { provider: 'anthropic', model: trimmed };
+}
+
+/** Anthropic models each role falls back to under Anthropic-first. */
+export const ANTHROPIC_ROLE_MODELS = {
+  model: 'claude-opus-5',
+  extractModel: 'claude-opus-5',
+  triageModel: 'claude-sonnet-5',
+} as const;
+
+/**
+ * Anthropic goes first: with an Anthropic key, a role configured for another
+ * provider runs on that role's Anthropic model instead. Other providers are
+ * used only when there is no Anthropic key, or when LLM_ANTHROPIC_FIRST=false.
+ */
+function anthropicFirst(
+  llm: Pick<LlmConfig, 'model' | 'extractModel' | 'triageModel'>,
+): Pick<LlmConfig, 'model' | 'extractModel' | 'triageModel'> {
+  const pick = (spec: string, fallback: string) =>
+    parseModelSpec(spec).provider === 'anthropic' ? spec : fallback;
+  return {
+    model: pick(llm.model, ANTHROPIC_ROLE_MODELS.model),
+    extractModel: pick(llm.extractModel ?? llm.model, ANTHROPIC_ROLE_MODELS.extractModel),
+    triageModel: pick(llm.triageModel, ANTHROPIC_ROLE_MODELS.triageModel),
+  };
+}
+
 export interface LlmProviderConfig {
   apiKey?: string;
   /** Override for the provider's default API root. Required for `openai-compatible`. */
@@ -310,9 +369,14 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       useFixtures: bool(env.USE_FIXTURES, false),
     },
     llm: {
-      model: env.LLM_MODEL || 'claude-opus-5',
-      extractModel: env.LLM_EXTRACT_MODEL || env.LLM_MODEL || 'claude-opus-5',
-      triageModel: env.LLM_TRIAGE_MODEL || 'claude-sonnet-5',
+      ...((): Pick<LlmConfig, 'model' | 'extractModel' | 'triageModel'> => {
+        const configured = {
+          model: env.LLM_MODEL || 'claude-opus-5',
+          extractModel: env.LLM_EXTRACT_MODEL || env.LLM_MODEL || 'claude-opus-5',
+          triageModel: env.LLM_TRIAGE_MODEL || 'claude-sonnet-5',
+        };
+        return env.ANTHROPIC_API_KEY && bool(env.LLM_ANTHROPIC_FIRST, true) ? anthropicFirst(configured) : configured;
+      })(),
       providers: {
         anthropic: { apiKey: env.ANTHROPIC_API_KEY || undefined, baseUrl: env.ANTHROPIC_BASE_URL || undefined },
         openai: { apiKey: env.OPENAI_API_KEY || undefined, baseUrl: env.OPENAI_BASE_URL || undefined },
