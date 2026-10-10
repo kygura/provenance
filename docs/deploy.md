@@ -37,7 +37,7 @@ secrets under **Settings → Secrets and variables → Actions**:
 
 | Secret | Required | What it is |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | one LLM key | default provider (`LLM_MODEL=claude-opus-5`) |
+| `ANTHROPIC_API_KEY` | one LLM key | default provider (`LLM_MODEL=claude-opus-5`); when set, it goes first for every role |
 | `OPENAI_API_KEY` | one LLM key | for `openai:` models |
 | `OPENROUTER_API_KEY` | one LLM key | for `openrouter:` models (Kimi, DeepSeek, GPT… through one key) |
 | `MOONSHOT_API_KEY` | one LLM key | for `moonshot:` Kimi models |
@@ -59,8 +59,15 @@ Tuning knobs (`MAX_TOKENS_PER_RUN`, `MIN_LIQUIDITY_USD`,
 `ALERT_SCORE_THRESHOLD`, `LLM_MAX_COST_USD_PER_RUN`, …) belong in **Variables**
 rather than Secrets; every one is listed in `.env.example`. So do the model
 choices: `LLM_MODEL`, `LLM_EXTRACT_MODEL`, `LLM_TRIAGE_MODEL` and `LLM_PRICING`.
-Only the keys for the providers those models name are needed. A cheap setup
-that keeps web search, for example:
+Only the keys for the providers those models name are needed.
+
+Anthropic goes first. While the `ANTHROPIC_API_KEY` secret is set, a model var
+naming another provider is replaced by that role's Anthropic default
+(`claude-opus-5` for research and extract, `claude-sonnet-5` for triage); Claude
+models you set are kept. The setups below take effect only without an Anthropic
+key, or with the variable `LLM_ANTHROPIC_FIRST=false`.
+
+A cheap setup that keeps web search, for example:
 
 ```
 LLM_MODEL=openrouter:moonshotai/kimi-k2.6

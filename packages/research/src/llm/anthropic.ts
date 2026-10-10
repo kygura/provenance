@@ -20,6 +20,8 @@ export interface AnthropicLlmOptions {
   client?: Pick<Anthropic, 'messages'>;
   apiKey?: string;
   baseUrl?: string;
+  /** Sent as anthropic-workspace-id; required by keys not scoped to a workspace. */
+  workspaceId?: string;
   /** A long search turn can stop with `pause_turn`; this bounds the resumes. */
   maxPauseTurnRestarts?: number;
 }
@@ -36,7 +38,12 @@ export class AnthropicLlm implements LlmClient {
   ) {
     this.client =
       options.client ??
-      new Anthropic({ apiKey: options.apiKey ?? '', baseURL: options.baseUrl, maxRetries: 3 });
+      new Anthropic({
+        apiKey: options.apiKey ?? '',
+        baseURL: options.baseUrl,
+        maxRetries: 3,
+        defaultHeaders: options.workspaceId ? { 'anthropic-workspace-id': options.workspaceId } : undefined,
+      });
     this.maxPauseTurnRestarts = options.maxPauseTurnRestarts ?? 3;
   }
 
