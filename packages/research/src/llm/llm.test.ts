@@ -5,6 +5,7 @@ import { CostTracker } from '../cost';
 import { PROVENANCE_TOOL_NAME } from '../schema';
 import { ExaSearch, parseExaArgs } from './exa';
 import { createLlm } from './index';
+import { AnthropicLlm, acceptsSampling, type AnthropicLlmOptions } from './anthropic';
 import { OpenAiLlm, chatUsage, toolInput, urlsIn, type FetchLike } from './openai';
 import { parseModelSpec } from './spec';
 import type { LlmClient, SearchResult, ToolCallResult } from './types';
@@ -535,5 +536,34 @@ describe('exa search', () => {
     const k3 = new OpenAiLlm('moonshot', 'kimi-k3', { apiKey: 'k', fetch });
     await k3.callTool({ ...TOOL, reasoningEffort: 'medium' }, noUsage);
     expect(calls[1]?.body.reasoning_effort).toBe('high');
+  });
+});
+
+// --- anthropic sampling ----------------------------------------------------------
+
+describe('anthropic sampling params', () => {
+  test('temperature goes only to models that still accept it', () => {
+    for (const model of ['claude-opus-5', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-opus-4-7', 'claude-opus-4-8', 'claude-fable-5-1', 'claude-sonnet-5-5', 'claude-haiku-5-5']) {
+      expect(acceptsSampling(model)).toBe(false);
+    }
+    for (const model of ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-sonnet-4-5-20250929', 'claude-opus-4-20250514', 'claude-3-7-sonnet-latest']) {
+      expect(acceptsSampling(model)).toBe(true);
+    }
+  });
+
+  test('extraction on claude-opus-5 sends no temperature', async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const client = {
+      messages: {
+        create: async (params: Record<string, unknown>) => {
+          sent.push(params);
+          return { content: [{ type: 'tool_use', name: 'record', input: { ok: 1 } }], usage: { input_tokens: 1, output_tokens: 1 } };
+        },
+      },
+    } as unknown as NonNullable<AnthropicLlmOptions['client']>;
+    await new AnthropicLlm('claude-opus-5', { client }).callTool(TOOL, noUsage);
+    await new AnthropicLlm('claude-sonnet-4-6', { client }).callTool(TOOL, noUsage);
+    expect(sent[0]).not.toHaveProperty('temperature');
+    expect(sent[1]?.temperature).toBe(0.2);
   });
 });

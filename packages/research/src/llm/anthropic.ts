@@ -16,6 +16,16 @@ import type { LlmClient, SearchRequest, SearchResult, ToolCallRequest, ToolCallR
  */
 export const WEB_SEARCH_TOOL_TYPE = 'web_search_20260209' as const;
 
+/**
+ * Sampling parameters (`temperature`, `top_p`, `top_k`) were removed from the
+ * Messages API from the 4.7 generation on: Opus 4.7+, Sonnet 5, Fable and the
+ * 5.x line return a 400 for them, Sonnet 5.5 / Haiku 5.5 for any non-default
+ * value. Only the 4.6 generation and older still accept them.
+ */
+export function acceptsSampling(model: string): boolean {
+  return /^claude-(?:3|(?:opus|sonnet|haiku)-4(?:-[0-6](?:$|-)|-\d{8}$|$))/.test(model);
+}
+
 export interface AnthropicLlmOptions {
   client?: Pick<Anthropic, 'messages'>;
   apiKey?: string;
@@ -106,7 +116,7 @@ export class AnthropicLlm implements LlmClient {
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: request.maxTokens,
-      ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
+      ...(request.temperature !== undefined && acceptsSampling(this.model) ? { temperature: request.temperature } : {}),
       system: this.system(request.system),
       tools: [tool],
       tool_choice: { type: 'tool', name: request.tool.name },
