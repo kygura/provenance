@@ -2,6 +2,7 @@
 
 import type { AppConfig } from '@provenance/core';
 import { AnthropicLlm, type AnthropicLlmOptions } from './anthropic';
+import { ExaSearch } from './exa';
 import { OpenAiLlm, type FetchLike } from './openai';
 import { parseModelSpec, providerApiKey, PROVIDER_KEY_ENV } from './spec';
 import type { LlmClient } from './types';
@@ -26,10 +27,15 @@ export function createLlm(app: AppConfig, spec: string, options: CreateLlmOption
     });
   }
   if (!apiKey) throw new Error(`${PROVIDER_KEY_ENV[provider]} is not set, needed for ${provider}:${model}.`);
-  return new OpenAiLlm(provider, model, { apiKey, baseUrl, fetch: options.fetch });
+  const exa =
+    app.llm.searchBackend !== 'native' && app.exaApiKey
+      ? new ExaSearch({ apiKey: app.exaApiKey, fetch: options.fetch })
+      : undefined;
+  return new OpenAiLlm(provider, model, { apiKey, baseUrl, fetch: options.fetch, ...(exa ? { exa } : {}) });
 }
 
 export { AnthropicLlm, WEB_SEARCH_TOOL_TYPE } from './anthropic';
+export { ExaSearch, EXA_TOOL_NAME, exaTool, formatExaHits, parseExaArgs, type ExaHit, type ExaQuery } from './exa';
 export { OpenAiLlm, PROVIDER_PROFILES, chatUsage, toolInput, urlsIn, type SearchMode, type FetchLike } from './openai';
 export {
   parseModelSpec,

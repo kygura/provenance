@@ -44,7 +44,8 @@ describe('usage and exit codes', () => {
   test('a missing API key names the variable', async () => {
     const { code, out } = await run(['run']);
     expect(code).toBe(EXIT_CONFIG);
-    expect(out).toContain('ANTHROPIC_API_KEY');
+    // The default models are Kimi on Moonshot.
+    expect(out).toContain('MOONSHOT_API_KEY');
   });
 
   test('version prints and exits 0', async () => {

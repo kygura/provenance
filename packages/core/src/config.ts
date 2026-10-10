@@ -54,6 +54,9 @@ export interface LlmProviderConfig {
   baseUrl?: string;
 }
 
+/** Every LLM pass runs on this unless LLM_MODEL / LLM_EXTRACT_MODEL / LLM_TRIAGE_MODEL say otherwise. */
+export const DEFAULT_LLM_MODEL = 'moonshot:kimi-k2.6';
+
 export interface LlmConfig {
   /**
    * Model used for the deep provenance synthesis, as `provider:model` or a bare
@@ -84,6 +87,13 @@ export interface LlmConfig {
    * date a meme and find two prior cycles without wandering.
    */
   maxWebSearches: number;
+  /**
+   * Where non-Anthropic models search. `exa` (the default, when EXA_API_KEY is
+   * set) gives the model a `web_search` function backed by Exa; `native` uses
+   * the provider's own tool (OpenRouter's plugin, Kimi's `$web_search`).
+   * Anthropic always uses its server-side tool.
+   */
+  searchBackend: 'exa' | 'native';
 }
 
 /**
@@ -310,9 +320,11 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       useFixtures: bool(env.USE_FIXTURES, false),
     },
     llm: {
-      model: env.LLM_MODEL || 'claude-opus-5',
-      extractModel: env.LLM_EXTRACT_MODEL || env.LLM_MODEL || 'claude-opus-5',
-      triageModel: env.LLM_TRIAGE_MODEL || 'claude-sonnet-5',
+      // Kimi K2.6 on Moonshot for every pass: cheap enough to run on every
+      // launch, with Exa doing the searching.
+      model: env.LLM_MODEL || DEFAULT_LLM_MODEL,
+      extractModel: env.LLM_EXTRACT_MODEL || env.LLM_MODEL || DEFAULT_LLM_MODEL,
+      triageModel: env.LLM_TRIAGE_MODEL || DEFAULT_LLM_MODEL,
       providers: {
         anthropic: { apiKey: env.ANTHROPIC_API_KEY || undefined, baseUrl: env.ANTHROPIC_BASE_URL || undefined },
         openai: { apiKey: env.OPENAI_API_KEY || undefined, baseUrl: env.OPENAI_BASE_URL || undefined },
@@ -336,6 +348,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       maxCostUsdPerRun: num(env.LLM_MAX_COST_USD_PER_RUN, 5),
       temperature: num(env.LLM_TEMPERATURE, 0.2),
       maxWebSearches: num(env.LLM_MAX_WEB_SEARCHES, 6),
+      searchBackend: env.LLM_SEARCH_BACKEND?.trim().toLowerCase() === 'native' ? 'native' : 'exa',
     },
     launches: {
       enabled: bool(env.LAUNCHES_ENABLED, true),

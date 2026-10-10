@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { extractJwt, loadConfig } from './config';
+import { DEFAULT_LLM_MODEL, extractJwt, loadConfig } from './config';
 
 describe('loadConfig', () => {
   test('a configured RPC leads and the public nodes follow it', () => {
@@ -28,7 +28,7 @@ describe('loadConfig', () => {
   });
 
   test('a whitespace-only value counts as unset where a default exists', () => {
-    expect(loadConfig({ LLM_MODEL: '  ' }).llm.model).toBe('claude-opus-5');
+    expect(loadConfig({ LLM_MODEL: '  ' }).llm.model).toBe(DEFAULT_LLM_MODEL);
   });
 
   test('social sightings are off without a key and default to the free-tier cadence', () => {

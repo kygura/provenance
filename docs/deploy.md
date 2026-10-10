@@ -37,10 +37,10 @@ secrets under **Settings → Secrets and variables → Actions**:
 
 | Secret | Required | What it is |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | one LLM key | default provider (`LLM_MODEL=claude-opus-5`) |
+| `MOONSHOT_API_KEY` | one LLM key | default provider: every pass runs on `moonshot:kimi-k2.6` |
+| `ANTHROPIC_API_KEY` | one LLM key | for `claude-*` models |
 | `OPENAI_API_KEY` | one LLM key | for `openai:` models |
 | `OPENROUTER_API_KEY` | one LLM key | for `openrouter:` models (Kimi, DeepSeek, GPT… through one key) |
-| `MOONSHOT_API_KEY` | one LLM key | for `moonshot:` Kimi models |
 | `DASHSCOPE_API_KEY` | one LLM key | for `qwen:` models on Alibaba Model Studio |
 | `DEEPSEEK_API_KEY` | one LLM key | for `deepseek:` models (no web search) |
 | `OPENAI_COMPATIBLE_API_KEY` / `OPENAI_COMPATIBLE_BASE_URL` | one LLM key | any other OpenAI-dialect endpoint (no web search) |
@@ -51,7 +51,7 @@ secrets under **Settings → Secrets and variables → Actions**:
 | `DISCORD_WEBHOOK_URL` | no | channel webhook |
 | `ALERT_WEBHOOK_URL` | no | any JSON endpoint |
 | `ETHERSCAN_API_KEY` | no | contract verification lookups |
-| `EXA_API_KEY` | no | finds DexTools pair pages through Exa search, one request per chain per run; without it DexTools needs the Playwright fallback |
+| `EXA_API_KEY` | recommended | the search tool for every non-Anthropic model (anchor check and research), and how DexTools pair pages are found; without it Kimi falls back to `$web_search` and DexTools needs the Playwright fallback |
 | `ELFA_API_KEY` | no | crypto-social sightings for the watchlist's social lead (`docs/social.md`); free tier is enough |
 | `RPC_ETHEREUM` / `RPC_SOLANA` | no | your own RPC endpoints, comma-separated and tried in order. A set list is tried first and the public defaults (Allnodes' publicnode.com, drpc, …) follow as fallbacks; set `RPC_PUBLIC_FALLBACK=false` to use only your list. A keyed URL (Alchemy, Helius) must be a secret so the logs mask it. Blank keeps the public defaults |
 
@@ -59,8 +59,10 @@ Tuning knobs (`MAX_TOKENS_PER_RUN`, `MIN_LIQUIDITY_USD`,
 `ALERT_SCORE_THRESHOLD`, `LLM_MAX_COST_USD_PER_RUN`, …) belong in **Variables**
 rather than Secrets; every one is listed in `.env.example`. So do the model
 choices: `LLM_MODEL`, `LLM_EXTRACT_MODEL`, `LLM_TRIAGE_MODEL` and `LLM_PRICING`.
-Only the keys for the providers those models name are needed. A cheap setup
-that keeps web search, for example:
+Only the keys for the providers those models name are needed. Blank model vars
+mean Kimi K2.6 on Moonshot for every pass, searching through Exa
+(`MOONSHOT_API_KEY` + `EXA_API_KEY`). The same model through OpenRouter, for
+example, when only an OpenRouter key is at hand:
 
 ```
 LLM_MODEL=openrouter:moonshotai/kimi-k2.6

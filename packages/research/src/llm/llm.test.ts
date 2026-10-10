@@ -3,6 +3,7 @@ import { loadConfig, nowIso, silentLogger, type AppConfig, type TokenSnapshot } 
 import { WebSearchAnalyst } from '../analyst';
 import { CostTracker } from '../cost';
 import { PROVENANCE_TOOL_NAME } from '../schema';
+import { ExaSearch, parseExaArgs } from './exa';
 import { createLlm } from './index';
 import { OpenAiLlm, chatUsage, toolInput, urlsIn, type FetchLike } from './openai';
 import { parseModelSpec } from './spec';
@@ -296,7 +297,8 @@ describe('moonshot', () => {
     const llm = new OpenAiLlm('moonshot', 'kimi-k2', { apiKey: 'k', fetch });
     expect((await llm.callTool(TOOL, noUsage)).input).toEqual({ ok: 1 });
     expect(calls[0]?.body.tool_choice).toBe('auto');
-    expect(calls[0]?.body.temperature).toBe(0.2);
+    // Kimi fixes temperature per mode and rejects any value sent.
+    expect(calls[0]?.body.temperature).toBeUndefined();
   });
 });
 
@@ -449,4 +451,89 @@ test('the analyst can research on one model and extract on a cheaper one', async
   expect(report.model).toBe('moonshotai/kimi-k2+deepseek/deepseek-chat');
   expect(report.memeName).toBe('Nyan Cat');
   expect(report.usage?.costUsd).toBeCloseTo(0.012, 6);
+});
+
+// --- exa -----------------------------------------------------------------------
+
+describe('exa search', () => {
+  const exaReply = (urls: string[], cost = 0.005) => ({
+    body: {
+      results: urls.map((url, i) => ({ url, title: `page ${i}`, publishedDate: '2011-04-05T00:00:00.000Z', text: 'Nyan  Cat\nfirst seen' })),
+      costDollars: { total: cost },
+    },
+  });
+  const searchCall = (id: string, args: string) => ({
+    tool_calls: [{ id, type: 'function', function: { name: 'web_search', arguments: args } }],
+  });
+
+  test('runs the model\'s queries on Exa and cites every page it was shown', async () => {
+    const exa = fakeFetch([exaReply(['https://a.invalid', 'https://b.invalid']), exaReply(['https://b.invalid', 'https://c.invalid'])]);
+    const llm = fakeFetch([
+      chat({ ...searchCall('a', '{"query":"nyan cat origin","end_published_date":"2026-09-01"}'), reasoning_content: 'think' }, {}, 'tool_calls'),
+      chat(searchCall('b', '{"query":"nyan cat 2011"}'), {}, 'tool_calls'),
+      chat({ content: 'Nyan Cat dates to April 2011.' }),
+    ]);
+    const client = new OpenAiLlm('moonshot', 'kimi-k2.6', {
+      apiKey: 'k',
+      fetch: llm.fetch,
+      exa: new ExaSearch({ apiKey: 'exa-key', fetch: exa.fetch }),
+    });
+    const billed: Array<[string, number | undefined]> = [];
+    const found = await client.search(SEARCH, (model, _usage, cost) => billed.push([model, cost]));
+
+    expect(client.canSearch).toBe(true);
+    expect(exa.calls[0]?.url).toBe('https://api.exa.ai/search');
+    expect(exa.calls[0]?.headers['x-api-key']).toBe('exa-key');
+    expect(exa.calls[0]?.body).toMatchObject({ query: 'nyan cat origin', endPublishedDate: '2026-09-01T23:59:59.999Z' });
+    expect(exa.calls[1]?.body).not.toHaveProperty('endPublishedDate');
+    // The assistant turn goes back verbatim, Kimi's reasoning included.
+    const history = llm.calls[1]?.body.messages as Array<Record<string, unknown>>;
+    expect(history.at(-2)).toMatchObject({ reasoning_content: 'think' });
+    expect(String(history.at(-1)?.content)).toContain('published: 2011-04-05');
+    // Two searches used: the last round may not search again.
+    expect(llm.calls[2]?.body.tool_choice).toBe('none');
+    expect(found).toMatchObject({ texts: ['Nyan Cat dates to April 2011.'], searches: 2 });
+    expect(found.citations).toEqual(['https://a.invalid', 'https://b.invalid', 'https://c.invalid']);
+    expect(billed.filter(([model]) => model === 'exa').map(([, cost]) => cost)).toEqual([0.005, 0.005]);
+  });
+
+  test('a failed search is reported to the model, not thrown; a refused key is thrown', async () => {
+    const down = fakeFetch([{ status: 500, body: 'boom' }]);
+    const llm = fakeFetch([chat(searchCall('a', '{"query":"x"}'), {}, 'tool_calls'), chat({ content: 'nothing found' })]);
+    const client = new OpenAiLlm('moonshot', 'kimi-k2.6', { apiKey: 'k', fetch: llm.fetch, exa: new ExaSearch({ apiKey: 'e', fetch: down.fetch }) });
+    const found = await client.search(SEARCH, noUsage);
+    expect(found.searchError).toBe('exa_error');
+    expect(found.texts).toEqual(['nothing found']);
+
+    const broke = fakeFetch([{ status: 402, body: 'no credits' }]);
+    const again = fakeFetch([chat(searchCall('a', '{"query":"x"}'), {}, 'tool_calls')]);
+    const refused = new OpenAiLlm('moonshot', 'kimi-k2.6', { apiKey: 'k', fetch: again.fetch, exa: new ExaSearch({ apiKey: 'e', fetch: broke.fetch }) });
+    await expect(refused.search(SEARCH, noUsage)).rejects.toThrow('HTTP 402');
+  });
+
+  test('bad arguments get an error back, not a search', () => {
+    expect(parseExaArgs('{"query":"  "}')).toBeUndefined();
+    expect(parseExaArgs('not json')).toBeUndefined();
+    expect(parseExaArgs('{"query":"pepe","end_published_date":"last week"}')).toEqual({ query: 'pepe' });
+  });
+
+  test('createLlm puts Exa behind every non-Anthropic model unless told not to', () => {
+    const app = loadConfig({ MOONSHOT_API_KEY: 'k', EXA_API_KEY: 'e' });
+    const llm = createLlm(app, app.llm.model) as OpenAiLlm;
+    expect(llm.model).toBe('kimi-k2.6');
+    expect((llm as unknown as { options: { exa?: unknown } }).options.exa).toBeInstanceOf(ExaSearch);
+    const native = loadConfig({ MOONSHOT_API_KEY: 'k', EXA_API_KEY: 'e', LLM_SEARCH_BACKEND: 'native' });
+    expect((createLlm(native, native.llm.model) as unknown as { options: { exa?: unknown } }).options.exa).toBeUndefined();
+  });
+
+  test('Kimi K2.6 drops thinking for a low-effort call and never sends temperature', async () => {
+    const { fetch, calls } = fakeFetch([chat({ content: '{"ok":1}' }), chat({ content: '{"ok":1}' })]);
+    const llm = new OpenAiLlm('moonshot', 'kimi-k2.6', { apiKey: 'k', fetch });
+    await llm.callTool({ ...TOOL, reasoningEffort: 'low' }, noUsage);
+    expect(calls[0]?.body.thinking).toEqual({ type: 'disabled' });
+    expect(calls[0]?.body).not.toHaveProperty('temperature');
+    const k3 = new OpenAiLlm('moonshot', 'kimi-k3', { apiKey: 'k', fetch });
+    await k3.callTool({ ...TOOL, reasoningEffort: 'medium' }, noUsage);
+    expect(calls[1]?.body.reasoning_effort).toBe('high');
+  });
 });

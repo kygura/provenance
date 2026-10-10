@@ -4,7 +4,7 @@ Is this meme anchored in something real, or is it being forced?
 
 That is the one question Provenance answers, and it answers it at launch.
 Every 30 minutes it reads new Uniswap pools straight off the factory
-contracts, drops anything unsafe, and asks Claude to find the earliest source
+contracts, drops anything unsafe, and asks a model to find the earliest source
 about the thing the token points at that does not mention the token.
 
 - **anchored**: the thing existed before the token and outside it. An old
@@ -66,7 +66,8 @@ up on a list. See [`docs/launch-lane.md`](docs/launch-lane.md).
 | Trending lane: lists, analysis, research | GitHub Actions cron, twice daily | free tier |
 | Database | libSQL / Turso (or a local SQLite file) | free tier |
 | Dashboard | Vercel | free tier |
-| LLM | Anthropic API | the only paid credential |
+| LLM | Kimi K2.6 on Moonshot (any provider works) | paid, per token |
+| Search | Exa (`EXA_API_KEY`): the models' search tool | paid, per query |
 | Social yardstick (optional) | Elfa trending-CA feeds, `ELFA_API_KEY` | free tier; ~720 of 1,000 monthly credits ([docs/social.md](docs/social.md)) |
 
 No paid market-data API keys. DexScreener and GeckoTerminal publish free keyless
@@ -91,8 +92,8 @@ discover ─┬─ dextools      (exa search for pair pages, playwright fallback
                 │             risk flags — free RPCs only
           evidence            on-chain + listing metadata, no network
                 │
-          research pass       Claude with the web search server tool, no output
-                │             constraint — prose notes and citations
+          research pass       Kimi K2.6 calling Exa search (publish dates, a
+                │             "before launch" bound) — prose notes and citations
                 │
           extraction pass     the same notes, no tools, forced tool call →
                 │             a schema-validated ProvenanceReport
@@ -119,7 +120,7 @@ produces partial data with an explicit note, never an aborted run.
 
 ```bash
 bun install
-cp .env.example .env          # one LLM key is all you need; ANTHROPIC_API_KEY by default
+cp .env.example .env          # MOONSHOT_API_KEY + EXA_API_KEY by default
 
 bun run apps/worker/src/cli.ts migrate
 bun run apps/worker/src/cli.ts seed          # demo data, no network needed
