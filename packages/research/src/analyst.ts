@@ -123,6 +123,15 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     };
   }
 
+  /**
+   * What a degraded report carries as its spend: whatever its calls cost before
+   * the failure. Without it a run whose extractions all fail reports $0 while
+   * the research passes were billed, and the per-run ceiling never trips.
+   */
+  private spentSince(spentBefore: number): NonNullable<ProvenanceReport['usage']> {
+    return { inputTokens: 0, outputTokens: 0, costUsd: Number((this.tracker.totalUsd - spentBefore).toFixed(6)) };
+  }
+
   /** Model label a report carries: the research model, plus the extractor when it differs. */
   private modelLabel(): string {
     const research = this.researchLlm.model;
@@ -148,7 +157,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     } catch (error) {
       const reason = errorMessage(error);
       log.error('research pass failed', { tokenId: snapshot.tokenId, error: reason });
-      return buildDegradedReport({
+      return withUsage(buildDegradedReport({
         tokenId: snapshot.tokenId,
         memeName: snapshot.name || snapshot.symbol,
         model,
@@ -156,7 +165,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
         reason: `Web research pass failed: ${reason}`,
         failed: reason,
         evidence,
-      });
+      }), this.spentSince(spentBefore));
     }
 
     log.info('research pass complete', {
@@ -170,14 +179,14 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     const allEvidence = [...evidence, ...searchEvidence];
 
     if (found.notes.trim() === '') {
-      return buildDegradedReport({
+      return withUsage(buildDegradedReport({
         tokenId: snapshot.tokenId,
         memeName: snapshot.name || snapshot.symbol,
         model,
         promptVersion: PROMPT_VERSION,
         reason: 'The research pass produced no notes to extract a report from.',
         evidence: allEvidence,
-      });
+      }), this.spentSince(spentBefore));
     }
 
     return this.runExtractionPass(snapshot, chain, found, allEvidence, log, spentBefore);
@@ -303,7 +312,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
       }
     }
 
-    return buildDegradedReport({
+    return withUsage(buildDegradedReport({
       tokenId: snapshot.tokenId,
       memeName: snapshot.name || snapshot.symbol,
       model,
@@ -311,7 +320,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
       reason: lastIssues[0] ?? 'The model did not return a usable provenance report.',
       ...(lastError !== undefined ? { failed: lastError } : {}),
       evidence,
-    });
+    }), this.spentSince(spentBefore));
   }
 }
 
@@ -333,4 +342,8 @@ export function mergeEvidence(
     out.push(item);
   }
   return out;
+}
+
+function withUsage(report: ProvenanceReport, usage: NonNullable<ProvenanceReport['usage']>): ProvenanceReport {
+  return { ...report, usage };
 }
