@@ -14,7 +14,9 @@ export type { DroppedSnapshot, FilterResult, Lanes } from './merge';
 // Source implementations
 export { GeckoTerminalSource } from './geckoterminal';
 export { DexScreenerSource } from './dexscreener';
-export { DexToolsSource } from './dextools';
+export { DexToolsSource, DEXTOOLS_SEARCH_QUERY } from './dextools';
+export type { DexToolsSourceOptions } from './dextools';
+export { extractPairLinks, dextoolsSlugFor, DEXTOOLS_CHAIN_SLUGS } from './dextools-search';
 export { LaunchSource } from './launches';
 
 // Pure parse helpers (browser-free, fixture-testable)
@@ -45,20 +47,6 @@ export type {
   DexScreenerPairRow,
   DexScreenerSourceOptions,
 } from './dexscreener';
-
-export {
-  parseDexToolsXhr,
-  parseDexToolsHtml,
-  collectRowArrays,
-  looksLikeDexToolsPayload,
-  resolveDexToolsChain,
-  parseAgeText,
-  dextoolsSlugFor,
-  DEXTOOLS_CHAIN_SLUGS,
-} from './dextools-parse';
-export type { DexToolsParseOptions } from './dextools-parse';
-export { DEXTOOLS_BASE_URL, DEXTOOLS_XHR_PATTERN } from './dextools';
-export type { DexToolsSourceOptions } from './dextools';
 
 export {
   parseFactoryLog,

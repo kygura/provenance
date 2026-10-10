@@ -32,7 +32,7 @@ const LAUNCH = '2026-09-01T12:00:00.000Z';
 const HOUR = 3_600_000;
 
 // Pinned: these tests drive the Anthropic adapter, whatever the shipped default is.
-const CLAUDE_ENV = { LLM_MODEL: 'claude-opus-5', LLM_TRIAGE_MODEL: 'claude-sonnet-5' };
+const CLAUDE_ENV = { LLM_MODEL: 'claude-opus-5', LLM_EXTRACT_MODEL: 'claude-opus-5', LLM_TRIAGE_MODEL: 'claude-sonnet-5' };
 
 function app(overrides: Partial<AppConfig> = {}): AppConfig {
   return { ...loadConfig(CLAUDE_ENV), anthropicApiKey: 'sk-test', ...overrides };

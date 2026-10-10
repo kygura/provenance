@@ -77,12 +77,11 @@ describe('createSources', () => {
 });
 
 describe('fixture discovery', () => {
-  // Captured from the fixture run before the launch source existed.
+  // The fixture run's trending lane: DexScreener and GeckoTerminal.
   const TRENDING_BEFORE: [string, number, number][] = [
-    ['solana:BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx', 3, 1],
-    ['ethereum:0x9f2c4b1ea7d0ab3e6c5f81d2a94b7e03cd15a8fe', 1, 2],
-    ['base:0x7a2b19cd4e5f60781b9c3ad2e4f5061728394ab0', 3, 2],
-    ['bsc:0xb9e8d7c6a5f4321098765432109876543210fedc', 2, 3],
+    ['solana:BonG9kRThz5vQ1pXmY7wLd3cJf8sNqA4eV6uZtP1rKx', 2, 1],
+    ['base:0x7a2b19cd4e5f60781b9c3ad2e4f5061728394ab0', 2, 2],
+    ['bsc:0xb9e8d7c6a5f4321098765432109876543210fedc', 1, 3],
     ['solana:GrumPYcat9xKdWqR2sTv5mNhJ7bZuE3fA6yLpQ8nXeVd', 2, 4],
     ['solana:TurB2nQx8vKdMz5rLpY9wHcJ3sGf7aUe6tNqZ1BmXkRv', 1, 5],
     ['ethereum:0x4f3ca1b2d5e6789012abcdef3456789012345abc', 1, 3],

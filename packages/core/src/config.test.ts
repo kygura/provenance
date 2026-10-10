@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_LLM_MODEL, extractJwt, loadConfig } from './config';
+import { DEFAULT_LLM_MODEL, DEFAULT_ROLE_MODELS, extractJwt, loadConfig } from './config';
 
 describe('loadConfig', () => {
   test('a configured RPC leads and the public nodes follow it', () => {
@@ -27,19 +27,22 @@ describe('loadConfig', () => {
     expect(app.alerts.telegramChatId).toBe('-5222707171');
   });
 
-  test('Anthropic is the default with its key; Kimi K2.6 without one', () => {
-    expect(loadConfig({ ANTHROPIC_API_KEY: 'sk' }).llm).toMatchObject({ model: 'claude-opus-5', triageModel: 'claude-sonnet-5' });
-    const kimi = loadConfig({ MOONSHOT_API_KEY: 'k' }).llm;
-    expect([kimi.model, kimi.extractModel, kimi.triageModel]).toEqual([DEFAULT_LLM_MODEL, DEFAULT_LLM_MODEL, DEFAULT_LLM_MODEL]);
+  test('Kimi is the default, K3 researching and K2.6 for the rest, Anthropic key or not', () => {
+    for (const env of [{ MOONSHOT_API_KEY: 'k' }, { ANTHROPIC_API_KEY: 'sk' }]) {
+      const llm = loadConfig(env).llm;
+      expect([llm.model, llm.extractModel, llm.triageModel]).toEqual(['moonshot:kimi-k3', DEFAULT_LLM_MODEL, DEFAULT_LLM_MODEL]);
+    }
+    expect(DEFAULT_ROLE_MODELS.model).toBe('moonshot:kimi-k3');
   });
 
   test('a whitespace-only value counts as unset where a default exists', () => {
-    expect(loadConfig({ LLM_MODEL: '  ' }).llm.model).toBe(DEFAULT_LLM_MODEL);
+    expect(loadConfig({ LLM_MODEL: '  ' }).llm.model).toBe(DEFAULT_ROLE_MODELS.model);
   });
 
-  test('with an Anthropic key, every LLM role runs on Anthropic first', () => {
+  test('LLM_ANTHROPIC_FIRST=true with an Anthropic key puts every role on Anthropic', () => {
     const llm = loadConfig({
       ANTHROPIC_API_KEY: 'sk-ant',
+      LLM_ANTHROPIC_FIRST: 'true',
       OPENROUTER_API_KEY: 'sk-or',
       LLM_MODEL: 'openrouter:qwen/qwen3-max',
       LLM_EXTRACT_MODEL: 'deepseek-v4',
@@ -53,11 +56,11 @@ describe('loadConfig', () => {
   });
 
   test('Anthropic-first keeps a Claude model the user picked', () => {
-    const llm = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant', LLM_MODEL: 'claude-fable-5-1', LLM_TRIAGE_MODEL: 'gpt-6' }).llm;
-    expect([llm.model, llm.extractModel, llm.triageModel]).toEqual(['claude-fable-5-1', 'claude-fable-5-1', 'claude-sonnet-5']);
+    const llm = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant', LLM_ANTHROPIC_FIRST: 'true', LLM_MODEL: 'claude-fable-5-1', LLM_TRIAGE_MODEL: 'gpt-6' }).llm;
+    expect([llm.model, llm.extractModel, llm.triageModel]).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
   });
 
-  test('other providers apply without an Anthropic key, or with LLM_ANTHROPIC_FIRST=false', () => {
+  test('other providers apply without an Anthropic key, or without LLM_ANTHROPIC_FIRST', () => {
     expect(loadConfig({ LLM_MODEL: 'openrouter:qwen/qwen3-max' }).llm.model).toBe('openrouter:qwen/qwen3-max');
     const off = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant', LLM_ANTHROPIC_FIRST: 'false', LLM_MODEL: 'deepseek-v4' });
     expect(off.llm.model).toBe('deepseek-v4');

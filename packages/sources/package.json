@@ -12,8 +12,6 @@
     "typecheck": "bunx tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
-    "@provenance/core": "workspace:*",
-    "playwright": "^1.49.1",
-    "cheerio": "^1.0.0"
+    "@provenance/core": "workspace:*"
   }
 }

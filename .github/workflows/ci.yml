@@ -20,12 +20,8 @@ jobs:
         with:
           bun-version: latest
 
-      # Chromium for the DexTools scraper is not needed to typecheck or run the
-      # offline tests, so CI skips the browser download entirely.
       - name: Install dependencies
         run: bun install --frozen-lockfile
-        env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
 
       - name: Typecheck
         run: bunx tsc --noEmit -p tsconfig.json

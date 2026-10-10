@@ -1,7 +1,6 @@
 import type { Chain } from '@provenance/core';
 
 import type { DexScreenerPairRow } from './dexscreener';
-import { DEXTOOLS_CHAIN_SLUGS } from './dextools-parse';
 import { compactEnrichment, type EnrichedTrendingEntry } from './enrichment';
 
 /**
@@ -10,6 +9,24 @@ import { compactEnrichment, type EnrichedTrendingEntry } from './enrichment';
  * URLs are read: chain slug and pair address, which DexScreener then resolves
  * to a token.
  */
+
+/** DexTools' URL slug per chain. */
+export const DEXTOOLS_CHAIN_SLUGS: Partial<Record<Chain, string>> = {
+  ethereum: 'ether',
+  solana: 'solana',
+  base: 'base',
+  bsc: 'bnb',
+  arbitrum: 'arbitrum',
+  polygon: 'polygon',
+  avalanche: 'avalanche',
+  blast: 'blast',
+  ton: 'ton',
+  sui: 'sui',
+};
+
+export function dextoolsSlugFor(chain: Chain): string | undefined {
+  return DEXTOOLS_CHAIN_SLUGS[chain];
+}
 
 export interface DexToolsPairHit {
   chain: Chain;

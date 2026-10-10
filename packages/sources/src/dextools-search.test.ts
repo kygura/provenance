@@ -9,6 +9,7 @@ const PAIR_A = '0x1111111111111111111111111111111111111111';
 const PAIR_B = '0x2222222222222222222222222222222222222222';
 const PAIR_BASE = '0x3333333333333333333333333333333333333333';
 const TOKEN_A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const SOL_MINT = '9ZtbETDNjnST9Y2zs82FZYy49xUMPgqXRh46YjjRpump';
 const SOL_PAIR = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU';
 
 /** Links wrapped in a redirect with the target percent-encoded, as search pages serve them. */
@@ -57,9 +58,25 @@ describe('DexToolsSource Exa lane', () => {
               { url: `https://www.dextools.io/app/en/base/pair-explorer/${PAIR_BASE}` },
               { url: 'https://www.dextools.io/app/en/ether/hot-pairs' },
               { url: `https://www.dextools.io/app/en/ether/pair-explorer/${PAIR_A}?t=2` },
+              { url: `https://www.dextools.io/app/solana/pair-explorer/${SOL_MINT}` },
             ],
             costDollars: { total: 0.005 },
           });
+        }
+        if (url.pathname.startsWith('/latest/dex/pairs/solana/')) {
+          hydrations.push(url.pathname);
+          return Response.json({ pairs: null });
+        }
+        if (url.pathname.startsWith('/latest/dex/tokens/')) {
+          hydrations.push(url.pathname);
+          const pair = (pairAddress: string, usd: number) => ({
+            chainId: 'solana',
+            pairAddress,
+            baseToken: { address: SOL_MINT, symbol: 'MINT', name: 'Mint' },
+            quoteToken: { symbol: 'SOL' },
+            liquidity: { usd },
+          });
+          return Response.json({ pairs: [pair('ShallowPool1111111111111111111111111111111', 50), pair('DeepPool11111111111111111111111111111111111', 40_000)] });
         }
         if (url.pathname.startsWith('/latest/dex/pairs/')) {
           hydrations.push(url.pathname);
@@ -90,7 +107,7 @@ describe('DexToolsSource Exa lane', () => {
 
   function source(app: AppConfig): DexToolsSource {
     const base = `http://127.0.0.1:${server.port}`;
-    return new DexToolsSource(dextoolsConfig(app), { exaBaseUrl: base, dexscreenerBaseUrl: base, browser: false });
+    return new DexToolsSource(dextoolsConfig(app), { exaBaseUrl: base, dexscreenerBaseUrl: base });
   }
 
   test('Exa result URLs become tokens: own chain only, deduped, hydrated through DexScreener', async () => {
@@ -115,6 +132,19 @@ describe('DexToolsSource Exa lane', () => {
       symbol: 'AAA',
       rank: 1,
     });
+    expect(dextools.drainErrors()).toEqual([]);
+  });
+
+  test('a pair link that carries a token mint is resolved as a token, on its deepest pool', async () => {
+    hydrations = [];
+    exaStatus = 200;
+    const app = loadConfig({ PROVENANCE_CHAINS: 'solana', EXA_API_KEY: 'exa-key' });
+    const dextools = source(app);
+    const entries = await dextools.fetchTrending({ config: dextoolsConfig(app), app, logger: silentLogger });
+
+    expect(hydrations).toEqual([`/latest/dex/pairs/solana/${SOL_MINT}`, `/latest/dex/tokens/${SOL_MINT}`]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ chain: 'solana', tokenAddress: SOL_MINT, pairAddress: 'DeepPool11111111111111111111111111111111111' });
     expect(dextools.drainErrors()).toEqual([]);
   });
 
