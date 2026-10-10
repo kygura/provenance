@@ -34,7 +34,16 @@ import {
   nowIso,
 } from '@provenance/core';
 import { type PipelineDeps, loadRuntimeDeps } from './deps';
-import { BUDGET_SOURCE, type LlmBudget, emptyLaunchStats, reconcileWatchlist, runLaunchLane, spend, sweepDormant } from './launch-lane';
+import {
+  BUDGET_SOURCE,
+  type LlmBudget,
+  emptyLaunchStats,
+  llmFailed,
+  reconcileWatchlist,
+  runLaunchLane,
+  spend,
+  sweepDormant,
+} from './launch-lane';
 import { collectSocial, emptySocialStats, isSocialSource, reconcileSocial } from './social';
 
 export interface RunOptions {
@@ -258,12 +267,22 @@ export async function runPipeline(
           }
           if (researcher) {
             const report = await researcher.research(snapshot, chain, evidence, researchCtx);
-            await store.saveProvenance(id, report);
-            provenance = report;
 
             // ---- Stage 5: cost ceiling ---------------------------------------
             spend(budget, report.usage?.costUsd ?? 0, stats.sourceErrors, log);
             stats.llmCostUsd = Number(budget.spent.toFixed(6));
+
+            // A failed call is not a report. Saving it would be reused as one
+            // until the re-analysis TTL, so the token scores market-only and
+            // the next run tries again.
+            const failed = report.anchor?.failed;
+            if (failed !== undefined) {
+              tokenLog.warn('research failed; not saved', { error: failed });
+              llmFailed(budget, `research:${snapshot.tokenId}`, failed, stats.sourceErrors, log);
+            } else {
+              await store.saveProvenance(id, report);
+              provenance = report;
+            }
           }
         }
 

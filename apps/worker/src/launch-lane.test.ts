@@ -149,6 +149,35 @@ describe('launch lane', () => {
     await runPipeline(makeConfig(), silentLogger, harness.deps, { runId: RUN });
     expect(harness.stages).not.toContain('analyze:ethereum:0xseen');
   });
+
+  test('a check that errored is not stored, and a refused provider stops LLM work for the run', async () => {
+    const credits = 'openrouter /chat/completions HTTP 402: This request requires more credits';
+    const harness = makeHarness({
+      snapshots: [makeSnapshot('solana:aaa'), makeLaunchSnapshot('ethereum:0xa'), makeLaunchSnapshot('ethereum:0xb')],
+      anchor: () => makeAnchor({ verdict: 'unclear', confidence: 'low', failed: credits }),
+    });
+    const record = await runPipeline(makeConfig(), silentLogger, harness.deps, { runId: RUN, concurrency: 1 });
+    // Not judged, so the next run retries both.
+    expect(harness.store.watch.size).toBe(0);
+    expect(harness.stages).toContain('anchor:ethereum:0xa');
+    expect(harness.stages).not.toContain('anchor:ethereum:0xb');
+    expect(harness.researchCalls).toEqual([]);
+    expect(record.stats.sourceErrors.map((e) => e.source)).toEqual(['anchor:ethereum:0xa', 'llm']);
+    expect(record.status).toBe('partial');
+  });
+
+  test('a transient check failure skips that token only', async () => {
+    const harness = makeHarness({
+      snapshots: [makeLaunchSnapshot('ethereum:0xa', { metrics: { liquidityUsd: 90_000 } }), makeLaunchSnapshot('ethereum:0xb')],
+      anchor: (snapshot) =>
+        snapshot.tokenId === 'ethereum:0xa'
+          ? makeAnchor({ verdict: 'unclear', confidence: 'low', failed: 'socket hang up' })
+          : makeAnchor(),
+    });
+    await runPipeline(makeConfig(), silentLogger, harness.deps, { runId: RUN, concurrency: 1 });
+    expect(harness.store.watch.has('ethereum:0xa')).toBe(false);
+    expect(harness.store.watch.get('ethereum:0xb')?.status).toBe('active');
+  });
 });
 
 describe('watchlist reconciliation', () => {

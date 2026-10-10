@@ -40,6 +40,7 @@ import {
   type WatchEntry,
   TRENDING_SOURCES,
   hoursBetween,
+  isFatalLlmError,
   mapLimit,
   nowIso,
 } from '@provenance/core';
@@ -76,6 +77,31 @@ export function spend(
   const detail = `LLM cost ceiling reached: $${budget.spent.toFixed(4)} of $${budget.limit}; remaining tokens get no LLM work`;
   sourceErrors.push({ source: BUDGET_SOURCE, error: detail });
   log.warn(detail, { spentUsd: budget.spent, ceilingUsd: budget.limit });
+}
+
+/** Marker recorded in `stats.sourceErrors` when the LLM provider refused a call. */
+export const LLM_SOURCE = 'llm';
+
+/**
+ * Records a failed LLM call. A token whose check failed was not judged, so the
+ * caller stores nothing for it and the next run retries. A failure every later
+ * call would repeat (no credits, bad key) also closes the budget for the run,
+ * recorded once: hammering a provider that already said no just stores more
+ * failures.
+ */
+export function llmFailed(
+  budget: LlmBudget,
+  source: string,
+  error: string,
+  sourceErrors: { source: string; error: string }[],
+  log: Logger,
+): void {
+  sourceErrors.push({ source, error });
+  if (!isFatalLlmError(error) || budget.exhausted) return;
+  budget.exhausted = true;
+  const detail = `LLM provider refused a call; remaining tokens get no LLM work: ${error.slice(0, 300)}`;
+  sourceErrors.push({ source: LLM_SOURCE, error: detail });
+  log.error(detail);
 }
 
 function errorMessage(error: unknown): string {
@@ -218,6 +244,12 @@ export async function runLaunchLane(launches: TokenSnapshot[], ctx: LaunchLaneCo
       checker ??= deps.createAnchorChecker(app, log);
       const fast = await checker.check(snapshot, ctx.researchCtx);
       spend(ctx.budget, fast.usage?.costUsd ?? 0, ctx.sourceErrors, log);
+      // A check that errored is not a verdict: store nothing, retry next run.
+      if (fast.failed !== undefined) {
+        tokenLog.warn('anchor check failed; not judged', { tokenId: snapshot.tokenId, error: fast.failed });
+        llmFailed(ctx.budget, `anchor:${snapshot.tokenId}`, fast.failed, ctx.sourceErrors, log);
+        return null;
+      }
       tokenLog.info('[VERDICT] launch', {
         tokenId: snapshot.tokenId,
         verdict: fast.verdict,
@@ -236,7 +268,12 @@ export async function runLaunchLane(launches: TokenSnapshot[], ctx: LaunchLaneCo
           const evidence = await deps.collectEvidence(snapshot, ctx.researchCtx);
           report = await researcher.research(snapshot, chain, evidence, ctx.researchCtx);
           spend(ctx.budget, report.usage?.costUsd ?? 0, ctx.sourceErrors, log);
-          stats.researched += 1;
+          const failed = report.anchor?.failed;
+          if (failed !== undefined) {
+            tokenLog.warn('full research failed; keeping the fast verdict', { error: failed });
+            llmFailed(ctx.budget, `research:${snapshot.tokenId}`, failed, ctx.sourceErrors, log);
+            report = undefined;
+          } else stats.researched += 1;
         } catch (error) {
           tokenLog.warn('full research failed; keeping the fast verdict', { error: errorMessage(error) });
         }

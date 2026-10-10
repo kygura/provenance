@@ -127,6 +127,33 @@ describe('cost ceiling', () => {
     expect(record.status).toBe('partial');
   });
 
+  test('a failed research call is not saved, and a refused provider stops research for the run', async () => {
+    const snapshots = ['aaa', 'bbb'].map((id) => makeSnapshot(`solana:${id}`));
+    const harness = makeHarness({
+      snapshots,
+      research: async (snapshot) =>
+        makeReport(snapshot.tokenId, {
+          anchor: {
+            verdict: 'unclear',
+            type: 'none',
+            subject: '',
+            summary: 'Anchor not established.',
+            confidence: 'low',
+            failed: 'openrouter /chat/completions HTTP 402: requires more credits',
+          },
+        }),
+    });
+
+    const record = await runPipeline(makeConfig(), silentLogger, harness.deps, { runId: RUN, concurrency: 1 });
+
+    // Saved, it would be reused as a report until the TTL ran out.
+    expect(harness.store.reports).toHaveLength(0);
+    expect(harness.researchCalls).toEqual(['solana:aaa']);
+    expect(harness.store.scores).toHaveLength(2);
+    expect(record.stats.sourceErrors.map((e) => e.source)).toEqual(['research:solana:aaa', 'llm']);
+    expect(record.status).toBe('partial');
+  });
+
   test('a zero budget means market-only from the first token', async () => {
     const harness = makeHarness({ snapshots: [makeSnapshot('solana:aaa')] });
     const base = makeConfig();

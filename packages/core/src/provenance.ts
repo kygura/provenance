@@ -41,6 +41,12 @@ export interface Anchor {
   /** One or two sentences: what the anchor is, or why there is none. */
   summary: string;
   confidence: AnchorConfidence;
+  /**
+   * Set when no judgement was made because a call failed (provider down, out
+   * of credits). Such an anchor is not a verdict: callers must not store it as
+   * one, or the token is never judged again.
+   */
+  failed?: string;
 }
 
 /**

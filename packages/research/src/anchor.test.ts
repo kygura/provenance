@@ -305,6 +305,7 @@ describe('WebSearchAnchorChecker', () => {
     expect(result.verdict).toBe('unclear');
     expect(result.confidence).toBe('low');
     expect(result.summary).toContain('overloaded');
+    expect(result.failed).toBe('overloaded');
     expect(result.citations).toEqual([]);
   });
 
@@ -314,6 +315,8 @@ describe('WebSearchAnchorChecker', () => {
     expect(calls).toHaveLength(1);
     expect(result.verdict).toBe('unclear');
     expect(result.confidence).toBe('low');
+    // Searched and found nothing: an answer, not a failure.
+    expect(result.failed).toBeUndefined();
   });
 
   test('no verdict tool call is unclear', async () => {
@@ -329,6 +332,7 @@ describe('WebSearchAnchorChecker', () => {
     expect(result.verdict).toBe('unclear');
     expect(result.confidence).toBe('low');
     expect(result.citations).toEqual(['https://a.invalid']);
+    expect(result.failed).toBe('500');
   });
 });
 
