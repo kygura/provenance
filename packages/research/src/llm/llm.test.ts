@@ -81,9 +81,9 @@ describe('config', () => {
     });
   });
 
-  test('extract model defaults to the research model; KIMI_API_KEY is an alias', () => {
+  test('extract model defaults to the cheap Kimi, not the research model; KIMI_API_KEY is an alias', () => {
     const app = loadConfig({ LLM_MODEL: 'openai:gpt-5.4', KIMI_API_KEY: 'k' });
-    expect(app.llm.extractModel).toBe('openai:gpt-5.4');
+    expect(app.llm.extractModel).toBe('moonshot:kimi-k2.6');
     expect(app.llm.providers.moonshot.apiKey).toBe('k');
   });
 
@@ -521,7 +521,7 @@ describe('exa search', () => {
   test('createLlm puts Exa behind every non-Anthropic model unless told not to', () => {
     const app = loadConfig({ MOONSHOT_API_KEY: 'k', EXA_API_KEY: 'e' });
     const llm = createLlm(app, app.llm.model) as OpenAiLlm;
-    expect(llm.model).toBe('kimi-k2.6');
+    expect(llm.model).toBe('kimi-k3');
     expect((llm as unknown as { options: { exa?: unknown } }).options.exa).toBeInstanceOf(ExaSearch);
     const native = loadConfig({ MOONSHOT_API_KEY: 'k', EXA_API_KEY: 'e', LLM_SEARCH_BACKEND: 'native' });
     expect((createLlm(native, native.llm.model) as unknown as { options: { exa?: unknown } }).options.exa).toBeUndefined();

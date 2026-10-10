@@ -4,8 +4,9 @@ name: Run lane
 # (launch lane) only choose when it fires and with which inputs; every secret
 # and variable the worker reads is forwarded here and nowhere else. The model
 # vars (LLM_*_MODEL) take `provider:model`, so switching vendor is a repo-var
-# change plus that provider's secret, though ANTHROPIC_API_KEY goes first
-# unless LLM_ANTHROPIC_FIRST=false. A new provider's key is one line below.
+# change plus that provider's secret; blank vars mean Kimi on Moonshot, and
+# LLM_ANTHROPIC_FIRST=true moves every role onto Claude. A new provider's key
+# is one line below.
 #
 # Callers pass `secrets: inherit`. GitHub never hands a job a secret the
 # workflow does not name, so the list below has to stay explicit.
@@ -25,10 +26,6 @@ on:
       chains:
         type: string
         default: ''
-      browser:
-        description: 'Install Chromium for the DexTools source'
-        type: boolean
-        default: false
       timeout_minutes:
         type: number
         default: 45
@@ -59,16 +56,6 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
-
-      # The DexTools source drives a real browser; the other sources are plain
-      # HTTP and keep working if this step fails. Run from the package that
-      # depends on Playwright: the workspace links its bin there, not at the
-      # root, and a root `bunx` fetches whatever Playwright is current on npm,
-      # whose browser build the locked version then cannot find.
-      - name: Install Chromium
-        if: inputs.browser
-        working-directory: packages/sources
-        run: bunx playwright install --with-deps chromium
 
       - name: Migrate database
         run: bun run apps/worker/src/cli.ts migrate
@@ -125,8 +112,7 @@ jobs:
           RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM || vars.RPC_ETHEREUM }}
           RPC_SOLANA: ${{ secrets.RPC_SOLANA || vars.RPC_SOLANA }}
           RPC_PUBLIC_FALLBACK: ${{ vars.RPC_PUBLIC_FALLBACK }}
-          # Exa: the search tool for Kimi and other non-Anthropic models, and
-          # DexTools pairs via search (without it DexTools needs the browser)
+          # Exa: the search tool for Kimi and other non-Anthropic models
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
           # Social yardstick (optional; docs/social.md)
           ELFA_API_KEY: ${{ secrets.ELFA_API_KEY }}

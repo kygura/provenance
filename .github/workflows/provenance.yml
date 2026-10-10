@@ -38,7 +38,6 @@ jobs:
       dry_run: ${{ inputs.dry_run == true }}
       limit: ${{ inputs.limit || '' }}
       chains: ${{ inputs.chains || '' }}
-      browser: true
       timeout_minutes: 45
       artifact_prefix: provenance-run
       retention_days: 14

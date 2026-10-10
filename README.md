@@ -17,7 +17,7 @@ about the thing the token points at that does not mention the token.
 The order of events decides it, and the code compares the dates, not the model.
 An anchored launch gets the full research straight away: lineage, prior
 cycles, and whether this token is the one the meme's audience will accept.
-Trending lists (DexTools, DexScreener, GeckoTerminal, twice a day) are the
+Trending lists (DexScreener, GeckoTerminal, twice a day) are the
 outcome, recorded against a verdict that came first. They are not the trigger.
 
 ## Why lineage matters to the verdict
@@ -66,21 +66,17 @@ up on a list. See [`docs/launch-lane.md`](docs/launch-lane.md).
 | Trending lane: lists, analysis, research | GitHub Actions cron, twice daily | free tier |
 | Database | libSQL / Turso (or a local SQLite file) | free tier |
 | Dashboard | Vercel | free tier |
-| LLM | Anthropic API; Kimi K2.6 on Moonshot without an Anthropic key | paid, per token |
+| LLM | Kimi K3 (research) and K2.6 (extraction, anchor check) on Moonshot; Claude optional | paid, per token |
 | Search | Anthropic's web search; Exa (`EXA_API_KEY`) for every other provider | paid, per query |
 | Social yardstick (optional) | Elfa trending-CA feeds, `ELFA_API_KEY` | free tier; ~720 of 1,000 monthly credits ([docs/social.md](docs/social.md)) |
 
 No paid market-data API keys. DexScreener and GeckoTerminal publish free keyless
-endpoints. DexTools has no free API and sits behind Cloudflare, so it is read
-through Exa search (`EXA_API_KEY`): results restricted to its `pair-explorer`
-pages, resolved to tokens through DexScreener, with Playwright and headless
-Chromium as the fallback when search finds nothing.
+endpoints, and between them they cover the trending lists.
 
 ## Pipeline
 
 ```
-discover ─┬─ dextools      (exa search for pair pages, playwright fallback)
-          ├─ dexscreener   (free public API: boosts, profiles, pairs)
+discover ─┬─ dexscreener   (free public API: boosts, profiles, pairs)
           ├─ geckoterminal (free public API: trending pools)
           └─ launches      (factory PairCreated/PoolCreated over public RPC)
                 │
@@ -92,8 +88,8 @@ discover ─┬─ dextools      (exa search for pair pages, playwright fallback
                 │             risk flags — free RPCs only
           evidence            on-chain + listing metadata, no network
                 │
-          research pass       Claude with the web search server tool (or Kimi
-                │             calling Exa) — prose notes and citations
+          research pass       Kimi K3 calling Exa search (publish dates, a
+                │             "before launch" bound) — prose notes and citations
                 │
           extraction pass     the same notes, no tools, forced tool call →
                 │             a schema-validated ProvenanceReport
@@ -120,7 +116,7 @@ produces partial data with an explicit note, never an aborted run.
 
 ```bash
 bun install
-cp .env.example .env          # ANTHROPIC_API_KEY by default; or MOONSHOT_API_KEY + EXA_API_KEY
+cp .env.example .env          # MOONSHOT_API_KEY + EXA_API_KEY by default
 
 bun run apps/worker/src/cli.ts migrate
 bun run apps/worker/src/cli.ts seed          # demo data, no network needed

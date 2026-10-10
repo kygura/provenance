@@ -37,8 +37,8 @@ secrets under **Settings → Secrets and variables → Actions**:
 
 | Secret | Required | What it is |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | one LLM key | default provider (`LLM_MODEL=claude-opus-5`); when set, it goes first for every role |
-| `MOONSHOT_API_KEY` | one LLM key | fallback provider: without an Anthropic key, every pass runs on `moonshot:kimi-k2.6` |
+| `MOONSHOT_API_KEY` | one LLM key | default provider: research on `moonshot:kimi-k3`, extraction and the anchor check on `moonshot:kimi-k2.6` |
+| `ANTHROPIC_API_KEY` | one LLM key | for `claude-*` models, or every role with `LLM_ANTHROPIC_FIRST=true` |
 | `OPENAI_API_KEY` | one LLM key | for `openai:` models |
 | `OPENROUTER_API_KEY` | one LLM key | for `openrouter:` models (Kimi, DeepSeek, GPT… through one key) |
 | `DASHSCOPE_API_KEY` | one LLM key | for `qwen:` models on Alibaba Model Studio |
@@ -51,7 +51,7 @@ secrets under **Settings → Secrets and variables → Actions**:
 | `DISCORD_WEBHOOK_URL` | no | channel webhook |
 | `ALERT_WEBHOOK_URL` | no | any JSON endpoint |
 | `ETHERSCAN_API_KEY` | no | contract verification lookups |
-| `EXA_API_KEY` | recommended | the search tool for every non-Anthropic model (anchor check and research), and how DexTools pair pages are found; without it Kimi falls back to `$web_search` and DexTools needs the Playwright fallback |
+| `EXA_API_KEY` | recommended | the search tool for every non-Anthropic model (anchor check and research) |
 | `ELFA_API_KEY` | no | crypto-social sightings for the watchlist's social lead (`docs/social.md`); free tier is enough |
 | `RPC_ETHEREUM` / `RPC_SOLANA` | no | your own RPC endpoints, comma-separated and tried in order. A set list is tried first and the public defaults (Allnodes' publicnode.com, drpc, …) follow as fallbacks; set `RPC_PUBLIC_FALLBACK=false` to use only your list. A keyed URL (Alchemy, Helius) must be a secret so the logs mask it. Blank keeps the public defaults |
 
@@ -61,15 +61,15 @@ rather than Secrets; every one is listed in `.env.example`. So do the model
 choices: `LLM_MODEL`, `LLM_EXTRACT_MODEL`, `LLM_TRIAGE_MODEL` and `LLM_PRICING`.
 Only the keys for the providers those models name are needed.
 
-Anthropic goes first. While the `ANTHROPIC_API_KEY` secret is set, a model var
-naming another provider is replaced by that role's Anthropic default
-(`claude-opus-5` for research and extract, `claude-sonnet-5` for triage); Claude
-models you set are kept. The setups below take effect only without an Anthropic
-key, or with the variable `LLM_ANTHROPIC_FIRST=false`.
+Blank model vars mean Kimi on Moonshot, searching through Exa
+(`MOONSHOT_API_KEY` + `EXA_API_KEY`): K3 researches, K2.6 extracts and runs
+the anchor check. The variable `LLM_ANTHROPIC_FIRST=true`, with the
+`ANTHROPIC_API_KEY` secret set, moves every role onto Claude instead
+(`claude-opus-5` for research and extract, `claude-sonnet-5` for triage), at
+about twice the cost per report.
 
-Without an Anthropic key, blank model vars mean Kimi K2.6 on Moonshot for every
-pass, searching through Exa (`MOONSHOT_API_KEY` + `EXA_API_KEY`). The same model
-through OpenRouter, for example, when only an OpenRouter key is at hand:
+Other setups, for example Kimi through OpenRouter when only an OpenRouter key
+is at hand:
 
 ```
 LLM_MODEL=openrouter:moonshotai/kimi-k2.6
@@ -120,9 +120,7 @@ read-write database token is the obvious way to get this wrong.
 
 The worker is a plain Bun process with a CLI, so anything that can run a
 container on a schedule works: a VPS with cron, Fly.io, Railway, a Raspberry Pi.
-One requirement: network access to the data hosts. Chromium (`bunx playwright
-install --with-deps chromium`, run in `packages/sources`) is optional; the
-DexTools source only reaches for it when Exa search finds nothing or `EXA_API_KEY` is unset.
+One requirement: network access to the data hosts. No browser is needed.
 
 Vercel Cron cannot host the worker — the run takes longer than a serverless
 function should.

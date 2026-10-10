@@ -91,9 +91,9 @@ export const ANTHROPIC_ROLE_MODELS = {
 } as const;
 
 /**
- * Anthropic goes first: with an Anthropic key, a role configured for another
- * provider runs on that role's Anthropic model instead. Other providers are
- * used only when there is no Anthropic key, or when LLM_ANTHROPIC_FIRST=false.
+ * Opt-in (LLM_ANTHROPIC_FIRST=true, with an Anthropic key): a role configured
+ * for another provider runs on that role's Anthropic model instead. Claude
+ * models set explicitly are kept.
  */
 function anthropicFirst(
   llm: Pick<LlmConfig, 'model' | 'extractModel' | 'triageModel'>,
@@ -115,8 +115,19 @@ export interface LlmProviderConfig {
   workspaceId?: string;
 }
 
-/** Every pass runs on this when there is no ANTHROPIC_API_KEY and no LLM_*_MODEL says otherwise. */
+/** The cheap Kimi: extraction and the per-launch anchor check run on it. */
 export const DEFAULT_LLM_MODEL = 'moonshot:kimi-k2.6';
+
+/**
+ * Default model per role: Kimi K3 researches (multi-step search with Exa),
+ * K2.6 copies notes into the schema and runs the fast anchor check. Any
+ * LLM_*_MODEL var overrides its role.
+ */
+export const DEFAULT_ROLE_MODELS = {
+  model: 'moonshot:kimi-k3',
+  extractModel: DEFAULT_LLM_MODEL,
+  triageModel: DEFAULT_LLM_MODEL,
+} as const;
 
 export interface LlmConfig {
   /**
@@ -235,7 +246,7 @@ export interface AppConfig {
   anthropicApiKey?: string;
   /** Optional: enables `contractVerified`. Every other EVM read is keyless. */
   etherscanApiKey?: string;
-  /** Exa search, used to find DexTools pair pages without fetching DexTools. */
+  /** Exa search: the search tool for every non-Anthropic model. */
   exaApiKey?: string;
   pipeline: PipelineConfig;
   launches: LaunchConfig;
@@ -347,12 +358,6 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       chains,
       sources: [
         {
-          id: 'dextools',
-          enabled: bool(env.SOURCE_DEXTOOLS, true),
-          limit: num(env.SOURCE_DEXTOOLS_LIMIT, 30),
-          rateLimitMs: num(env.SOURCE_DEXTOOLS_RATE_MS, 2500),
-        },
-        {
           id: 'dexscreener',
           enabled: bool(env.SOURCE_DEXSCREENER, true),
           limit: num(env.SOURCE_DEXSCREENER_LIMIT, 30),
@@ -382,18 +387,15 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
     },
     llm: {
       ...((): Pick<LlmConfig, 'model' | 'extractModel' | 'triageModel'> => {
-        // Anthropic is the main provider. Without its key, every pass falls
-        // back to Kimi K2.6 on Moonshot, searching through Exa.
-        const anthropic = Boolean(env.ANTHROPIC_API_KEY);
-        const defaults = anthropic
-          ? ANTHROPIC_ROLE_MODELS
-          : { model: DEFAULT_LLM_MODEL, extractModel: DEFAULT_LLM_MODEL, triageModel: DEFAULT_LLM_MODEL };
+        // Kimi on Moonshot by default: about half what Claude Opus costs per
+        // report. LLM_ANTHROPIC_FIRST=true (with an Anthropic key) moves every
+        // role back onto Claude.
         const configured = {
-          model: env.LLM_MODEL || defaults.model,
-          extractModel: env.LLM_EXTRACT_MODEL || env.LLM_MODEL || defaults.extractModel,
-          triageModel: env.LLM_TRIAGE_MODEL || defaults.triageModel,
+          model: env.LLM_MODEL || DEFAULT_ROLE_MODELS.model,
+          extractModel: env.LLM_EXTRACT_MODEL || DEFAULT_ROLE_MODELS.extractModel,
+          triageModel: env.LLM_TRIAGE_MODEL || DEFAULT_ROLE_MODELS.triageModel,
         };
-        return anthropic && bool(env.LLM_ANTHROPIC_FIRST, true) ? anthropicFirst(configured) : configured;
+        return env.ANTHROPIC_API_KEY && bool(env.LLM_ANTHROPIC_FIRST, false) ? anthropicFirst(configured) : configured;
       })(),
       providers: {
         anthropic: {
