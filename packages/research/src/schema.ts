@@ -528,12 +528,14 @@ export function buildDegradedReport(params: {
   model: string;
   promptVersion: string;
   reason: string;
+  /** The error behind it, when a call failed rather than finding nothing. */
+  failed?: string;
   evidence?: readonly EvidenceItem[];
   generatedAt?: string;
 }): ProvenanceReport {
   return {
     tokenId: params.tokenId,
-    anchor: unresolvedAnchor(`Anchor not established: ${params.reason}`),
+    anchor: unresolvedAnchor(`Anchor not established: ${params.reason}`, params.failed),
     memeName: params.memeName,
     narrativeCluster: 'unclassified',
     originSummary: `Provenance could not be established: ${params.reason}. No lineage is claimed here; treat this token as unresearched rather than as researched-and-clean.`,

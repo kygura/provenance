@@ -115,6 +115,7 @@ jobs:
           # ceiling; blank falls back to the shared one.
           LLM_MAX_COST_USD_PER_RUN: ${{ inputs.lane == 'launches' && vars.LAUNCHES_MAX_COST_USD_PER_RUN || vars.LLM_MAX_COST_USD_PER_RUN }}
           LLM_MAX_WEB_SEARCHES: ${{ vars.LLM_MAX_WEB_SEARCHES }}
+          LLM_SEARCH_BACKEND: ${{ vars.LLM_SEARCH_BACKEND }}
           # Chain data. RPC lists are comma-separated, tried in order; blank
           # keeps the public defaults in packages/core/src/config.ts. A keyed
           # URL (Helius, Alchemy) carries its key in the URL and error messages
@@ -124,7 +125,8 @@ jobs:
           RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM || vars.RPC_ETHEREUM }}
           RPC_SOLANA: ${{ secrets.RPC_SOLANA || vars.RPC_SOLANA }}
           RPC_PUBLIC_FALLBACK: ${{ vars.RPC_PUBLIC_FALLBACK }}
-          # DexTools pairs via search (optional; without it DexTools needs the browser)
+          # Exa: the search tool for Kimi and other non-Anthropic models, and
+          # DexTools pairs via search (without it DexTools needs the browser)
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
           # Social yardstick (optional; docs/social.md)
           ELFA_API_KEY: ${{ secrets.ELFA_API_KEY }}

@@ -154,6 +154,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
         model,
         promptVersion: PROMPT_VERSION,
         reason: `Web research pass failed: ${reason}`,
+        failed: reason,
         evidence,
       });
     }
@@ -229,6 +230,8 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     const model = this.modelLabel();
     const prompt = buildExtractionPrompt(snapshot, chain, found.notes, found.citations);
     let lastIssues: string[] = [];
+    // Set only while the latest attempt threw: a call that failed, not a bad answer.
+    let lastError: string | undefined;
 
     for (let attempt = 1; attempt <= this.attempts; attempt++) {
       try {
@@ -244,6 +247,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
           },
           this.onUsage,
         );
+        lastError = undefined;
 
         if (input === undefined) {
           lastIssues = ['Model returned no tool call despite tool_choice.'];
@@ -293,7 +297,8 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
           },
         };
       } catch (error) {
-        lastIssues = [errorMessage(error)];
+        lastError = errorMessage(error);
+        lastIssues = [lastError];
         log.warn('extraction call failed', { tokenId: snapshot.tokenId, attempt, error: lastIssues[0] });
       }
     }
@@ -304,6 +309,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
       model,
       promptVersion: PROMPT_VERSION,
       reason: lastIssues[0] ?? 'The model did not return a usable provenance report.',
+      ...(lastError !== undefined ? { failed: lastError } : {}),
       evidence,
     });
   }

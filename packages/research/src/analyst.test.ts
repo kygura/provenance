@@ -15,8 +15,11 @@ import { PROVENANCE_TOOL_NAME } from './schema';
 
 // --- fixtures ---------------------------------------------------------------
 
+// Pinned: these tests drive the Anthropic adapter, whatever the shipped default is.
+const CLAUDE_ENV = { LLM_MODEL: 'claude-opus-5', LLM_TRIAGE_MODEL: 'claude-sonnet-5' };
+
 function app(overrides: Partial<AppConfig['llm']> = {}): AppConfig {
-  const base = loadConfig({});
+  const base = loadConfig(CLAUDE_ENV);
   return { ...base, anthropicApiKey: 'sk-test', llm: { ...base.llm, ...overrides } };
 }
 

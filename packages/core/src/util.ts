@@ -141,3 +141,12 @@ export class FatalSourceError extends Error {
     this.name = 'FatalSourceError';
   }
 }
+
+/**
+ * Provider errors that will fail every later call in the run too: out of
+ * credits, a bad key, a disabled account. Retrying them per token just
+ * repeats the failure, so a lane stops its LLM work for the run instead.
+ */
+export function isFatalLlmError(message: string): boolean {
+  return /\bHTTP (?:401|402|403)\b/.test(message) || /\b(?:insufficient|exceed\w*)[^.]{0,40}credits?\b/i.test(message);
+}

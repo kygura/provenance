@@ -34,8 +34,11 @@ import {
 } from '@provenance/core';
 import type { DiscoveryResult, FilterResult, PipelineDeps } from './deps';
 
+/** Pinned to Claude: the fakes and key checks assume the Anthropic adapter, whatever the shipped default is. */
+export const CLAUDE_ENV = { LLM_MODEL: 'claude-opus-5', LLM_TRIAGE_MODEL: 'claude-sonnet-5' };
+
 export function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
-  const base = loadConfig({});
+  const base = loadConfig(CLAUDE_ENV);
   return {
     ...base,
     ...overrides,

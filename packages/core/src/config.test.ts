@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { extractJwt, loadConfig } from './config';
+import { DEFAULT_LLM_MODEL, extractJwt, loadConfig } from './config';
 
 describe('loadConfig', () => {
   test('a configured RPC leads and the public nodes follow it', () => {
@@ -27,8 +27,14 @@ describe('loadConfig', () => {
     expect(app.alerts.telegramChatId).toBe('-5222707171');
   });
 
+  test('Anthropic is the default with its key; Kimi K2.6 without one', () => {
+    expect(loadConfig({ ANTHROPIC_API_KEY: 'sk' }).llm).toMatchObject({ model: 'claude-opus-5', triageModel: 'claude-sonnet-5' });
+    const kimi = loadConfig({ MOONSHOT_API_KEY: 'k' }).llm;
+    expect([kimi.model, kimi.extractModel, kimi.triageModel]).toEqual([DEFAULT_LLM_MODEL, DEFAULT_LLM_MODEL, DEFAULT_LLM_MODEL]);
+  });
+
   test('a whitespace-only value counts as unset where a default exists', () => {
-    expect(loadConfig({ LLM_MODEL: '  ' }).llm.model).toBe('claude-opus-5');
+    expect(loadConfig({ LLM_MODEL: '  ' }).llm.model).toBe(DEFAULT_LLM_MODEL);
   });
 
   test('with an Anthropic key, every LLM role runs on Anthropic first', () => {

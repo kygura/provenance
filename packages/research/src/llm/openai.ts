@@ -19,10 +19,14 @@
  *   - `none`       DeepSeek and custom endpoints: no search. The turn is
  *                  answered from recall, which the analyst already scores as
  *                  ungrounded.
+ *   - `exa`        Any provider, when an Exa client is passed in: the model
+ *                  calls a `web_search` function and the client runs it on
+ *                  Exa (see `./exa`). Overrides the provider's own mode.
  */
 
 import type { LlmProvider } from '@provenance/core';
 import type { TokenUsage } from '../cost';
+import { EXA_TOOL_NAME, exaTool, formatExaHits, parseExaArgs, type ExaSearch } from './exa';
 import type {
   LlmClient,
   ReasoningEffort,
@@ -33,7 +37,7 @@ import type {
   UsageSink,
 } from './types';
 
-export type SearchMode = 'responses' | 'plugin' | 'builtin' | 'dashscope' | 'none';
+export type SearchMode = 'responses' | 'plugin' | 'builtin' | 'dashscope' | 'none' | 'exa';
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
 interface ProviderProfile {
@@ -43,12 +47,20 @@ interface ProviderProfile {
   forceToolChoice: boolean;
   /** OpenAI's reasoning models reject `temperature` and `max_tokens`. */
   reasoningParams: boolean;
+  /** Kimi fixes temperature per mode and rejects any value sent. */
+  fixedTemperature?: boolean;
 }
 
 export const PROVIDER_PROFILES: Readonly<Record<Exclude<LlmProvider, 'anthropic'>, ProviderProfile>> = {
   openai: { baseUrl: 'https://api.openai.com/v1', search: 'responses', forceToolChoice: true, reasoningParams: true },
   openrouter: { baseUrl: 'https://openrouter.ai/api/v1', search: 'plugin', forceToolChoice: true, reasoningParams: false },
-  moonshot: { baseUrl: 'https://api.moonshot.ai/v1', search: 'builtin', forceToolChoice: false, reasoningParams: false },
+  moonshot: {
+    baseUrl: 'https://api.moonshot.ai/v1',
+    search: 'builtin',
+    forceToolChoice: false,
+    reasoningParams: false,
+    fixedTemperature: true,
+  },
   qwen: {
     baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
     search: 'dashscope',
@@ -69,6 +81,8 @@ export interface OpenAiLlmOptions {
   /** Attempts per HTTP call on 429 and 5xx. */
   retries?: number;
   timeoutMs?: number;
+  /** Search through Exa instead of the provider's own tool. */
+  exa?: ExaSearch;
 }
 
 // -- response shapes (only the fields read) -----------------------------------
@@ -97,6 +111,8 @@ interface ChatMessage {
   tool_calls?: ChatToolCall[];
   /** Reasoning models' visible thinking (OpenRouter). Not the answer, but not nothing. */
   reasoning?: string | null;
+  /** Kimi's thinking. Must go back verbatim on the next turn of a tool loop. */
+  reasoning_content?: string | null;
   annotations?: Array<{ type?: string; url_citation?: { url?: string } }>;
 }
 
@@ -196,7 +212,7 @@ export class OpenAiLlm implements LlmClient {
     const baseUrl = options.baseUrl ?? this.profile.baseUrl;
     if (!baseUrl) throw new Error(`${provider} needs a base URL (OPENAI_COMPATIBLE_BASE_URL).`);
     this.baseUrl = baseUrl.replace(/\/+$/, '');
-    this.canSearch = this.profile.search !== 'none';
+    this.canSearch = options.exa !== undefined || this.profile.search !== 'none';
     this.fetchImpl = options.fetch ?? ((input, init) => fetch(input, init));
     this.retries = options.retries ?? 3;
     this.timeoutMs = options.timeoutMs ?? 180_000;
@@ -249,13 +265,27 @@ export class OpenAiLlm implements LlmClient {
     if (this.profile.reasoningParams) {
       return { max_completion_tokens: maxTokens, ...(effort ? { reasoning_effort: effort } : {}) };
     }
+    if (this.provider === 'moonshot') return { max_tokens: maxTokens, ...this.kimiReasoning(effort) };
     return {
       max_tokens: maxTokens,
-      ...(temperature !== undefined ? { temperature } : {}),
+      ...(temperature !== undefined && !this.profile.fixedTemperature ? { temperature } : {}),
       // OpenRouter normalises this across the models it routes and drops it
       // for models that do not reason.
       ...(effort && this.provider === 'openrouter' ? { reasoning: { effort } } : {}),
     };
+  }
+
+  /**
+   * Kimi's reasoning knobs differ per family. K2.x thinks by default and takes
+   * `thinking: disabled`, which is what a low-effort call (the anchor check,
+   * extraction) wants: no billed thinking for copying notes into a schema.
+   * K3 always thinks and takes `reasoning_effort` low/high/max, defaulting to
+   * max, so it always gets an explicit level.
+   */
+  private kimiReasoning(effort?: ReasoningEffort): Record<string, unknown> {
+    if (/^kimi-k3/.test(this.model)) return { reasoning_effort: effort === 'low' ? 'low' : 'high' };
+    if (/^kimi-k2\.[56]/.test(this.model) && effort === 'low') return { thinking: { type: 'disabled' } };
+    return {};
   }
 
   private report(onUsage: UsageSink, raw: ChatUsage | undefined): TokenUsage {
@@ -267,6 +297,7 @@ export class OpenAiLlm implements LlmClient {
   // -- search -------------------------------------------------------------------
 
   async search(request: SearchRequest, onUsage: UsageSink): Promise<SearchResult> {
+    if (this.options.exa) return this.searchExa(this.options.exa, request, onUsage);
     switch (this.profile.search) {
       case 'responses':
         return this.searchResponses(request, onUsage);
@@ -343,8 +374,81 @@ export class OpenAiLlm implements LlmClient {
       choice = response.choices?.[0];
     }
     const message = choice?.message;
-    const text = message?.content?.trim() || message?.reasoning?.trim() || '';
+    const text = message?.content?.trim() || message?.reasoning?.trim() || message?.reasoning_content?.trim() || '';
     return { text, message };
+  }
+
+  /**
+   * A function-calling loop over Exa. Every page Exa returned is a citation:
+   * the model read it, whether or not it quotes the URL back. Exa's own bill
+   * is reported to the usage sink under `exa`, so it counts against the run's
+   * ceiling like any model call.
+   */
+  private async searchExa(exa: ExaSearch, request: SearchRequest, onUsage: UsageSink): Promise<SearchResult> {
+    const spec = exaTool();
+    const tools = [{ type: 'function', function: { name: spec.name, description: spec.description, parameters: spec.schema } }];
+    const messages: Array<Record<string, unknown>> = [
+      { role: 'system', content: request.system },
+      { role: 'user', content: request.prompt },
+    ];
+    const result: SearchResult = { texts: [], citations: [], searches: 0 };
+    const seen = new Set<string>();
+
+    // One more round than searches, so the model always gets a turn to write.
+    for (let round = 0; round <= request.maxSearches; round++) {
+      const allowSearch = result.searches < request.maxSearches && round < request.maxSearches;
+      const response = await this.post<ChatResponse>('/chat/completions', {
+        model: this.model,
+        messages,
+        tools,
+        // History holds tool calls, so the tools stay declared; `none` is how
+        // the last round is told to write instead of search again.
+        tool_choice: allowSearch ? 'auto' : 'none',
+        ...(this.provider === 'openrouter' ? { usage: { include: true } } : {}),
+        ...this.sampling(request.maxTokens, undefined, request.reasoningEffort),
+      });
+      this.report(onUsage, response.usage);
+      const message = response.choices?.[0]?.message;
+      const calls = (message?.tool_calls ?? []).filter((call) => call.function?.name === EXA_TOOL_NAME);
+      if (!allowSearch || calls.length === 0) {
+        const text = message?.content?.trim() || message?.reasoning_content?.trim() || message?.reasoning?.trim() || '';
+        if (text) result.texts.push(text);
+        break;
+      }
+      // Kimi requires the assistant turn back unchanged, reasoning included.
+      messages.push(message as unknown as Record<string, unknown>);
+      for (const call of calls) {
+        let content: string;
+        const args = parseExaArgs(call.function.arguments);
+        if (result.searches >= request.maxSearches) {
+          content = 'Search limit reached. Write your notes from what you have.';
+        } else if (!args) {
+          content = 'Invalid arguments: pass {"query": "..."}.';
+        } else {
+          result.searches += 1;
+          try {
+            const reply = await exa.search(args);
+            if (reply.costUsd !== undefined) {
+              onUsage('exa', { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, reply.costUsd);
+            }
+            for (const hit of reply.hits) {
+              if (seen.has(hit.url)) continue;
+              seen.add(hit.url);
+              result.citations.push(hit.url);
+            }
+            content = formatExaHits(reply.hits);
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            result.searchError ??= 'exa_error';
+            content = `Search failed: ${reason}`;
+            // A refused key fails every later search too; stop asking.
+            if (/HTTP (?:401|402|403)\b/.test(reason)) throw error;
+          }
+        }
+        messages.push({ role: 'tool', tool_call_id: call.id, name: EXA_TOOL_NAME, content });
+      }
+    }
+    return result;
   }
 
   private async searchPlugin(request: SearchRequest, onUsage: UsageSink): Promise<SearchResult> {

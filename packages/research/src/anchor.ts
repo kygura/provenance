@@ -209,9 +209,14 @@ export function resolveAnchor(anchor: Anchor, launchedAt: string | undefined, ci
   return out;
 }
 
-/** The anchor block for a report that could not be researched. */
-export function unresolvedAnchor(reason: string): Anchor {
-  return { verdict: 'unclear', type: 'none', subject: '', summary: reason, confidence: 'low' };
+/**
+ * The anchor block for a report that could not be researched. `failed` marks a
+ * call that errored, as opposed to a search that ran and found nothing.
+ */
+export function unresolvedAnchor(reason: string, failed?: string): Anchor {
+  const anchor: Anchor = { verdict: 'unclear', type: 'none', subject: '', summary: reason, confidence: 'low' };
+  if (failed !== undefined) anchor.failed = failed;
+  return anchor;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +330,7 @@ export class WebSearchAnchorChecker implements AnchorChecker {
       citations = [...new Set(found.citations)];
     } catch (error) {
       log.warn('anchor search failed', { tokenId: snapshot.tokenId, error: errorMessage(error) });
-      return finish(unresolvedAnchor(`Anchor search failed: ${errorMessage(error)}`), []);
+      return finish(unresolvedAnchor(`Anchor search failed: ${errorMessage(error)}`, errorMessage(error)), []);
     }
     if (notes.trim() === '') return finish(unresolvedAnchor('The search pass produced no notes.'), citations);
 
@@ -346,7 +351,10 @@ export class WebSearchAnchorChecker implements AnchorChecker {
       return finish(parseAnchor(input), citations);
     } catch (error) {
       log.warn('anchor extraction failed', { tokenId: snapshot.tokenId, error: errorMessage(error) });
-      return finish(unresolvedAnchor(`Anchor extraction failed: ${errorMessage(error)}`), citations);
+      return finish(
+        unresolvedAnchor(`Anchor extraction failed: ${errorMessage(error)}`, errorMessage(error)),
+        citations,
+      );
     }
   }
 }

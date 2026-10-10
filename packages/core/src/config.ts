@@ -115,6 +115,9 @@ export interface LlmProviderConfig {
   workspaceId?: string;
 }
 
+/** Every pass runs on this when there is no ANTHROPIC_API_KEY and no LLM_*_MODEL says otherwise. */
+export const DEFAULT_LLM_MODEL = 'moonshot:kimi-k2.6';
+
 export interface LlmConfig {
   /**
    * Model used for the deep provenance synthesis, as `provider:model` or a bare
@@ -145,6 +148,13 @@ export interface LlmConfig {
    * date a meme and find two prior cycles without wandering.
    */
   maxWebSearches: number;
+  /**
+   * Where non-Anthropic models search. `exa` (the default, when EXA_API_KEY is
+   * set) gives the model a `web_search` function backed by Exa; `native` uses
+   * the provider's own tool (OpenRouter's plugin, Kimi's `$web_search`).
+   * Anthropic always uses its server-side tool.
+   */
+  searchBackend: 'exa' | 'native';
 }
 
 /**
@@ -372,12 +382,18 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
     },
     llm: {
       ...((): Pick<LlmConfig, 'model' | 'extractModel' | 'triageModel'> => {
+        // Anthropic is the main provider. Without its key, every pass falls
+        // back to Kimi K2.6 on Moonshot, searching through Exa.
+        const anthropic = Boolean(env.ANTHROPIC_API_KEY);
+        const defaults = anthropic
+          ? ANTHROPIC_ROLE_MODELS
+          : { model: DEFAULT_LLM_MODEL, extractModel: DEFAULT_LLM_MODEL, triageModel: DEFAULT_LLM_MODEL };
         const configured = {
-          model: env.LLM_MODEL || 'claude-opus-5',
-          extractModel: env.LLM_EXTRACT_MODEL || env.LLM_MODEL || 'claude-opus-5',
-          triageModel: env.LLM_TRIAGE_MODEL || 'claude-sonnet-5',
+          model: env.LLM_MODEL || defaults.model,
+          extractModel: env.LLM_EXTRACT_MODEL || env.LLM_MODEL || defaults.extractModel,
+          triageModel: env.LLM_TRIAGE_MODEL || defaults.triageModel,
         };
-        return env.ANTHROPIC_API_KEY && bool(env.LLM_ANTHROPIC_FIRST, true) ? anthropicFirst(configured) : configured;
+        return anthropic && bool(env.LLM_ANTHROPIC_FIRST, true) ? anthropicFirst(configured) : configured;
       })(),
       providers: {
         anthropic: {
@@ -406,6 +422,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       maxCostUsdPerRun: num(env.LLM_MAX_COST_USD_PER_RUN, 5),
       temperature: num(env.LLM_TEMPERATURE, 0.2),
       maxWebSearches: num(env.LLM_MAX_WEB_SEARCHES, 6),
+      searchBackend: env.LLM_SEARCH_BACKEND?.trim().toLowerCase() === 'native' ? 'native' : 'exa',
     },
     launches: {
       enabled: bool(env.LAUNCHES_ENABLED, true),

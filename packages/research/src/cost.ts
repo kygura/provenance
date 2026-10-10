@@ -33,6 +33,11 @@ export const MODEL_PRICING_USD_PER_MTOK: Readonly<Record<string, ModelPricing>> 
   'claude-sonnet-5': { inputPerMTok: 2, outputPerMTok: 10 },
   'claude-sonnet-4-6': { inputPerMTok: 3, outputPerMTok: 15 },
   'claude-haiku-4-5': { inputPerMTok: 1, outputPerMTok: 5 },
+  // Moonshot first-party, cache-miss input, from platform.kimi.ai/docs/pricing/chat,
+  // read 2026-10-10. A cache hit is $0.16, which the 0.1x read multiplier
+  // under-counts slightly.
+  'kimi-k2.6': { inputPerMTok: 0.95, outputPerMTok: 4 },
+  'kimi-k3': { inputPerMTok: 3, outputPerMTok: 15 },
 };
 
 /**
