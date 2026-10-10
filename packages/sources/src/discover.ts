@@ -1,6 +1,7 @@
 import type { AppConfig, Logger, SourceConfig, SourceContext, TrendingEntry, TrendingSource } from '@provenance/core';
 
 import { DexScreenerSource } from './dexscreener';
+import { DexToolsSource } from './dextools';
 import { GeckoTerminalSource } from './geckoterminal';
 import { LaunchSource } from './launches';
 
@@ -42,6 +43,9 @@ export function createSources(app: AppConfig, logger: Logger): TrendingSource[] 
         break;
       case 'dexscreener':
         sources.push(new DexScreenerSource(config));
+        break;
+      case 'dextools':
+        sources.push(new DexToolsSource(config));
         break;
       case 'launches':
         // Two switches: the source row gates the scan, `launches.enabled` gates

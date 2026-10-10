@@ -17,7 +17,7 @@ about the thing the token points at that does not mention the token.
 The order of events decides it, and the code compares the dates, not the model.
 An anchored launch gets the full research straight away: lineage, prior
 cycles, and whether this token is the one the meme's audience will accept.
-Trending lists (DexScreener, GeckoTerminal, twice a day) are the
+Trending lists (DexTools, DexScreener, GeckoTerminal, twice a day) are the
 outcome, recorded against a verdict that came first. They are not the trigger.
 
 ## Why lineage matters to the verdict
@@ -71,12 +71,16 @@ up on a list. See [`docs/launch-lane.md`](docs/launch-lane.md).
 | Social yardstick (optional) | Elfa trending-CA feeds, `ELFA_API_KEY` | free tier; ~720 of 1,000 monthly credits ([docs/social.md](docs/social.md)) |
 
 No paid market-data API keys. DexScreener and GeckoTerminal publish free keyless
-endpoints, and between them they cover the trending lists.
+endpoints. DexTools has no free API and sits behind Cloudflare, so it is read
+through Exa search (`EXA_API_KEY`): results restricted to its `pair-explorer`
+pages, resolved to tokens through DexScreener (as a pair, or as a token when
+the link carries the mint). No browser is involved.
 
 ## Pipeline
 
 ```
-discover ─┬─ dexscreener   (free public API: boosts, profiles, pairs)
+discover ─┬─ dextools      (exa search for pair pages, resolved via dexscreener)
+          ├─ dexscreener   (free public API: boosts, profiles, pairs)
           ├─ geckoterminal (free public API: trending pools)
           └─ launches      (factory PairCreated/PoolCreated over public RPC)
                 │

@@ -51,7 +51,7 @@ secrets under **Settings → Secrets and variables → Actions**:
 | `DISCORD_WEBHOOK_URL` | no | channel webhook |
 | `ALERT_WEBHOOK_URL` | no | any JSON endpoint |
 | `ETHERSCAN_API_KEY` | no | contract verification lookups |
-| `EXA_API_KEY` | recommended | the search tool for every non-Anthropic model (anchor check and research) |
+| `EXA_API_KEY` | recommended | the search tool for every non-Anthropic model (anchor check and research), and how DexTools pair pages are found; without it the DexTools source is skipped |
 | `ELFA_API_KEY` | no | crypto-social sightings for the watchlist's social lead (`docs/social.md`); free tier is enough |
 | `RPC_ETHEREUM` / `RPC_SOLANA` | no | your own RPC endpoints, comma-separated and tried in order. A set list is tried first and the public defaults (Allnodes' publicnode.com, drpc, …) follow as fallbacks; set `RPC_PUBLIC_FALLBACK=false` to use only your list. A keyed URL (Alchemy, Helius) must be a secret so the logs mask it. Blank keeps the public defaults |
 

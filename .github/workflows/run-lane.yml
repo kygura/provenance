@@ -112,7 +112,8 @@ jobs:
           RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM || vars.RPC_ETHEREUM }}
           RPC_SOLANA: ${{ secrets.RPC_SOLANA || vars.RPC_SOLANA }}
           RPC_PUBLIC_FALLBACK: ${{ vars.RPC_PUBLIC_FALLBACK }}
-          # Exa: the search tool for Kimi and other non-Anthropic models
+          # Exa: the search tool for Kimi and other non-Anthropic models, and
+          # how DexTools pairs are found (no browser)
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
           # Social yardstick (optional; docs/social.md)
           ELFA_API_KEY: ${{ secrets.ELFA_API_KEY }}

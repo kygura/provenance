@@ -14,8 +14,8 @@ meme's audience would accept as canonical.
 
 Twice a day, in the cloud:
 
-1. **Discover** — read trending token lists from DexScreener and
-   GeckoTerminal. No paid API keys anywhere.
+1. **Discover** — read trending token lists from DexTools (through Exa
+   search), DexScreener and GeckoTerminal. No paid API keys anywhere.
 2. **Merge and triage** — normalize to one `TokenSnapshot` per token, rank by
    cross-source agreement, filter on liquidity / volume / pool age.
 3. **Analyse on-chain** — holder distribution, concentration, supply, mint and freeze
@@ -34,7 +34,8 @@ Twice a day, in the cloud:
 - **Runtime: Bun + TypeScript.** ESM only. `strict: true`,
   `noUncheckedIndexedAccess: true`. No `any` in exported signatures.
 - **No paid market-data API keys.** DexScreener and GeckoTerminal have free,
-  keyless public endpoints — use them.
+  keyless public endpoints — use them. DexTools has no free API, so its pair
+  pages are found through Exa search.
 - **The only paid credential is `ANTHROPIC_API_KEY`**, for the LLM step.
   Optional keys that work on a free tier are allowed when nothing depends on
   them: `ETHERSCAN_API_KEY`, and `ELFA_API_KEY` for the social yardstick

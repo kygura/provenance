@@ -246,7 +246,7 @@ export interface AppConfig {
   anthropicApiKey?: string;
   /** Optional: enables `contractVerified`. Every other EVM read is keyless. */
   etherscanApiKey?: string;
-  /** Exa search: the search tool for every non-Anthropic model. */
+  /** Exa search: finds DexTools' trending pairs, and is the search tool for every non-Anthropic model. */
   exaApiKey?: string;
   pipeline: PipelineConfig;
   launches: LaunchConfig;
@@ -357,6 +357,12 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
     pipeline: {
       chains,
       sources: [
+        {
+          id: 'dextools',
+          enabled: bool(env.SOURCE_DEXTOOLS, true),
+          limit: num(env.SOURCE_DEXTOOLS_LIMIT, 30),
+          rateLimitMs: num(env.SOURCE_DEXTOOLS_RATE_MS, 2500),
+        },
         {
           id: 'dexscreener',
           enabled: bool(env.SOURCE_DEXSCREENER, true),
