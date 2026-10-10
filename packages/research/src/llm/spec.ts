@@ -1,39 +1,11 @@
 /**
- * `provider:model` parsing. A bare id keeps working (`LLM_MODEL=claude-opus-5`
- * predates this module), with the provider inferred from well-known prefixes.
+ * Provider keys and the model specs a run will call. `parseModelSpec` lives in
+ * core, since config applies the Anthropic-first rule with it.
  */
 
-import { LLM_PROVIDERS, type AppConfig, type LlmProvider } from '@provenance/core';
+import { parseModelSpec, type AppConfig, type LlmProvider, type ModelSpec } from '@provenance/core';
 
-export interface ModelSpec {
-  provider: LlmProvider;
-  model: string;
-}
-
-const INFERRED: ReadonlyArray<[RegExp, LlmProvider]> = [
-  [/^claude-/, 'anthropic'],
-  [/^(gpt-|o\d|chatgpt-)/, 'openai'],
-  [/^(kimi-|moonshot-)/, 'moonshot'],
-  [/^qwen/, 'qwen'],
-  [/^deepseek-/, 'deepseek'],
-];
-
-export function parseModelSpec(spec: string): ModelSpec {
-  const trimmed = spec.trim();
-  const colon = trimmed.indexOf(':');
-  if (colon > 0) {
-    const prefix = trimmed.slice(0, colon).toLowerCase();
-    if ((LLM_PROVIDERS as readonly string[]).includes(prefix)) {
-      return { provider: prefix as LlmProvider, model: trimmed.slice(colon + 1).trim() };
-    }
-  }
-  for (const [pattern, provider] of INFERRED) {
-    if (pattern.test(trimmed)) return { provider, model: trimmed };
-  }
-  // An `org/model` id is OpenRouter's naming; nothing else in the list uses it.
-  if (trimmed.includes('/')) return { provider: 'openrouter', model: trimmed };
-  return { provider: 'anthropic', model: trimmed };
-}
+export { parseModelSpec, type ModelSpec };
 
 /**
  * The key for a provider. The top-level `anthropicApiKey` is still honoured,
