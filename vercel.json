@@ -1,6 +1,13 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
+  "git": {
+    "deploymentEnabled": {
+      "claude-code/*": false,
+      "ccr-*": false,
+      "routine/*": false
+    }
+  },
   "installCommand": "cd ../.. && bun install",
   "buildCommand": "cd ../.. && bun run --filter @provenance/dashboard build"
 }
