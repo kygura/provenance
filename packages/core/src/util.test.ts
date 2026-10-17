@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isFatalLlmError, retry } from './util';
+import { isFatalLlmError, redactUrl, retry } from './util';
 
 describe('retry', () => {
   test('minDelayMs holds the next attempt back for errors that ask for it', async () => {
@@ -29,5 +29,32 @@ describe('isFatalLlmError', () => {
     expect(isFatalLlmError('openrouter /chat/completions HTTP 429: rate limited')).toBe(false);
     expect(isFatalLlmError('HTTP 529: overloaded')).toBe(false);
     expect(isFatalLlmError('socket hang up')).toBe(false);
+  });
+});
+
+describe('redactUrl', () => {
+  test('masks a key in the path and keeps the origin', () => {
+    expect(redactUrl('https://eth-mainnet.g.alchemy.com/v2/AbCdEf0123456789AbCdEf0123456789')).toBe(
+      'https://eth-mainnet.g.alchemy.com/v2/***',
+    );
+  });
+
+  test('masks secret query values and userinfo', () => {
+    expect(redactUrl('https://mainnet.helius-rpc.com/?api-key=0123abcd-4567&cluster=main')).toBe(
+      'https://mainnet.helius-rpc.com/?api-key=***&cluster=main',
+    );
+    expect(redactUrl('https://user:hunter2@node.example/rpc')).toBe('https://***@node.example/rpc');
+  });
+
+  test('leaves keyless public endpoints and 0x addresses alone', () => {
+    expect(redactUrl('https://ethereum-rpc.publicnode.com')).toBe('https://ethereum-rpc.publicnode.com/');
+    expect(redactUrl('https://1rpc.io/eth')).toBe('https://1rpc.io/eth');
+    expect(redactUrl('https://x.example/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2')).toBe(
+      'https://x.example/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
+    );
+  });
+
+  test('masks something that is not a URL whole', () => {
+    expect(redactUrl('not a url with a secret')).toBe('***');
   });
 });

@@ -78,6 +78,13 @@ export const LAUNCH_CHUNK_BLOCKS = 2_000;
 export const LAUNCH_MAX_CHUNKS = 30;
 /** Discovery runs sources concurrently; the walk must not hold the run hostage. */
 export const LAUNCH_WALK_BUDGET_MS = 45_000;
+/**
+ * The walk starts this far behind the reported head. `eth_blockNumber` is
+ * answered by one node and the first `eth_getLogs` can land on a slower one,
+ * which refuses a range ending past its own head ("block range extends beyond
+ * current head block"). The skipped blocks fall inside the next run's lookback.
+ */
+export const LAUNCH_HEAD_LAG_SECONDS = 36;
 
 /** A decoded factory creation event. Addresses are lowercase. */
 export interface PoolCreation {
@@ -273,6 +280,8 @@ export interface WalkOptions {
   chunkBlocks?: number;
   maxChunks?: number;
   budgetMs?: number;
+  /** Seconds behind the reported head at which scanning starts. Default `LAUNCH_HEAD_LAG_SECONDS`. */
+  headLagSeconds?: number;
   signal?: AbortSignal;
   /** Injected clock for the wall-clock budget. */
   now?: () => number;
@@ -330,7 +339,8 @@ export async function walkFactoryLogs(call: RpcCaller, spec: LaunchChainSpec, op
     topics: [[...new Set(spec.factories.map((factory) => factory.topic0))]],
   };
 
-  let to = head;
+  const lagBlocks = Math.ceil(Math.max(0, options.headLagSeconds ?? LAUNCH_HEAD_LAG_SECONDS) / spec.blockSeconds);
+  let to = Math.max(windowFrom, head - lagBlocks);
   while (to >= windowFrom) {
     if (options.signal?.aborted) {
       result.errors.push(`aborted with blocks ${windowFrom}-${to} unscanned`);

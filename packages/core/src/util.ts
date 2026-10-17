@@ -12,6 +12,38 @@ export function runId(date = new Date()): string {
   return `run_${date.toISOString().replace(/[-:.]/g, '').slice(0, 15)}_${randomUUID().slice(0, 8)}`;
 }
 
+const SECRET_QUERY_KEY = /key|token|secret|auth|sig|pass/i;
+/** A path segment this long and unbroken is an API key, not a route name (`/v2/<key>`). */
+const KEY_LIKE_SEGMENT = /^(?!0x)[A-Za-z0-9_-]{20,}$/;
+
+/**
+ * Masks the parts of an RPC endpoint URL that carry credentials: userinfo,
+ * key-like path segments (Alchemy `/v2/<key>`) and secret-looking query values
+ * (Helius `?api-key=`). Keeps the origin so a log line still says which node.
+ * Meant for endpoints; request URLs carrying token addresses are left alone by
+ * their callers. Anything that does not parse is masked whole.
+ */
+export function redactUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return '***';
+  }
+  if (url.username || url.password) {
+    url.username = '***';
+    url.password = '';
+  }
+  url.pathname = url.pathname
+    .split('/')
+    .map((segment) => (KEY_LIKE_SEGMENT.test(segment) ? '***' : segment))
+    .join('/');
+  for (const [name, value] of [...url.searchParams]) {
+    if (value && SECRET_QUERY_KEY.test(name)) url.searchParams.set(name, '***');
+  }
+  return url.toString().replace(/%2A%2A%2A/g, '***');
+}
+
 export function hashKey(input: string): string {
   return createHash('sha256').update(input).digest('hex').slice(0, 32);
 }
