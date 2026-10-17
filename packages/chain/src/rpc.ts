@@ -14,7 +14,7 @@
  *     instead of hanging the pipeline.
  */
 
-import { RateLimiter, retry, type Logger } from '@provenance/core';
+import { RateLimiter, redactUrl, retry, type Logger } from '@provenance/core';
 
 export interface JsonRpcCall {
   method: string;
@@ -76,7 +76,7 @@ export class RpcTimeoutError extends RpcError {
 export class BatchUnsupportedError extends RpcError {
   readonly batchUnsupported = true;
   constructor(endpoint: string) {
-    super(`endpoint does not support JSON-RPC batching: ${endpoint}`, { endpoint });
+    super(`endpoint does not support JSON-RPC batching: ${redactUrl(endpoint)}`, { endpoint });
     this.name = 'BatchUnsupportedError';
   }
 }
@@ -156,7 +156,7 @@ export class HttpRpcTransport implements RpcTransport {
 
     if (!response.ok) {
       const retryAfter = Number(response.headers.get('retry-after'));
-      throw new RpcError(`HTTP ${response.status} from ${request.endpoint}`, {
+      throw new RpcError(`HTTP ${response.status} from ${redactUrl(request.endpoint)}`, {
         endpoint: request.endpoint,
         code: response.status,
         ...(Number.isFinite(retryAfter) && retryAfter > 0 ? { retryAfterMs: Math.min(retryAfter * 1000, 10_000) } : {}),
@@ -167,7 +167,7 @@ export class HttpRpcTransport implements RpcTransport {
 
     if (payload.length === 1) {
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new RpcError(`malformed JSON-RPC response from ${request.endpoint}`, { endpoint: request.endpoint });
+        throw new RpcError(`malformed JSON-RPC response from ${redactUrl(request.endpoint)}`, { endpoint: request.endpoint });
       }
       return [parsed as JsonRpcResult];
     }
@@ -362,7 +362,7 @@ export class RpcClient {
             (!isRefusal(error) || (error as RpcError).detail.code === 429),
           onRetry: (error, attempt) => {
             this.options.logger.debug('rpc retry', {
-              endpoint,
+              endpoint: redactUrl(endpoint),
               method: calls[0]?.method,
               attempt,
               error: describe(error),
@@ -372,12 +372,12 @@ export class RpcClient {
         this.preferred = index;
         return results;
       } catch (error) {
-        failures.push(`${endpoint}: ${describe(error)}`);
+        failures.push(`${redactUrl(endpoint)}: ${describe(error)}`);
         if (isRefusal(error) && this.endpoints.length > 1) {
           COOLDOWNS.set(cooldownKey(endpoint, method), Date.now() + COOLDOWN_MS);
         }
         this.options.logger.warn('rpc endpoint failed', {
-          endpoint,
+          endpoint: redactUrl(endpoint),
           method: calls[0]?.method,
           error: describe(error),
         });
@@ -435,7 +435,7 @@ export class RpcClient {
     } catch (error) {
       if (calls.length > 1 && isBatchUnsupported(error)) {
         this.noBatch.add(endpoint);
-        this.options.logger.debug('rpc batching disabled for endpoint', { endpoint });
+        this.options.logger.debug('rpc batching disabled for endpoint', { endpoint: redactUrl(endpoint) });
         return this.sendTo(endpoint, calls, timeoutMs);
       }
       throw error;

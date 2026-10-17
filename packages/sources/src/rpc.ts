@@ -1,4 +1,4 @@
-import type { Logger } from '@provenance/core';
+import { type Logger, redactUrl } from '@provenance/core';
 
 import { HttpError, JsonClient } from './http';
 import { isRecord } from './normalize';
@@ -54,6 +54,7 @@ export class JsonRpcClient {
         logger: options.logger,
         timeoutMs: options.timeoutMs ?? 20_000,
         attempts: options.attempts ?? 2,
+        redact: true,
       }),
     }));
   }
@@ -87,7 +88,7 @@ export class JsonRpcClient {
           this.refused.add(`${method} ${endpoint}`);
         }
         this.options.logger.debug('rpc endpoint failed, trying next', {
-          endpoint,
+          endpoint: redactUrl(endpoint),
           method,
           error: error instanceof Error ? error.message : String(error),
         });

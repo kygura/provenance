@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { type AppConfig, type SourceConfig, loadConfig, silentLogger } from '@provenance/core';
+import { type AppConfig, type Logger, type SourceConfig, loadConfig, silentLogger } from '@provenance/core';
 
 import { readEnrichment } from './enrichment';
 import { fixtureDir } from './fixtures';
@@ -211,7 +211,7 @@ describe('walkFactoryLogs', () => {
 
   test('walks back from head in contiguous chunks covering the lookback', async () => {
     const { call, calls } = scripted(1_000_000);
-    const walk = await walkFactoryLogs(call, ETH, { lookbackHours: 24, chunkBlocks: 2000 });
+    const walk = await walkFactoryLogs(call, ETH, { lookbackHours: 24, chunkBlocks: 2000, headLagSeconds: 0 });
 
     expect(lookbackBlocks(24, 12)).toBe(7200);
     expect(walk.errors).toEqual([]);
@@ -236,9 +236,19 @@ describe('walkFactoryLogs', () => {
     expect(filter.topics).toEqual([[PAIR_CREATED_TOPIC, POOL_CREATED_TOPIC]]);
   });
 
+  test('starts a few blocks behind the head so a lagging node is not asked past its own', async () => {
+    const { call, calls } = scripted(1_000_000);
+    const walk = await walkFactoryLogs(call, ETH, { lookbackHours: 24, chunkBlocks: 2000 });
+    const first = calls.find((entry) => entry.method === 'eth_getLogs')?.params[0] as { toBlock: string };
+    // 36 s at 12 s per block
+    expect(hexToNumber(first.toBlock)).toBe(999_997);
+    expect(walk.head).toBe(1_000_000);
+    expect(walk.errors).toEqual([]);
+  });
+
   test('a refused range stops the walk, keeps the newer chunks and is recorded', async () => {
     const { call } = scripted(1_000_000, 995_000);
-    const walk = await walkFactoryLogs(call, ETH, { lookbackHours: 24, chunkBlocks: 2000 });
+    const walk = await walkFactoryLogs(call, ETH, { lookbackHours: 24, chunkBlocks: 2000, headLagSeconds: 0 });
     expect(walk.chunks).toBe(2);
     expect(walk.logs).toHaveLength(2);
     expect(walk.scannedFrom).toBe(996_001);
@@ -366,6 +376,7 @@ describe('LaunchSource over the network path', () => {
           return Response.json(hydrationFixture);
         }
         const body = (await request.json()) as { id: number; method: string; params: unknown[] };
+        if (url.pathname.startsWith('/v2/')) return new Response('bad range', { status: 400 });
         if (url.pathname === '/refuses') {
           return Response.json({ jsonrpc: '2.0', id: body.id, error: { code: -32005, message: 'limit exceeded' } });
         }
@@ -417,6 +428,21 @@ describe('LaunchSource over the network path', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]?.source).toBe('launches:ethereum');
     expect(errors[0]?.error).toContain('limit exceeded');
+  });
+
+  test('a keyed endpoint never reaches an error message or a log line', async () => {
+    const secret = 'AbCdEf0123456789AbCdEf0123456789';
+    const lines: string[] = [];
+    const record = (message: string, meta?: Record<string, unknown>) => lines.push(`${message} ${JSON.stringify(meta ?? {})}`);
+    const logger: Logger = { debug: record, info: record, warn: record, error: record, child: () => logger };
+    const base = `http://127.0.0.1:${server.port}`;
+    const client = new JsonRpcClient({ endpoints: [`${base}/v2/${secret}`], rateLimitMs: 0, logger });
+
+    const error = (await client.call('eth_getLogs', []).catch((caught: unknown) => caught)) as Error;
+    expect(error.message).toContain('-> 400');
+    expect(error.message).not.toContain(secret);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.join('\n')).not.toContain(secret);
   });
 
   test('JsonRpcClient throws the last error once every endpoint fails', async () => {

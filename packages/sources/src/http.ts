@@ -1,4 +1,4 @@
-import { type Logger, RateLimiter, retry } from '@provenance/core';
+import { type Logger, RateLimiter, redactUrl, retry } from '@provenance/core';
 
 export class HttpError extends Error {
   constructor(
@@ -27,6 +27,8 @@ export interface JsonClientOptions {
   headers?: Record<string, string>;
   timeoutMs?: number;
   attempts?: number;
+  /** The URL carries a credential (a keyed RPC endpoint): keep it out of errors and logs. */
+  redact?: boolean;
 }
 
 /**
@@ -67,6 +69,7 @@ export class JsonClient {
     as: 'json' | 'text' = 'json',
   ): Promise<T> {
     const url = path.startsWith('http') ? path : `${this.options.baseUrl}${path}`;
+    const shown = this.options.redact ? redactUrl(url) : url;
     const attempts = this.options.attempts ?? 3;
     const timeoutMs = this.options.timeoutMs ?? 20_000;
     const headers: Record<string, string> = {
@@ -90,7 +93,7 @@ export class JsonClient {
               signal: controller.signal,
             });
             if (!response.ok) {
-              throw new HttpError(`${method} ${url} -> ${response.status}`, response.status, url);
+              throw new HttpError(`${method} ${shown} -> ${response.status}`, response.status, shown);
             }
             return (as === 'json' ? await response.json() : await response.text()) as T;
           } finally {
@@ -104,7 +107,7 @@ export class JsonClient {
         retryable: isRetryable,
         onRetry: (error, attempt, delayMs) =>
           this.options.logger.debug('http retry', {
-            url,
+            url: shown,
             attempt,
             delayMs: Math.round(delayMs),
             error: error instanceof Error ? error.message : String(error),
