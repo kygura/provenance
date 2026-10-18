@@ -39,8 +39,17 @@ and adds a small, gated **setups ledger** for tokens.
 
 1. **Health (A).** Pick `CUR`/`PREV` as CLAUDE.md §2 A says. No full run in
    24 h → brief only on watchlist and alerts, and say so in the first line.
+   The same applies when a full run is still in flight: a `running` row newer
+   than `CUR` that has written snapshots, or has run longer than a
+   launch-lane job can (20 min). The header then reads "today's full run
+   hasn't landed (latest: <started_at>, running)", the model is not called
+   on the stale `CUR`, and the ledger reads DexScreener. A row still
+   `running` past the full-run job timeout (45 min) is a killed job and does
+   not hold the brief back.
 2. **Collect B–G**, then the deterministic notable set (CLAUDE.md §3.1,
-   capped at 8, severity first).
+   capped at 8, severity first). Query C runs once for the whole run as a
+   windowed query (three newest provenance rows per token), because
+   selection needs it to see a changed verdict.
 3. **Meme regime** (`regime.ts`, pure, unit-tested) from the DB:
    - S/A-tier token count and mean score over the last 7 days vs the 7
      days before;
@@ -60,8 +69,12 @@ and adds a small, gated **setups ledger** for tokens.
    - `watching` → `invalidated` when mcap is below the invalidation level
      or a kill condition holds;
    - `triggered` → `invalidated` (−1R) on invalidation or kill condition;
-   - `triggered` → `target_hit` at the first target (record R);
-   - past `expires_at` → `expired`.
+   - `triggered` → `target_hit` at the first target (record R), checked
+     before expiry so a hit seen on the first brief after `expires_at`
+     still counts (unless a kill condition holds);
+   - past `expires_at` → `expired`. A `triggered` setup that expires is
+     marked to market: R at the observed market cap, floored at −1, or no
+     R when no market cap could be read. A `watching` one gets no R.
    Kill conditions, from the code's own thresholds: liquidity < 50% of
    liquidity at creation, top-10 ≥ 80%, single holder ≥ 25%, mint or
    freeze authority active, a `rug-risk` or `canonical-impostor` alert on
@@ -73,7 +86,11 @@ and adds a small, gated **setups ledger** for tokens.
    notable tokens with components/penalties/chain facts, watchlist
    changes, track record, clusters, regime, open and recently closed
    setups. All `report_json`/alert/evidence text goes in as untrusted data.
-   Output (zod-validated, one retry on invalid):
+   Output (validated by a hand-written checker in `llm.ts`, in the style of
+   `research/schema.ts`, since zod is not a dependency; one retry on an
+   invalid object, then the fallback model, then the deterministic brief).
+   Reads for tokens outside the notable set and cancels of unknown setups
+   are dropped and logged rather than failing the output:
    - `headline`, `tokens[]` (one entry per notable token: change, why,
      evidence, confidence word, breaks_if), `watchlist[]`, `track_record`,
      `clusters[]`, `pipeline[]`;
@@ -94,14 +111,20 @@ and adds a small, gated **setups ledger** for tokens.
    - caps: at most 4 open, at most 2 new per run, one per token.
 7. **Write** accepted setups and status changes to `setups`, send the
    brief through `createSinks` + `dispatchAlerts` as one alert with
-   `rule: 'daily-brief'` (split under Telegram's 4096 limit; plain text),
+   `rule: 'daily-brief'` (split so each part stays under 4096 after Telegram MarkdownV2 or Discord escaping, whichever is longer; plain text),
    write the brief to the GitHub step summary.
 
 Format of the brief: CLAUDE.md §4, plus a `Setups` section (new, status
 changes, open count, 90-day hit rate and average R) and a one-line
 `Regime` header.
 
-## Table `setups` (migration)
+## Table `setups` (migration 5)
+
+`brief.yml` and `run-lane.yml` both run `cli.ts migrate` and sit in
+different concurrency groups, so both may apply a pending version at once.
+The DDL is `IF NOT EXISTS` and the bookkeeping row is `INSERT OR IGNORE`, so
+the second applier succeeds too. `cli.ts brief` itself does not migrate.
+
 
 ```
 id TEXT PRIMARY KEY            -- `${symbol}-${YYYYMMDD}-${n}`

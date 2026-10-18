@@ -24,7 +24,9 @@ export interface SetupChange {
 export interface BriefView {
   date: string;
   cur?: FullRun;
-  /** False when no full run landed in the last 24 h. */
+  /** The newest full run: an in-flight one when there is one, else CUR. */
+  latest?: { startedAt: string; status: string };
+  /** False when no full run landed in the last 24 h, or one is still running. */
   fresh: boolean;
   tokenCount: number;
   alerts: AlertRow[];
@@ -224,7 +226,7 @@ export function renderBrief(view: BriefView, nowMs: number): string {
   const out: string[] = [];
   const header = view.fresh && view.cur
     ? `provenance · ${view.date} · full run ${view.cur.startedAt} (${view.cur.status}) · ${view.tokenCount} tokens, ${view.alerts.length} alerts`
-    : `provenance · ${view.date} · today's full run hasn't landed (latest: ${view.cur ? `${view.cur.startedAt}, ${view.cur.status}` : 'none'}) · watchlist and alerts only · ${view.alerts.length} alerts`;
+    : `provenance · ${view.date} · today's full run hasn't landed (latest: ${view.latest ? `${view.latest.startedAt}, ${view.latest.status}` : 'none'}) · watchlist and alerts only · ${view.alerts.length} alerts`;
   out.push(header);
   const btc = view.btc.state
     ? `BTC ${view.btc.state}${view.btc.since ? ` since ${view.btc.since}` : ''}${view.btc.stale ? ' (stale)' : ''}`
@@ -255,15 +257,28 @@ export function renderBrief(view: BriefView, nowMs: number): string {
   return out.join('\n');
 }
 
-/** Budget per message, measured after MarkdownV2 escaping, leaving room for the title line. */
+/** Discord renders `markdown`; neutralise the characters it would read as formatting. */
+export function discordSafe(text: string): string {
+  return text.replace(/([\\*_~`|>])/g, '\\$1');
+}
+
+/** Length of a part as the longer of what Telegram (MarkdownV2) and Discord (embed) will receive. */
+export function deliveredLength(text: string): number {
+  return Math.max(escapeMarkdownV2(text).length, discordSafe(text).length);
+}
+
+/**
+ * Budget per message, against `deliveredLength`, leaving room for the title
+ * line under Telegram's 4096 and Discord's 4096-character embed description.
+ */
 export const MESSAGE_BUDGET = 3800;
 
 /**
  * Splits on line boundaries so every part stays under `budget` once escaped
- * for Telegram (escaping can double a line). A single line too long on its own
+ * for either channel (escaping can double a line). A single line too long on its own
  * is cut hard.
  */
-export function splitBrief(text: string, budget = MESSAGE_BUDGET, measure: (s: string) => number = (s) => escapeMarkdownV2(s).length): string[] {
+export function splitBrief(text: string, budget = MESSAGE_BUDGET, measure: (s: string) => number = deliveredLength): string[] {
   const parts: string[] = [];
   let current = '';
   const push = () => {

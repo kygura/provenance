@@ -6,7 +6,7 @@ import { EXIT_OK, main } from '../cli';
 import { makeConfig, makeHarness } from '../test-fakes';
 import { briefAlerts, runBrief, setupId } from './index';
 import { DEFAULT_SETUP_KILL } from './ledger';
-import { MESSAGE_BUDGET, splitBrief } from './render';
+import { MESSAGE_BUDGET, discordSafe, splitBrief } from './render';
 import { hoursAgo, seedRun, seedToken, tempDb, type TempDb } from './test-db';
 
 const X = 'solana:XxxxTokenAddress1111111111111111';
@@ -290,6 +290,51 @@ describe('runBrief end to end', () => {
     expect(result.text).not.toContain('Tokens');
   });
 
+  test('a full run still in flight: CUR is stale, so no model call and the header names the running run', async () => {
+    await seed();
+    // Started after CUR, already writing snapshots, not yet finished.
+    await seedRun(db.store, 'run_inflight', hoursAgo(0.3), 'running');
+    await seedToken(db.store, 'run_inflight', { tokenId: Y, at: hoursAgo(0.3) });
+    const { client, requests } = stubLlm([VALID]);
+    const result = await runBrief({
+      app: makeConfig(),
+      logger: silentLogger,
+      db: db.store.raw,
+      setups: db.store,
+      models: ['moonshot:kimi-k3'],
+      fetchImpl: stubFetch,
+      createClient: () => client,
+    });
+    expect(requests).toHaveLength(0);
+    expect(result.text.split('\n')[0]).toContain(`today's full run hasn't landed (latest: ${hoursAgo(0.3).slice(0, 13)}`);
+    expect(result.text.split('\n')[0]).toContain(', running)');
+    expect(result.text).not.toContain('Tokens');
+    expect(result.newSetups).toEqual([]);
+    // The ledger still moves on fresh observations: CUR's snapshot is stale, so
+    // every setup reads DexScreener (Z answers, X is a 404 gap and holds).
+    expect(result.changes.map((c) => c.after.id)).toEqual(['ZZZ-20261017-1']);
+    expect(result.text).toContain('XXX-20261017-1: dexscreener: HTTP 404');
+  });
+
+  test('a launch-lane run still running, or a killed full run left `running`, does not hold the brief back', async () => {
+    await seed();
+    await seedRun(db.store, 'run_lane_live', hoursAgo(0.1), 'running'); // young, no snapshots
+    await seedRun(db.store, 'run_dead', hoursAgo(1.5), 'running'); // past the 45-min job timeout
+    await seedToken(db.store, 'run_dead', { tokenId: Y, at: hoursAgo(1.5) });
+    const { client, requests } = stubLlm([VALID]);
+    const result = await runBrief({
+      app: makeConfig(),
+      logger: silentLogger,
+      db: db.store.raw,
+      setups: db.store,
+      models: ['moonshot:kimi-k3'],
+      fetchImpl: stubFetch,
+      createClient: () => client,
+    });
+    expect(requests).toHaveLength(1);
+    expect(result.text.split('\n')[0]).toContain('· full run ');
+  });
+
   test('a model that keeps failing falls back, then degrades to the deterministic brief', async () => {
     await seed();
     const specs: string[] = [];
@@ -330,6 +375,27 @@ describe('delivery shape', () => {
       expect(buildTelegramMessage(alert)).not.toContain('\n…');
       expect(buildTelegramMessage(alert).length).toBeLessThanOrEqual(4096);
     }
+  });
+
+  test('a bullet-dense brief stays under both channels\' limits once each escapes it', () => {
+    // Every character here is special to Discord, Telegram or both.
+    const line = '- *_PEPE_* ~x~ `y` |z| >q \\ (1.5%) [a-b] #c +d =e {f} !g';
+    const text = Array.from({ length: 400 }, (_, i) => `${line} ${i}`).join('\n');
+    const parts = splitBrief(text);
+    expect(parts.join('\n')).toBe(text);
+    for (const alert of briefAlerts(parts, '2026-10-18', 'run_cur', Date.now())) {
+      expect(alert.markdown).toBe(discordSafe(alert.body));
+      expect(alert.markdown.length).toBeLessThanOrEqual(MESSAGE_BUDGET);
+      expect(escapeMarkdownV2(alert.body).length).toBeLessThanOrEqual(MESSAGE_BUDGET);
+      expect(buildTelegramMessage(alert)).not.toContain('\n…');
+    }
+  });
+
+  test('the split budget follows whichever channel escapes more', () => {
+    // A measure where Discord is the longer one must still cap the parts.
+    const text = Array.from({ length: 50 }, () => '*'.repeat(100)).join('\n');
+    const parts = splitBrief(text, 1000, (s) => discordSafe(s).length * 2);
+    expect(parts.every((part) => discordSafe(part).length * 2 <= 1000)).toBe(true);
   });
 
   test('an over-long single line is cut, not dropped', () => {

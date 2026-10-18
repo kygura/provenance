@@ -345,7 +345,11 @@ export async function migrate(client: Client, logger: Logger = silentLogger): Pr
       [
         ...migration.statements.map((sql) => ({ sql, args: [] })),
         {
-          sql: 'INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)',
+          // OR IGNORE: two processes (brief.yml and run-lane.yml run in different
+          // concurrency groups) can both see a version as pending and apply it.
+          // The DDL is IF NOT EXISTS, so the second batch is a no-op except for
+          // this row, which must not fail it on the primary key.
+          sql: 'INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)',
           args: [migration.version, migration.name, new Date().toISOString()],
         },
       ],

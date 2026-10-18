@@ -33,11 +33,6 @@ export interface SetupObservation {
   severeAlerts: { rule: string; createdAt: string }[];
 }
 
-export interface LedgerChange {
-  before: Setup['status'];
-  after: Setup;
-}
-
 export function entryMid(setup: Pick<Setup, 'entryMcapLow' | 'entryMcapHigh'>): number {
   return (setup.entryMcapLow + setup.entryMcapHigh) / 2;
 }
@@ -93,9 +88,10 @@ function fmtMcap(value: number): string {
  * (same object) when nothing moved, so the caller can tell by identity.
  *
  * Order matters and is deliberate:
- *  1. expiry first: an observation after `expiresAt` describes a dead plan;
- *  2. kill conditions next: they hold regardless of where the price is;
- *  3. then the levels.
+ *  1. a triggered setup at its first target (and no kill) is a hit, even past expiry;
+ *  2. expiry next: otherwise an observation after `expiresAt` describes a dead plan;
+ *  3. kill conditions: they hold regardless of where the price is;
+ *  4. then the levels.
  */
 export function updateSetup(setup: Setup, obs: SetupObservation, nowIso: string): Setup {
   if (setup.status !== 'watching' && setup.status !== 'triggered') return setup;
@@ -106,6 +102,14 @@ export function updateSetup(setup: Setup, obs: SetupObservation, nowIso: string)
     return next;
   };
   const mcap = obs.mcapUsd;
+  const killed = killReason(setup, obs);
+  const target = setup.targets[0];
+
+  // A triggered plan seen at its target is a hit even when this observation
+  // lands after expiry: briefs are ~12 h apart, so expiry can fall between them.
+  if (setup.status === 'triggered' && !killed && mcap !== undefined && target !== undefined && mcap >= target) {
+    return close('target_hit', `mcap ${fmtMcap(mcap)} reached first target ${fmtMcap(target)}`, rMultiple(setup, target));
+  }
 
   if (nowIso > setup.expiresAt) {
     // A triggered plan that ran out of time is marked to market when we can see it.
@@ -113,7 +117,6 @@ export function updateSetup(setup: Setup, obs: SetupObservation, nowIso: string)
     return close('expired', `expired ${setup.expiresAt}${mcap !== undefined ? ` at mcap ${fmtMcap(mcap)}` : ''}`, r === undefined ? undefined : Math.max(-1, r));
   }
 
-  const killed = killReason(setup, obs);
   if (killed) return close('invalidated', `kill: ${killed}`, setup.status === 'triggered' ? -1 : undefined);
 
   if (mcap === undefined) return setup;
@@ -131,10 +134,6 @@ export function updateSetup(setup: Setup, obs: SetupObservation, nowIso: string)
   // triggered
   if (mcap <= setup.invalidationMcap) {
     return close('invalidated', `mcap ${fmtMcap(mcap)} at or below invalidation ${fmtMcap(setup.invalidationMcap)}`, -1);
-  }
-  const target = setup.targets[0];
-  if (target !== undefined && mcap >= target) {
-    return close('target_hit', `mcap ${fmtMcap(mcap)} reached first target ${fmtMcap(target)}`, rMultiple(setup, target));
   }
   return setup;
 }
@@ -178,7 +177,6 @@ export const DEXSCREENER_TOKENS_URL = 'https://api.dexscreener.com/latest/dex/to
 export interface MarketRead {
   mcapUsd?: number;
   liquidityUsd?: number;
-  pairUrl?: string;
   /** Set when the read failed. */
   gap?: string;
 }
@@ -197,7 +195,6 @@ export function pickDexScreenerPair(payload: unknown, address: string, chain?: s
   return {
     mcapUsd: best.metrics.marketCapUsd ?? best.metrics.fdvUsd,
     liquidityUsd: best.metrics.liquidityUsd,
-    pairUrl: best.url ?? best.pair.url,
   };
 }
 

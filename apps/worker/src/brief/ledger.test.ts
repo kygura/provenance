@@ -99,6 +99,17 @@ describe('updateSetup transitions', () => {
     expect(triggered.rResult).toBe(1);
   });
 
+  test('a triggered setup at its target after expiry is a hit, not an expiry', () => {
+    const late = '2026-10-23T07:00:00.000Z';
+    const next = updateSetup(setup({ status: 'triggered' }), obs({ mcapUsd: 1_800_000 }), late);
+    expect(next.status).toBe('target_hit');
+    expect(next.rResult).toBe(2.5);
+    // A watching setup that skipped the zone does not get the same treatment.
+    expect(updateSetup(setup(), obs({ mcapUsd: 1_800_000 }), late).status).toBe('expired');
+    // Nor does a triggered one whose kill condition holds.
+    expect(updateSetup(setup({ status: 'triggered' }), obs({ mcapUsd: 1_800_000, mintActive: true }), NOW).status).toBe('invalidated');
+  });
+
   test('closed setups never move', () => {
     for (const status of ['invalidated', 'target_hit', 'expired', 'cancelled'] as const) {
       const s = setup({ status });
@@ -174,7 +185,6 @@ describe('DexScreener market read', () => {
     expect(pickDexScreenerPair(payload, 'Pepe1111111111111111111111111111', 'solana')).toEqual({
       mcapUsd: 1_050_000,
       liquidityUsd: 250_000,
-      pairUrl: 'https://dexscreener.com/solana/big',
     });
     expect(pickDexScreenerPair(payload, 'Pepe1111111111111111111111111111', 'base').gap).toContain('no pair');
   });

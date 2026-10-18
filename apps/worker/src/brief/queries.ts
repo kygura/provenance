@@ -7,6 +7,8 @@
  * Read-only. Nothing in this file writes.
  */
 
+import { SEVERE_ALERT_RULES } from './ledger';
+
 /** The slice of `@libsql/client`'s Client the brief needs. `LibsqlStore.raw` satisfies it. */
 export interface SqlExecutor {
   execute(stmt: { sql: string; args: (string | number | null)[] }): Promise<{ rows: ArrayLike<unknown> }>;
@@ -314,7 +316,7 @@ export async function queryDossiers(db: SqlExecutor, curRunId: string, prevRunId
 }
 
 // ---------------------------------------------------------------------------
-// C. previous verdicts for one token
+// C. previous verdicts, for every token in a run
 // ---------------------------------------------------------------------------
 
 export interface VerdictRow {
@@ -326,19 +328,37 @@ export interface VerdictRow {
   confidence?: number;
 }
 
-export const SQL_C = `SELECT token_id, run_id, created_at, anchor_verdict, recycle_verdict, confidence
-FROM provenance WHERE token_id = ?
-ORDER BY created_at DESC LIMIT 3`;
+/**
+ * Query C for every token of a run in one round trip: the three newest
+ * provenance rows per token (CLAUDE.md's `ORDER BY created_at DESC LIMIT 3`),
+ * windowed instead of one query per token. Notable selection needs it to see
+ * a changed verdict, so it has to cover the whole run, before selection.
+ */
+export const SQL_C_WINDOWED = `SELECT token_id, run_id, created_at, anchor_verdict, recycle_verdict, confidence FROM (
+  SELECT p.token_id, p.run_id, p.created_at, p.anchor_verdict, p.recycle_verdict, p.confidence,
+         ROW_NUMBER() OVER (PARTITION BY p.token_id ORDER BY p.created_at DESC) AS rn
+  FROM provenance p
+  WHERE p.token_id IN (SELECT token_id FROM snapshots WHERE run_id = ?)
+) WHERE rn <= 3
+ORDER BY token_id, created_at DESC`;
 
-export async function queryVerdicts(db: SqlExecutor, tokenId: string): Promise<VerdictRow[]> {
-  return (await select(db, SQL_C, [tokenId])).map((row) => ({
-    tokenId: toStr(row.token_id) ?? '',
-    runId: toStr(row.run_id) ?? '',
-    createdAt: toStr(row.created_at) ?? '',
-    anchorVerdict: toStr(row.anchor_verdict),
-    recycleVerdict: toStr(row.recycle_verdict),
-    confidence: toNum(row.confidence),
-  }));
+/** Newest first per token; tokens with no provenance are absent. */
+export async function queryVerdictHistory(db: SqlExecutor, runId: string): Promise<Map<string, VerdictRow[]>> {
+  const out = new Map<string, VerdictRow[]>();
+  for (const row of await select(db, SQL_C_WINDOWED, [runId])) {
+    const verdict: VerdictRow = {
+      tokenId: toStr(row.token_id) ?? '',
+      runId: toStr(row.run_id) ?? '',
+      createdAt: toStr(row.created_at) ?? '',
+      anchorVerdict: toStr(row.anchor_verdict),
+      recycleVerdict: toStr(row.recycle_verdict),
+      confidence: toNum(row.confidence),
+    };
+    const list = out.get(verdict.tokenId) ?? [];
+    list.push(verdict);
+    out.set(verdict.tokenId, list);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -383,9 +403,9 @@ export async function querySevereAlerts(db: SqlExecutor, tokenIds: readonly stri
     db,
     `SELECT a.created_at, a.run_id, a.token_id, a.rule, a.severity, a.title, a.body
      FROM alerts a
-     WHERE a.rule IN ('rug-risk','canonical-impostor') AND a.token_id IN (${ids.map(() => '?').join(', ')})
+     WHERE a.rule IN (${SEVERE_ALERT_RULES.map(() => '?').join(', ')}) AND a.token_id IN (${ids.map(() => '?').join(', ')})
      ORDER BY a.created_at DESC`,
-    ids,
+    [...SEVERE_ALERT_RULES, ...ids],
   );
   return rows.map((row) => ({
     createdAt: toStr(row.created_at) ?? '',

@@ -7,8 +7,11 @@ import {
   queryFullRuns,
   queryRegimeCounts,
   queryRuns24h,
+  queryActiveWatch,
+  queryLatestFacts,
+  querySevereAlerts,
   queryTrackRecord,
-  queryVerdicts,
+  queryVerdictHistory,
   queryWatchChanges,
 } from './queries';
 import { hoursAgo, seedRun, seedToken, tempDb, type TempDb } from './test-db';
@@ -112,8 +115,10 @@ describe('queries C–G', () => {
     await seedTwoFullRunsAndLaunchLane();
     const { store } = db;
 
-    const history = await queryVerdicts(store.raw, X);
-    expect(history.map((row) => row.anchorVerdict)).toEqual(['anchored', 'unclear']);
+    // One windowed query for the whole run; Y has no provenance and is absent.
+    const histories = await queryVerdictHistory(store.raw, 'run_cur');
+    expect(histories.get(X)?.map((row) => row.anchorVerdict)).toEqual(['anchored', 'unclear']);
+    expect(histories.has(Y)).toBe(false);
 
     await store.saveAlert({ ...alert('run_cur', X, 'rug-risk'), createdAt: hoursAgo(1) }, []);
     await store.saveAlert({ ...alert('run_prev', X, 'high-score'), id: 'old', createdAt: hoursAgo(30) }, []);
@@ -140,6 +145,59 @@ describe('queries C–G', () => {
     expect(counts.saTokens7d).toBe(2); // X (A) and Y (S); the B rows do not count
     expect(counts.alerts7d).toBe(2); // the 30 h-old alert is outside D's 24 h but inside 7 d
     expect(counts.anchored30d.expressed).toBe(1);
+  });
+});
+
+describe('per-token lookups', () => {
+  test('queryVerdictHistory keeps the three newest rows per token', async () => {
+    await seedTwoFullRunsAndLaunchLane();
+    for (const [i, verdict] of (['forced', 'unclear', 'anchored'] as const).entries()) {
+      await seedRun(db.store, `run_old_${i}`, hoursAgo(100 - i));
+      await seedToken(db.store, `run_old_${i}`, {
+        tokenId: X,
+        at: hoursAgo(100 - i),
+        report: { anchor: { verdict, type: 'none', subject: '', summary: '', confidence: 'low' } },
+      });
+    }
+    const history = (await queryVerdictHistory(db.store.raw, 'run_cur')).get(X) ?? [];
+    expect(history).toHaveLength(3);
+    expect(history.map((row) => row.runId)).toEqual(['run_cur', 'run_prev', 'run_old_2']);
+  });
+
+  test('queryLatestFacts reads the newest score, chain analysis and verdict for a token outside CUR', async () => {
+    await seedTwoFullRunsAndLaunchLane();
+    const facts = await queryLatestFacts(db.store.raw, X);
+    expect(facts).toMatchObject({
+      tokenId: X,
+      symbol: 'XXX',
+      tier: 'A',
+      score: 76,
+      anchorVerdict: 'anchored',
+      top10Pct: 31.5,
+      largestHolderPct: 6.2,
+      mintActive: false,
+    });
+    expect(facts.flags[0]?.code).toBe('lp-unlocked');
+    const unknown = await queryLatestFacts(db.store.raw, 'solana:nothing');
+    expect(unknown).toEqual({ tokenId: 'solana:nothing', flags: [] } as typeof unknown);
+  });
+
+  test('querySevereAlerts returns only rug-risk and impostor alerts, any age, for the given tokens', async () => {
+    await seedTwoFullRunsAndLaunchLane();
+    await db.store.saveAlert({ ...alert('run_prev', X, 'rug-risk'), createdAt: hoursAgo(200) }, []);
+    await db.store.saveAlert({ ...alert('run_cur', X, 'high-score'), createdAt: hoursAgo(1) }, []);
+    await db.store.saveAlert({ ...alert('run_cur', Y, 'canonical-impostor'), createdAt: hoursAgo(1) }, []);
+    const forX = await querySevereAlerts(db.store.raw, [X]);
+    expect(forX.map((a) => a.rule)).toEqual(['rug-risk']);
+    expect((await querySevereAlerts(db.store.raw, [X, Y])).map((a) => a.rule).sort()).toEqual(['canonical-impostor', 'rug-risk']);
+    expect(await querySevereAlerts(db.store.raw, [])).toEqual([]);
+  });
+
+  test('queryActiveWatch lists only active entries', async () => {
+    await db.store.saveWatch(watch('solana:W1', 'active'));
+    await db.store.saveWatch(watch('solana:W2', 'dormant'));
+    await db.store.saveWatch(watch('solana:W3', 'expressed'));
+    expect(await queryActiveWatch(db.store.raw)).toEqual([{ tokenId: 'solana:W1', anchorVerdict: 'anchored' }]);
   });
 });
 

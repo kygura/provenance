@@ -31,15 +31,15 @@ import {
   queryRuns24h,
   querySevereAlerts,
   queryTrackRecord,
-  queryVerdicts,
+  queryVerdictHistory,
   queryWatchChanges,
   type DossierRow,
+  type FullRun,
   type RunRow,
   type SqlExecutor,
-  type VerdictRow,
 } from './queries';
 import { MEME_REGIME_RULE, fetchBtcRegime, labelMemeRegime, type FetchLike } from './regime';
-import { renderBrief, splitBrief, type BriefView, type SetupChange } from './render';
+import { discordSafe, renderBrief, splitBrief, type BriefView, type SetupChange } from './render';
 
 export { briefSettings, usableModels } from './llm';
 
@@ -94,13 +94,33 @@ export function setupId(symbol: string, nowIso: string, taken: ReadonlySet<strin
   }
 }
 
+/** The full run's job timeout (provenance.yml) and the launch lane's (launches.yml), in minutes. */
+const FULL_RUN_TIMEOUT_MIN = 45;
+const LAUNCH_RUN_TIMEOUT_MIN = 20;
+
+/**
+ * A full run that is still going. Runs carry no lane marker, so: a `running`
+ * row newer than CUR that already wrote snapshots (launch-lane runs never
+ * do), or that has been running longer than a launch-lane job can live. A
+ * row still `running` past the full-run timeout is a killed job, not a run in
+ * flight, and must not hold the brief back for a day.
+ */
+export function fullRunInFlight(runs: readonly RunRow[], cur: FullRun | undefined, nowMs: number): RunRow | undefined {
+  const killedBefore = new Date(nowMs - FULL_RUN_TIMEOUT_MIN * 60_000).toISOString();
+  const launchLimit = new Date(nowMs - LAUNCH_RUN_TIMEOUT_MIN * 60_000).toISOString();
+  return runs.find(
+    (run) =>
+      run.status === 'running' &&
+      run.startedAt >= killedBefore &&
+      (cur === undefined || run.startedAt > cur.startedAt) &&
+      (run.hasSnapshots || run.startedAt <= launchLimit),
+  );
+}
+
 function pipelineLines(runs: readonly RunRow[], details: Map<string, string[]>): string[] {
   const lines: string[] = [];
   for (const run of runs.filter((r) => r.status === 'failed')) {
     lines.push(`${run.id} failed${run.error ? `: ${run.error.slice(0, 160)}` : ''}`);
-  }
-  for (const run of runs.filter((r) => r.status === 'running' && r.hasSnapshots)) {
-    lines.push(`${run.id} full run still running (started ${run.startedAt})`);
   }
   const erroring = runs.filter((r) => r.sourceErrors > 0);
   if (erroring.length > 0) {
@@ -212,7 +232,11 @@ export async function runBrief(options: RunBriefOptions): Promise<BriefResult> {
   // ---- 1. health (A) -------------------------------------------------------
   const runs = await queryRuns24h(db);
   const { cur, prev } = await queryFullRuns(db);
-  const fresh = cur !== undefined && cur.startedAt >= dayAgo;
+  const inFlight = fullRunInFlight(runs, cur, nowMs);
+  // CLAUDE.md §2 A: a full run still running means today's has not landed;
+  // CUR is then the previous run and must not be briefed as today's.
+  const fresh = cur !== undefined && cur.startedAt >= dayAgo && !inFlight;
+  if (inFlight) log.push(`full run ${inFlight.id} still running (started ${inFlight.startedAt}); briefing watchlist, alerts and ledger only`);
   const details = new Map<string, string[]>();
   for (const run of runs.filter((r) => r.sourceErrors > 0 || r.status === 'failed').slice(0, 5)) {
     const detail = await queryRunErrors(db, run.id);
@@ -225,10 +249,7 @@ export async function runBrief(options: RunBriefOptions): Promise<BriefResult> {
   const track = await queryTrackRecord(db);
   const clusters = await queryClusters(db);
   const rows = fresh && cur ? await queryDossiers(db, cur.id, prev?.id) : [];
-  const verdicts = new Map<string, VerdictRow[]>();
-  for (const row of rows) {
-    if (row.provenanceAt) verdicts.set(row.tokenId, await queryVerdicts(db, row.tokenId));
-  }
+  const verdicts = fresh && cur ? await queryVerdictHistory(db, cur.id) : new Map();
   const notable = selectNotable(rows, alerts, verdicts, nowMs);
 
   // ---- 3. regimes ----------------------------------------------------------
@@ -484,6 +505,7 @@ export async function runBrief(options: RunBriefOptions): Promise<BriefResult> {
   const view: BriefView = {
     date: nowIso.slice(0, 10),
     ...(cur ? { cur } : {}),
+    ...(inFlight ? { latest: { startedAt: inFlight.startedAt, status: inFlight.status } } : cur ? { latest: cur } : {}),
     fresh,
     tokenCount: rows.length,
     alerts,
@@ -519,11 +541,6 @@ export async function runBrief(options: RunBriefOptions): Promise<BriefResult> {
 // ---------------------------------------------------------------------------
 // delivery
 // ---------------------------------------------------------------------------
-
-/** Discord renders `markdown`; neutralise the characters it would read as formatting. */
-function discordSafe(text: string): string {
-  return text.replace(/([\\*_~`|>])/g, '\\$1');
-}
 
 /** One synthetic alert per part, rule `daily-brief`, numbered when there is more than one. */
 export function briefAlerts(parts: readonly string[], date: string, runId: string | undefined, nowMs: number): Alert[] {

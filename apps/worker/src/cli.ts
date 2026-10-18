@@ -389,8 +389,7 @@ async function cmdBrief(
       console.error(style.red('error: brief needs the libSQL store (raw SQL and the setups table)'));
       return EXIT_FAILED;
     }
-    // Idempotent; skipped on a dry run, which must not write anything.
-    if (!dryRun) await store.migrate();
+    // No migrate here: brief.yml runs `cli.ts migrate` first, as run-lane.yml does.
     const nowMs = Date.now();
     const result = await runBrief({
       app,

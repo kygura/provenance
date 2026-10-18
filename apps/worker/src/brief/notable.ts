@@ -2,11 +2,11 @@
  * CLAUDE.md §3.1, deterministic: which tokens of the current run the brief is
  * about. Severity first (rug risk, impostor), then size of change, capped.
  */
+import { SEVERE_ALERT_RULES } from './ledger';
 import type { AlertRow, DossierRow, VerdictRow } from './queries';
 
 export const NOTABLE_CAP = 8;
 export const SCORE_DELTA_POINTS = 10;
-const SEVERE_RULES = ['rug-risk', 'canonical-impostor'];
 
 export interface NotableToken {
   row: DossierRow;
@@ -54,7 +54,7 @@ export function selectNotable(
     const reasons: string[] = [];
     const tierChanged = row.prevTier !== undefined && row.tier !== undefined && row.prevTier !== row.tier;
     const delta = row.score !== undefined && row.prevScore !== undefined ? row.score - row.prevScore : undefined;
-    const severe = alerts24h.find((alert) => alert.tokenId === row.tokenId && SEVERE_RULES.includes(alert.rule))?.rule;
+    const severe = alerts24h.find((alert) => alert.tokenId === row.tokenId && (SEVERE_ALERT_RULES as readonly string[]).includes(alert.rule))?.rule;
     const { change, isNew } = verdictDelta(row, verdicts.get(row.tokenId) ?? []);
     const isNewToken = row.firstSeenAt >= dayAgo;
 
