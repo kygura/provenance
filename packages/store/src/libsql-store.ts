@@ -12,6 +12,7 @@ import type {
   RunRecord,
   RunStats,
   RunStatus,
+  Setup,
   SocialFirstSeen,
   SocialSighting,
   TokenDossier,
@@ -19,7 +20,7 @@ import type {
   WatchEntry,
   WatchQuery,
 } from '@provenance/core';
-import { createLogger, silentLogger } from '@provenance/core';
+import { createLogger, OPEN_SETUP_STATUSES, silentLogger } from '@provenance/core';
 import {
   alertRowArgs,
   chainRowArgs,
@@ -30,10 +31,12 @@ import {
   rowToProvenance,
   rowToRun,
   rowToScore,
+  rowToSetup,
   rowToSnapshot,
   rowToSocialFirstSeen,
   rowToWatch,
   scoreRowArgs,
+  setupRowArgs,
   snapshotRowArgs,
   tokenRowArgs,
   text,
@@ -723,6 +726,53 @@ export class LibsqlStore implements ProvenanceStore {
       out.push(...rows.map((row) => rowToSocialFirstSeen(row as SqlRow)));
     }
     return out;
+  }
+
+  // -------------------------------------------------------------------------
+  // setups (the brief routine's ledger)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Setups that are open (`watching`/`triggered`) or were touched since
+   * `updatedSince`, newest first. With neither filter, every setup.
+   */
+  async listSetups(query: { open?: boolean; updatedSince?: string } = {}): Promise<Setup[]> {
+    const where: string[] = [];
+    const args: string[] = [];
+    if (query.open) where.push(`status IN (${OPEN_SETUP_STATUSES.map(() => '?').join(', ')})`);
+    if (query.open) args.push(...OPEN_SETUP_STATUSES);
+    if (query.updatedSince) {
+      where.push('updated_at >= ?');
+      args.push(query.updatedSince);
+    }
+    const rows = await this.all({
+      sql: `SELECT * FROM setups ${where.length > 0 ? `WHERE ${where.join(' OR ')}` : ''}
+            ORDER BY created_at DESC, id ASC`,
+      args,
+    });
+    return rows.map((row) => rowToSetup(row as SqlRow, this.logger));
+  }
+
+  /**
+   * Upserts setups in one batch, so a brief's new setups and status changes
+   * land together or not at all. `created_at` and the levels never move once
+   * written; only the status fields do.
+   */
+  async upsertSetups(setups: readonly Setup[]): Promise<void> {
+    await this.write(
+      setups.map((setup) => ({
+        sql: `INSERT INTO setups (id, token_id, chain, address, symbol, thesis, trigger, conviction, regime_json,
+                entry_mcap_low, entry_mcap_high, invalidation_mcap, targets_json, kill_json, status, status_note,
+                r_result, created_at, updated_at, expires_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(id) DO UPDATE SET
+                status = excluded.status,
+                status_note = excluded.status_note,
+                r_result = excluded.r_result,
+                updated_at = excluded.updated_at`,
+        args: setupRowArgs(setup),
+      })),
+    );
   }
 
   // -------------------------------------------------------------------------

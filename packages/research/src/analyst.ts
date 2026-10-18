@@ -110,12 +110,17 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
       anthropicClient: options.client,
       fetch: options.fetch,
       maxPauseTurnRestarts: options.maxPauseTurnRestarts,
+      warn: (message) => logger.warn(message),
     };
-    this.researchLlm = options.researchLlm ?? createLlm(app, app.llm.model, build);
+    this.researchLlm =
+      options.researchLlm ?? createLlm(app, app.llm.model, { ...build, fallback: app.llm.fallbackModel });
     const extractSpec = app.llm.extractModel ?? app.llm.model;
+    const extractFallback = app.llm.fallbackExtractModel;
     this.extractLlm =
       options.extractLlm ??
-      (extractSpec === app.llm.model && !options.researchLlm ? this.researchLlm : createLlm(app, extractSpec, build));
+      (extractSpec === app.llm.model && extractFallback === app.llm.fallbackModel && !options.researchLlm
+        ? this.researchLlm
+        : createLlm(app, extractSpec, { ...build, fallback: extractFallback }));
     this.attempts = options.attempts ?? 2;
     this.maxWebSearches = options.maxWebSearches ?? app.llm.maxWebSearches ?? 6;
     this.onUsage = (model, usage, costUsd) => {
@@ -132,7 +137,11 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     return { inputTokens: 0, outputTokens: 0, costUsd: Number((this.tracker.totalUsd - spentBefore).toFixed(6)) };
   }
 
-  /** Model label a report carries: the research model, plus the extractor when it differs. */
+  /**
+   * Model label a report carries: the research model, plus the extractor when it
+   * differs. Read when the report is built, since a provider fallback can switch
+   * models mid-report.
+   */
   private modelLabel(): string {
     const research = this.researchLlm.model;
     const extract = this.extractLlm.model;
@@ -146,7 +155,6 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     _ctx: ResearchContext,
   ): Promise<ProvenanceReport> {
     const log = this.logger.child('analyst');
-    const model = this.modelLabel();
     // The tracker lives for the whole run; a report carries only its own spend,
     // because the pipeline sums `usage.costUsd` across reports.
     const spentBefore = this.tracker.totalUsd;
@@ -160,7 +168,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
       return withUsage(buildDegradedReport({
         tokenId: snapshot.tokenId,
         memeName: snapshot.name || snapshot.symbol,
-        model,
+        model: this.modelLabel(),
         promptVersion: PROMPT_VERSION,
         reason: `Web research pass failed: ${reason}`,
         failed: reason,
@@ -182,7 +190,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
       return withUsage(buildDegradedReport({
         tokenId: snapshot.tokenId,
         memeName: snapshot.name || snapshot.symbol,
-        model,
+        model: this.modelLabel(),
         promptVersion: PROMPT_VERSION,
         reason: 'The research pass produced no notes to extract a report from.',
         evidence: allEvidence,
@@ -236,7 +244,6 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     log: Logger,
     spentBefore: number,
   ): Promise<ProvenanceReport> {
-    const model = this.modelLabel();
     const prompt = buildExtractionPrompt(snapshot, chain, found.notes, found.citations);
     let lastIssues: string[] = [];
     // Set only while the latest attempt threw: a call that failed, not a bad answer.
@@ -296,7 +303,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
           tokenId: snapshot.tokenId,
           evidence: mergeEvidence(outcome.draft.evidence, evidence),
           confidence: clamp(outcome.draft.confidence * (grounded ? 1 : 0.7) - penalty, 0, 1),
-          model,
+          model: this.modelLabel(),
           promptVersion: PROMPT_VERSION,
           generatedAt: nowIso(),
           usage: {
@@ -315,7 +322,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     return withUsage(buildDegradedReport({
       tokenId: snapshot.tokenId,
       memeName: snapshot.name || snapshot.symbol,
-      model,
+      model: this.modelLabel(),
       promptVersion: PROMPT_VERSION,
       reason: lastIssues[0] ?? 'The model did not return a usable provenance report.',
       ...(lastError !== undefined ? { failed: lastError } : {}),

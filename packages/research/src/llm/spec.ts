@@ -40,6 +40,20 @@ export function configuredModelSpecs(app: AppConfig): ModelSpec[] {
   });
 }
 
+/**
+ * Runtime fallbacks a run may switch to (Anthropic-first), deduped. Not
+ * required to have a key (config drops a keyless one), but they are billed, so
+ * the cost cap needs their price.
+ */
+export function fallbackModelSpecs(app: AppConfig): ModelSpec[] {
+  const specs = [app.llm.fallbackModel, app.llm.fallbackExtractModel, app.llm.fallbackTriageModel]
+    .filter((spec): spec is string => Boolean(spec))
+    .map(parseModelSpec);
+  return specs.filter(
+    (spec, i) => specs.findIndex((other) => other.provider === spec.provider && other.model === spec.model) === i,
+  );
+}
+
 /** Specs whose provider has no key. Empty means every configured model can be called. */
 export function missingCredentials(app: AppConfig): ModelSpec[] {
   return configuredModelSpecs(app).filter((spec) => !providerApiKey(app, spec.provider));

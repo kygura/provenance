@@ -83,28 +83,35 @@ export function parseModelSpec(spec: string): ModelSpec {
   return { provider: 'anthropic', model: trimmed };
 }
 
-/** Anthropic models each role falls back to under Anthropic-first. */
+/** Anthropic model each role runs on under Anthropic-first (the default with an Anthropic key). */
 export const ANTHROPIC_ROLE_MODELS = {
   model: 'claude-opus-5',
   extractModel: 'claude-opus-5',
   triageModel: 'claude-sonnet-5',
 } as const;
 
+type RoleModels = Pick<LlmConfig, 'model' | 'extractModel' | 'triageModel'>;
+type RoleFallbacks = Pick<LlmConfig, 'fallbackModel' | 'fallbackExtractModel' | 'fallbackTriageModel'>;
+
 /**
- * Opt-in (LLM_ANTHROPIC_FIRST=true, with an Anthropic key): a role configured
- * for another provider runs on that role's Anthropic model instead. Claude
- * models set explicitly are kept.
+ * Anthropic-first, on by default whenever an Anthropic key is set
+ * (LLM_ANTHROPIC_FIRST=false turns it off): a role configured for another
+ * provider runs on that role's Anthropic model, and keeps its own spec as the
+ * fallback used when Anthropic fails at runtime (credits, auth, rate limit,
+ * overload). Claude models set explicitly are kept, falling back to the Kimi
+ * default. A fallback whose provider has no key is dropped.
  */
-function anthropicFirst(
-  llm: Pick<LlmConfig, 'model' | 'extractModel' | 'triageModel'>,
-): Pick<LlmConfig, 'model' | 'extractModel' | 'triageModel'> {
-  const pick = (spec: string, fallback: string) =>
-    parseModelSpec(spec).provider === 'anthropic' ? spec : fallback;
-  return {
-    model: pick(llm.model, ANTHROPIC_ROLE_MODELS.model),
-    extractModel: pick(llm.extractModel ?? llm.model, ANTHROPIC_ROLE_MODELS.extractModel),
-    triageModel: pick(llm.triageModel, ANTHROPIC_ROLE_MODELS.triageModel),
+function anthropicFirst(llm: RoleModels, hasKey: (spec: string) => boolean): RoleModels & RoleFallbacks {
+  const role = (key: keyof RoleModels): [string, string | undefined] => {
+    const spec = llm[key];
+    const claude = parseModelSpec(spec).provider === 'anthropic';
+    const fallback = claude ? DEFAULT_ROLE_MODELS[key] : spec;
+    return [claude ? spec : ANTHROPIC_ROLE_MODELS[key], hasKey(fallback) ? fallback : undefined];
   };
+  const [model, fallbackModel] = role('model');
+  const [extractModel, fallbackExtractModel] = role('extractModel');
+  const [triageModel, fallbackTriageModel] = role('triageModel');
+  return { model, extractModel, triageModel, fallbackModel, fallbackExtractModel, fallbackTriageModel };
 }
 
 export interface LlmProviderConfig {
@@ -119,9 +126,11 @@ export interface LlmProviderConfig {
 export const DEFAULT_LLM_MODEL = 'moonshot:kimi-k2.6';
 
 /**
- * Default model per role: Kimi K3 researches (multi-step search with Exa),
- * K2.6 copies notes into the schema and runs the fast anchor check. Any
- * LLM_*_MODEL var overrides its role.
+ * Non-Anthropic model per role: Kimi K3 researches (multi-step search with
+ * Exa), K2.6 copies notes into the schema and runs the fast anchor check. The
+ * models themselves without an Anthropic key (or LLM_ANTHROPIC_FIRST=false),
+ * the runtime fallback under Anthropic-first. Any LLM_*_MODEL var overrides
+ * its role.
  */
 export const DEFAULT_ROLE_MODELS = {
   model: 'moonshot:kimi-k3',
@@ -143,6 +152,15 @@ export interface LlmConfig {
   extractModel: string;
   /** Cheaper model for triage/classification passes. Same spec format as `model`. */
   triageModel: string;
+  /**
+   * Under Anthropic-first, the non-Anthropic spec each role switches to when
+   * Anthropic fails at runtime (credits exhausted, auth, rate limit, overload,
+   * network). Undefined when the role's model is not Anthropic-first or the
+   * fallback provider has no key.
+   */
+  fallbackModel?: string;
+  fallbackExtractModel?: string;
+  fallbackTriageModel?: string;
   providers: Record<LlmProvider, LlmProviderConfig>;
   /**
    * Price overrides, USD per million tokens, keyed by model id (without the
@@ -270,6 +288,32 @@ function bool(value: string | undefined, fallback: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
 }
 
+/** Key and endpoint per LLM provider, from the environment. */
+function llmProviders(env: Record<string, string | undefined>): LlmConfig['providers'] {
+  return {
+    anthropic: {
+      apiKey: env.ANTHROPIC_API_KEY || undefined,
+      baseUrl: env.ANTHROPIC_BASE_URL || undefined,
+      workspaceId: env.ANTHROPIC_WORKSPACE_ID || undefined,
+    },
+    openai: { apiKey: env.OPENAI_API_KEY || undefined, baseUrl: env.OPENAI_BASE_URL || undefined },
+    openrouter: { apiKey: env.OPENROUTER_API_KEY || undefined, baseUrl: env.OPENROUTER_BASE_URL || undefined },
+    moonshot: {
+      apiKey: env.MOONSHOT_API_KEY || env.KIMI_API_KEY || undefined,
+      baseUrl: env.MOONSHOT_BASE_URL || undefined,
+    },
+    qwen: {
+      apiKey: env.DASHSCOPE_API_KEY || env.QWEN_API_KEY || undefined,
+      baseUrl: env.DASHSCOPE_BASE_URL || undefined,
+    },
+    deepseek: { apiKey: env.DEEPSEEK_API_KEY || undefined, baseUrl: env.DEEPSEEK_BASE_URL || undefined },
+    'openai-compatible': {
+      apiKey: env.OPENAI_COMPATIBLE_API_KEY || undefined,
+      baseUrl: env.OPENAI_COMPATIBLE_BASE_URL || undefined,
+    },
+  };
+}
+
 /** `id=in/out,id2=in/out` -> price table. Malformed entries are skipped, not guessed. */
 function pricing(value: string | undefined): LlmConfig['pricing'] {
   const out: LlmConfig['pricing'] = {};
@@ -335,6 +379,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
   const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(raw)) env[key] = value?.trim();
   const chains = list(env.PROVENANCE_CHAINS).map(normalizeChain);
+  const providers = llmProviders(env);
   // Your own endpoints lead and the public ones follow, so a keyed node that
   // rate-limits or refuses a range (Alchemy's free eth_getLogs cap) still has
   // somewhere to fail over to. RPC_PUBLIC_FALLBACK=false keeps only your list.
@@ -392,39 +437,20 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       useFixtures: bool(env.USE_FIXTURES, false),
     },
     llm: {
-      ...((): Pick<LlmConfig, 'model' | 'extractModel' | 'triageModel'> => {
-        // Kimi on Moonshot by default: about half what Claude Opus costs per
-        // report. LLM_ANTHROPIC_FIRST=true (with an Anthropic key) moves every
-        // role back onto Claude.
+      ...((): RoleModels & RoleFallbacks => {
+        // Claude by default when an Anthropic key is set, each role falling
+        // back to its Kimi (or explicit non-Anthropic LLM_*) model if Anthropic
+        // fails mid-run. LLM_ANTHROPIC_FIRST=false, or no Anthropic key, runs
+        // the configured models directly with no fallback.
         const configured = {
           model: env.LLM_MODEL || DEFAULT_ROLE_MODELS.model,
           extractModel: env.LLM_EXTRACT_MODEL || DEFAULT_ROLE_MODELS.extractModel,
           triageModel: env.LLM_TRIAGE_MODEL || DEFAULT_ROLE_MODELS.triageModel,
         };
-        return env.ANTHROPIC_API_KEY && bool(env.LLM_ANTHROPIC_FIRST, false) ? anthropicFirst(configured) : configured;
+        if (!env.ANTHROPIC_API_KEY || !bool(env.LLM_ANTHROPIC_FIRST, true)) return configured;
+        return anthropicFirst(configured, (spec) => Boolean(providers[parseModelSpec(spec).provider].apiKey));
       })(),
-      providers: {
-        anthropic: {
-          apiKey: env.ANTHROPIC_API_KEY || undefined,
-          baseUrl: env.ANTHROPIC_BASE_URL || undefined,
-          workspaceId: env.ANTHROPIC_WORKSPACE_ID || undefined,
-        },
-        openai: { apiKey: env.OPENAI_API_KEY || undefined, baseUrl: env.OPENAI_BASE_URL || undefined },
-        openrouter: { apiKey: env.OPENROUTER_API_KEY || undefined, baseUrl: env.OPENROUTER_BASE_URL || undefined },
-        moonshot: {
-          apiKey: env.MOONSHOT_API_KEY || env.KIMI_API_KEY || undefined,
-          baseUrl: env.MOONSHOT_BASE_URL || undefined,
-        },
-        qwen: {
-          apiKey: env.DASHSCOPE_API_KEY || env.QWEN_API_KEY || undefined,
-          baseUrl: env.DASHSCOPE_BASE_URL || undefined,
-        },
-        deepseek: { apiKey: env.DEEPSEEK_API_KEY || undefined, baseUrl: env.DEEPSEEK_BASE_URL || undefined },
-        'openai-compatible': {
-          apiKey: env.OPENAI_COMPATIBLE_API_KEY || undefined,
-          baseUrl: env.OPENAI_COMPATIBLE_BASE_URL || undefined,
-        },
-      },
+      providers,
       pricing: pricing(env.LLM_PRICING),
       maxOutputTokens: num(env.LLM_MAX_OUTPUT_TOKENS, 4096),
       maxCostUsdPerRun: num(env.LLM_MAX_COST_USD_PER_RUN, 5),

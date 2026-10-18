@@ -37,8 +37,8 @@ secrets under **Settings → Secrets and variables → Actions**:
 
 | Secret | Required | What it is |
 |---|---|---|
-| `MOONSHOT_API_KEY` | one LLM key | default provider: research on `moonshot:kimi-k3`, extraction and the anchor check on `moonshot:kimi-k2.6` |
-| `ANTHROPIC_API_KEY` | one LLM key | for `claude-*` models, or every role with `LLM_ANTHROPIC_FIRST=true` |
+| `MOONSHOT_API_KEY` | one LLM key | Kimi: research on `moonshot:kimi-k3`, extraction and the anchor check on `moonshot:kimi-k2.6`; the runtime fallback when Claude is primary, and the only provider when no Anthropic key is set |
+| `ANTHROPIC_API_KEY` | one LLM key | default provider when set: every role runs on Claude (unless `LLM_ANTHROPIC_FIRST=false`) |
 | `OPENAI_API_KEY` | one LLM key | for `openai:` models |
 | `OPENROUTER_API_KEY` | one LLM key | for `openrouter:` models (Kimi, DeepSeek, GPT… through one key) |
 | `DASHSCOPE_API_KEY` | one LLM key | for `qwen:` models on Alibaba Model Studio |
@@ -61,12 +61,20 @@ rather than Secrets; every one is listed in `.env.example`. So do the model
 choices: `LLM_MODEL`, `LLM_EXTRACT_MODEL`, `LLM_TRIAGE_MODEL` and `LLM_PRICING`.
 Only the keys for the providers those models name are needed.
 
-Blank model vars mean Kimi on Moonshot, searching through Exa
-(`MOONSHOT_API_KEY` + `EXA_API_KEY`): K3 researches, K2.6 extracts and runs
-the anchor check. The variable `LLM_ANTHROPIC_FIRST=true`, with the
-`ANTHROPIC_API_KEY` secret set, moves every role onto Claude instead
+With the `ANTHROPIC_API_KEY` secret set, every role runs on Claude by default
 (`claude-opus-5` for research and extract, `claude-sonnet-5` for triage), at
-about twice the cost per report.
+about twice the cost per report of Kimi. Each role keeps a fallback: the
+non-Anthropic model its `LLM_*_MODEL` variable names, else its Kimi default.
+When Anthropic fails mid-run (credit balance too low, a rejected key, a rate
+limit or overload that outlasts the SDK's retries, the network), the run logs
+one warning and finishes on the fallback, billed at the fallback's price. The
+fallback needs its own key (`MOONSHOT_API_KEY` for Kimi). A `claude-*` value
+in an `LLM_*_MODEL` variable picks that role's Claude model.
+
+Without an Anthropic key, or with the variable `LLM_ANTHROPIC_FIRST=false`,
+the model variables run as set; blank means Kimi on Moonshot, searching through
+Exa (`MOONSHOT_API_KEY` + `EXA_API_KEY`): K3 researches, K2.6 extracts and runs
+the anchor check.
 
 Other setups, for example Kimi through OpenRouter when only an OpenRouter key
 is at hand:

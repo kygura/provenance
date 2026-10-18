@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { loadConfig } from '@provenance/core';
 import { applyFlags, llmDisabled, parseArgs, validateEnv } from './args';
 import { colorEnabled } from './format';
 import { makeConfig } from './test-fakes';
@@ -166,6 +167,23 @@ describe('validateEnv', () => {
       llm: { ...unpriced.llm, pricing: { 'gpt-5.4-mini': { inputPerMTok: 0.75, outputPerMTok: 4.5 } } },
     });
     expect(validateEnv('run', priced, parseArgs(['run']))).toEqual([]);
+  });
+
+  test('Claude-first with a Kimi fallback needs only one of the two keys', () => {
+    const llmErrors = (env: Record<string, string>) =>
+      validateEnv('run', loadConfig(env), parseArgs(['run'])).filter((e) => /API_KEY|LLM_PRICING/.test(e));
+    expect(llmErrors({ ANTHROPIC_API_KEY: 'sk-ant', MOONSHOT_API_KEY: 'k' })).toEqual([]);
+    expect(llmErrors({ ANTHROPIC_API_KEY: 'sk-ant' })).toEqual([]);
+    expect(llmErrors({ MOONSHOT_API_KEY: 'k' })).toEqual([]);
+    expect(llmErrors({}).join('\n')).toContain('MOONSHOT_API_KEY');
+  });
+
+  test('an unpriced fallback is refused under a cost cap', () => {
+    const app = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant', OPENAI_API_KEY: 'sk-o', LLM_MODEL: 'openai:gpt-9-unpriced' });
+    expect(app.llm.fallbackModel).toBe('openai:gpt-9-unpriced');
+    const errors = validateEnv('run', app, parseArgs(['run'])).join('\n');
+    expect(errors).toContain('gpt-9-unpriced');
+    expect(errors).not.toContain('OPENAI_API_KEY is not set');
   });
 
   test('a malformed DATABASE_AUTH_TOKEN is named without echoing it', () => {

@@ -286,14 +286,19 @@ export class WebSearchAnchorChecker implements AnchorChecker {
     options: AnchorOptions = {},
   ) {
     this.llm =
-      options.llm ?? createLlm(app, app.llm.triageModel, { anthropicClient: options.client, fetch: options.fetch });
+      options.llm ??
+      createLlm(app, app.llm.triageModel, {
+        anthropicClient: options.client,
+        fetch: options.fetch,
+        fallback: app.llm.fallbackTriageModel,
+        warn: (message) => logger.warn(message),
+      });
     this.tracker = options.tracker ?? new CostTracker(app.llm.maxCostUsdPerRun, app.llm.pricing);
     this.maxWebSearches = options.maxWebSearches ?? app.launches.maxAnchorSearches;
   }
 
   async check(snapshot: TokenSnapshot, _ctx: ResearchContext): Promise<AnchorCheck> {
     const log = this.logger.child('anchor');
-    const model = this.llm.model;
     const spentBefore = this.tracker.totalUsd;
     let inputTokens = 0;
     let outputTokens = 0;
@@ -304,7 +309,8 @@ export class WebSearchAnchorChecker implements AnchorChecker {
     };
     const finish = (anchor: Anchor, citations: string[]): AnchorCheck => ({
       ...resolveAnchor(anchor, snapshot.metrics.poolCreatedAt, citations.length),
-      model,
+      // Read at the end: a provider fallback mid-check changes the model.
+      model: this.llm.model,
       checkedAt: nowIso(),
       citations,
       usage: { inputTokens, outputTokens, costUsd: Number((this.tracker.totalUsd - spentBefore).toFixed(6)) },

@@ -32,6 +32,9 @@ import {
   validateEnv,
 } from './args';
 import { type PipelineDeps, loadRuntimeDeps } from './deps';
+import { type SetupStore, briefAlerts, briefSettings, runBrief, usableModels, writeStepSummary } from './brief';
+import type { SqlExecutor } from './brief/queries';
+import type { FetchLike } from './brief/regime';
 import { runPipeline } from './pipeline';
 import {
   type ReportFormat,
@@ -65,15 +68,17 @@ commands:
   seed                     load demo data into the database
   alerts:test              push a synthetic alert through every configured channel
   report                   print a run's results
+  brief                    daily brief + setups ledger from stored runs (docs/brief-routine.md);
+                           writes only the setups table, delivers through the alert channels
   help, version
 
 options:
-  --dry-run, -n            do not deliver alerts to remote channels
+  --dry-run, -n            do not deliver alerts to remote channels (brief: also write nothing)
   --fixtures               read recorded payloads; no network, no API key
   --limit N                cap tokens analysed this run
   --chains sol,base        restrict to these chains
   --sources dexscreener,…  restrict to these trending sources
-  --no-llm                 skip the research stage entirely
+  --no-llm                 skip the research stage entirely (brief: deterministic, no setups)
   --run <id>               report: which run (default: the latest)
   --status active|expressed|dormant|dismissed   watchlist: filter by status
   --verdict anchored|forced|unclear            watchlist: filter by verdict
@@ -353,9 +358,89 @@ async function cmdAlertsTest(
   return failures > 0 ? EXIT_FAILED : EXIT_OK;
 }
 
+/** The brief needs raw SQL and the setups helpers, which only the libSQL store has. */
+function isBriefStore(store: unknown): store is SetupStore & { raw: SqlExecutor } {
+  const candidate = store as Partial<SetupStore> & { raw?: Partial<SqlExecutor> };
+  return (
+    typeof candidate.listSetups === 'function' &&
+    typeof candidate.upsertSetups === 'function' &&
+    typeof candidate.raw?.execute === 'function'
+  );
+}
+
+async function cmdBrief(
+  app: AppConfig,
+  parsed: ParsedArgs,
+  logger: Logger,
+  deps: PipelineDeps,
+  style: Style,
+  env: Record<string, string | undefined>,
+  fetchImpl?: FetchLike,
+): Promise<number> {
+  const dryRun = flagBool(parsed.flags, 'dry-run');
+  const settings = briefSettings(env);
+  const models = llmDisabled(app, parsed) ? [] : usableModels(app, settings);
+  if (!llmDisabled(app, parsed) && models.length === 0) {
+    print(style.yellow(`notice: no API key for ${settings.model} or ${settings.fallback}; writing the deterministic brief`));
+  }
+  const store = deps.createStore(app);
+  try {
+    if (!isBriefStore(store)) {
+      console.error(style.red('error: brief needs the libSQL store (raw SQL and the setups table)'));
+      return EXIT_FAILED;
+    }
+    // No migrate here: brief.yml runs `cli.ts migrate` first, as run-lane.yml does.
+    const nowMs = Date.now();
+    const result = await runBrief({
+      app,
+      logger,
+      db: store.raw,
+      setups: store,
+      models,
+      maxUsd: settings.maxUsd,
+      dryRun,
+      now: () => new Date(nowMs),
+      ...(fetchImpl ? { fetchImpl } : {}),
+    });
+    print(result.text);
+    print('');
+    for (const line of result.log) print(style.dim(line));
+    const date = new Date(nowMs).toISOString().slice(0, 10);
+    await writeStepSummary(env.GITHUB_STEP_SUMMARY, date, result.text).catch((error) =>
+      logger.warn('could not write the step summary', { error: errorMessage(error) }),
+    );
+    if (dryRun) {
+      print(style.dim(`dry run: ${result.written.length} setup change(s) not written, ${result.parts.length} message(s) not sent`));
+      return EXIT_OK;
+    }
+    print(style.dim(`wrote ${result.written.length} setup change(s)`));
+
+    // The brief is already on stdout; the console sink would print it twice.
+    const sinks = deps.createSinks(app, logger).filter((sink) => sink.enabled && sink.channel !== 'console');
+    if (sinks.length === 0) {
+      print(style.dim('no alert channel configured; brief printed only'));
+      return EXIT_OK;
+    }
+    let failures = 0;
+    // One part at a time, so a multi-part brief arrives in order.
+    for (const alert of briefAlerts(result.parts, date, result.curRunId, nowMs)) {
+      const delivered = await deps.dispatchAlerts([alert], sinks, logger);
+      for (const delivery of delivered.get(alert.id) ?? []) {
+        if (delivery.ok) continue;
+        failures += 1;
+        print(`${style.red('fail')} ${delivery.channel}: ${delivery.error ?? 'unknown error'}`);
+      }
+    }
+    if (failures === 0) print(style.dim(`sent ${result.parts.length} message(s) to ${sinks.map((s) => s.channel).join(', ')}`));
+    return failures > 0 ? EXIT_FAILED : EXIT_OK;
+  } finally {
+    await store.close().catch(() => undefined);
+  }
+}
+
 export async function main(
   argv: readonly string[],
-  overrides: { deps?: PipelineDeps; env?: Record<string, string | undefined> } = {},
+  overrides: { deps?: PipelineDeps; env?: Record<string, string | undefined>; fetch?: FetchLike } = {},
 ): Promise<number> {
   const parsed = parseArgs(argv);
   const env = overrides.env ?? process.env;
@@ -423,6 +508,8 @@ export async function main(
         return await cmdAlertsTest(app, logger, deps, style);
       case 'report':
         return await cmdReport(app, parsed, deps, style);
+      case 'brief':
+        return await cmdBrief(app, parsed, logger, deps, style, env, overrides.fetch);
       default:
         print(HELP);
         return EXIT_CONFIG;

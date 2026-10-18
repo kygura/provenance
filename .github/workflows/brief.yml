@@ -1,0 +1,99 @@
+name: Daily brief
+
+# The briefing layer (docs/brief-routine.md): reads what the full run stored,
+# labels the regimes, updates the setups ledger, asks the brief model once and
+# delivers one `daily-brief` message. 40 minutes after each full run
+# (provenance.yml, 06:00 and 18:00 UTC), so the run has normally finished.
+# It writes only the `setups` table and never runs discovery, research or
+# alert rules. No LLM key → a deterministic brief with no setups.
+on:
+  schedule:
+    - cron: '40 6 * * *'
+    - cron: '40 18 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Compute and print the brief; write and send nothing'
+        type: boolean
+        default: false
+
+# Its own group: the brief only reads pipeline tables, so it must not queue
+# behind the 30-minute launch lane in provenance-run.
+concurrency:
+  group: provenance-brief
+  cancel-in-progress: false
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check database credentials
+        id: creds
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$DATABASE_AUTH_TOKEN" ]; then
+            echo "::notice::provenance brief skipped: DATABASE_URL or DATABASE_AUTH_TOKEN is not set"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
+
+      - if: steps.creds.outputs.ok == 'true'
+        uses: actions/checkout@v4
+
+      - if: steps.creds.outputs.ok == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - if: steps.creds.outputs.ok == 'true'
+        name: Cache Bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - if: steps.creds.outputs.ok == 'true'
+        name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Same as run-lane.yml: creates the setups table on first run. Skipped on
+      # a dry run, which must not write anything.
+      - if: steps.creds.outputs.ok == 'true' && inputs.dry_run != true
+        name: Migrate database
+        run: bun run apps/worker/src/cli.ts migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
+
+      # Inputs reach the shell as env vars, never as `${{ }}` inside the script.
+      - if: steps.creds.outputs.ok == 'true'
+        name: Brief
+        run: |
+          args=(brief)
+          [ "$INPUT_DRY_RUN" = "true" ] && args+=(--dry-run)
+          bun run apps/worker/src/cli.ts "${args[@]}"
+        env:
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          # Brief model, fallback and spend cap. Blank means Claude Opus 5,
+          # then Kimi K3, then K2.6, capped at $0.50 a run.
+          LLM_BRIEF_MODEL: ${{ vars.LLM_BRIEF_MODEL }}
+          LLM_BRIEF_FALLBACK: ${{ vars.LLM_BRIEF_FALLBACK }}
+          LLM_BRIEF_MAX_USD: ${{ vars.LLM_BRIEF_MAX_USD }}
+          LLM_PRICING: ${{ vars.LLM_PRICING }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_WORKSPACE_ID: ${{ secrets.ANTHROPIC_WORKSPACE_ID }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          # Storage and delivery
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL }}

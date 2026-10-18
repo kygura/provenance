@@ -66,7 +66,7 @@ up on a list. See [`docs/launch-lane.md`](docs/launch-lane.md).
 | Trending lane: lists, analysis, research | GitHub Actions cron, twice daily | free tier |
 | Database | libSQL / Turso (or a local SQLite file) | free tier |
 | Dashboard | Vercel | free tier |
-| LLM | Kimi K3 (research) and K2.6 (extraction, anchor check) on Moonshot; Claude optional | paid, per token |
+| LLM | Claude (Opus 5 research and extraction, Sonnet 5 anchor check) when `ANTHROPIC_API_KEY` is set, switching mid-run to Kimi K3 / K2.6 on Moonshot if Anthropic fails; Kimi alone with only `MOONSHOT_API_KEY` | paid, per token |
 | Search | Anthropic's web search; Exa (`EXA_API_KEY`) for every other provider | paid, per query |
 | Social yardstick (optional) | Elfa trending-CA feeds, `ELFA_API_KEY` | free tier; ~720 of 1,000 monthly credits ([docs/social.md](docs/social.md)) |
 
@@ -92,8 +92,9 @@ discover ─┬─ dextools      (exa search for pair pages, resolved via dexscr
                 │             risk flags — free RPCs only
           evidence            on-chain + listing metadata, no network
                 │
-          research pass       Kimi K3 calling Exa search (publish dates, a
-                │             "before launch" bound) — prose notes and citations
+          research pass       Claude with its web search, or Kimi K3 calling Exa
+                │             (publish dates, a "before launch" bound) — prose
+                │             notes and citations
                 │
           extraction pass     the same notes, no tools, forced tool call →
                 │             a schema-validated ProvenanceReport

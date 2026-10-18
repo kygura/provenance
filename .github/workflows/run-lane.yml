@@ -4,9 +4,11 @@ name: Run lane
 # (launch lane) only choose when it fires and with which inputs; every secret
 # and variable the worker reads is forwarded here and nowhere else. The model
 # vars (LLM_*_MODEL) take `provider:model`, so switching vendor is a repo-var
-# change plus that provider's secret; blank vars mean Kimi on Moonshot, and
-# LLM_ANTHROPIC_FIRST=true moves every role onto Claude. A new provider's key
-# is one line below.
+# change plus that provider's secret. With ANTHROPIC_API_KEY set every role
+# runs on Claude and falls back to Kimi (blank vars) or its non-Anthropic
+# LLM_*_MODEL if Anthropic fails mid-run; LLM_ANTHROPIC_FIRST=false, or no
+# Anthropic key, runs the vars as set (blank = Kimi on Moonshot). A new
+# provider's key is one line below.
 #
 # Callers pass `secrets: inherit`. GitHub never hands a job a secret the
 # workflow does not name, so the list below has to stay explicit.
