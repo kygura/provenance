@@ -4,7 +4,7 @@
  * a configuration error rather than a silently ignored typo.
  */
 import { type AppConfig, type Chain, normalizeChain } from '@provenance/core';
-import { configuredModelSpecs, missingCredentials, PROVIDER_KEY_ENV, resolvePricing } from '@provenance/research';
+import { configuredModelSpecs, fallbackModelSpecs, missingCredentials, PROVIDER_KEY_ENV, resolvePricing } from '@provenance/research';
 
 export const COMMANDS = [
   'run',
@@ -240,9 +240,11 @@ export function validateEnv(command: CommandName, app: AppConfig, parsed: Parsed
     ) {
       errors.push('OPENAI_COMPATIBLE_BASE_URL is required for an openai-compatible: model.');
     }
-    // A budget the tracker cannot price is a budget that never trips.
+    // A budget the tracker cannot price is a budget that never trips. Runtime
+    // fallbacks are billed too, so they need a price; they need no key, since
+    // config only keeps a fallback whose provider has one.
     if (Number.isFinite(app.llm.maxCostUsdPerRun)) {
-      for (const spec of specs) {
+      for (const spec of [...specs, ...fallbackModelSpecs(app)]) {
         if (spec.provider === 'openrouter') continue; // billed cost comes back per call
         if (!resolvePricing(spec.model, app.llm.pricing ?? {})) {
           errors.push(

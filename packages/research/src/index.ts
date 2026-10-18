@@ -81,6 +81,9 @@ export {
 } from './anchor';
 export {
   createLlm,
+  FallbackLlm,
+  providerFailure,
+  fallbackModelSpecs,
   AnthropicLlm,
   OpenAiLlm,
   PROVIDER_PROFILES,

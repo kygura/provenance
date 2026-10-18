@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_LLM_MODEL, DEFAULT_ROLE_MODELS, extractJwt, loadConfig } from './config';
+import { DEFAULT_LLM_MODEL, DEFAULT_ROLE_MODELS, extractJwt, loadConfig, type LlmConfig } from './config';
 
 describe('loadConfig', () => {
   test('a configured RPC leads and the public nodes follow it', () => {
@@ -27,12 +27,33 @@ describe('loadConfig', () => {
     expect(app.alerts.telegramChatId).toBe('-5222707171');
   });
 
-  test('Kimi is the default, K3 researching and K2.6 for the rest, Anthropic key or not', () => {
-    for (const env of [{ MOONSHOT_API_KEY: 'k' }, { ANTHROPIC_API_KEY: 'sk' }]) {
-      const llm = loadConfig(env).llm;
-      expect([llm.model, llm.extractModel, llm.triageModel]).toEqual(['moonshot:kimi-k3', DEFAULT_LLM_MODEL, DEFAULT_LLM_MODEL]);
-    }
+  const roles = (llm: LlmConfig) => [llm.model, llm.extractModel, llm.triageModel];
+  const fallbacks = (llm: LlmConfig) => [llm.fallbackModel, llm.fallbackExtractModel, llm.fallbackTriageModel];
+  const KIMI = ['moonshot:kimi-k3', DEFAULT_LLM_MODEL, DEFAULT_LLM_MODEL];
+
+  test('Kimi with no Anthropic key: K3 researching, K2.6 for the rest, no fallback', () => {
+    const llm = loadConfig({ MOONSHOT_API_KEY: 'k' }).llm;
+    expect(roles(llm)).toEqual(KIMI);
+    expect(fallbacks(llm)).toEqual([undefined, undefined, undefined]);
     expect(DEFAULT_ROLE_MODELS.model).toBe('moonshot:kimi-k3');
+  });
+
+  test('an Anthropic key makes Claude the default, each role falling back to its Kimi model', () => {
+    const llm = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant', MOONSHOT_API_KEY: 'k' }).llm;
+    expect(roles(llm)).toEqual(['claude-opus-5', 'claude-opus-5', 'claude-sonnet-5']);
+    expect(fallbacks(llm)).toEqual(KIMI);
+  });
+
+  test('Claude-first without a Moonshot key has no fallback', () => {
+    const llm = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant' }).llm;
+    expect(roles(llm)).toEqual(['claude-opus-5', 'claude-opus-5', 'claude-sonnet-5']);
+    expect(fallbacks(llm)).toEqual([undefined, undefined, undefined]);
+  });
+
+  test('LLM_ANTHROPIC_FIRST=false restores Kimi-first with no fallback', () => {
+    const llm = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant', MOONSHOT_API_KEY: 'k', LLM_ANTHROPIC_FIRST: 'false' }).llm;
+    expect(roles(llm)).toEqual(KIMI);
+    expect(fallbacks(llm)).toEqual([undefined, undefined, undefined]);
   });
 
   test('a whitespace-only value counts as unset where a default exists', () => {
@@ -49,6 +70,8 @@ describe('loadConfig', () => {
       LLM_TRIAGE_MODEL: 'kimi-k3',
     }).llm;
     expect([llm.model, llm.extractModel, llm.triageModel]).toEqual(['claude-opus-5', 'claude-opus-5', 'claude-sonnet-5']);
+    // A configured model whose provider has a key becomes the role's fallback.
+    expect(fallbacks(llm)).toEqual(['openrouter:qwen/qwen3-max', undefined, undefined]);
   });
 
   test('ANTHROPIC_WORKSPACE_ID is carried on the anthropic provider', () => {
@@ -58,6 +81,17 @@ describe('loadConfig', () => {
   test('Anthropic-first keeps a Claude model the user picked', () => {
     const llm = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant', LLM_ANTHROPIC_FIRST: 'true', LLM_MODEL: 'claude-fable-5-1', LLM_TRIAGE_MODEL: 'gpt-6' }).llm;
     expect([llm.model, llm.extractModel, llm.triageModel]).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
+  });
+
+  test('Anthropic-first falls back to an explicit non-Anthropic LLM_* model, else the Kimi default', () => {
+    const llm = loadConfig({
+      ANTHROPIC_API_KEY: 'sk-ant',
+      MOONSHOT_API_KEY: 'k',
+      LLM_MODEL: 'claude-opus-4-8',
+      LLM_EXTRACT_MODEL: 'kimi-k3',
+    }).llm;
+    expect(roles(llm)).toEqual(['claude-opus-4-8', 'claude-opus-5', 'claude-sonnet-5']);
+    expect(fallbacks(llm)).toEqual(['moonshot:kimi-k3', 'kimi-k3', DEFAULT_LLM_MODEL]);
   });
 
   test('other providers apply without an Anthropic key, or without LLM_ANTHROPIC_FIRST', () => {
