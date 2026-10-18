@@ -17,9 +17,14 @@ import type {
   EvidenceItem,
   EvidenceKind,
   LineageNode,
+  OrganicRead,
+  OrganicVerdict,
   PriorCycle,
   ProvenanceReport,
   RecycleVerdict,
+  RivalInstance,
+  TractionSignal,
+  TractionSignalKind,
 } from '@provenance/core';
 import { clamp, nowIso, truncate } from '@provenance/core';
 import { anchorSchema, parseAnchor, unresolvedAnchor } from './anchor';
@@ -32,6 +37,19 @@ const RECYCLE_VERDICTS: readonly RecycleVerdict[] = [
   'derivative',
   'copycat',
   'unclear',
+];
+const ORGANIC_VERDICTS: readonly OrganicVerdict[] = ['organic', 'manufactured', 'mixed', 'unclear'];
+const SIGNAL_KINDS: readonly TractionSignalKind[] = [
+  'listing',
+  'notable-attention',
+  'community-effort',
+  'media',
+  'anchor-acknowledgement',
+  'sniped-launch',
+  'insider-cluster',
+  'paid-promotion',
+  'fast-tracked-listing',
+  'other',
 ];
 const LINEAGE_KINDS: readonly LineageNode['kind'][] = ['origin', 'revival', 'derivative', 'platform-shift'];
 const OUTCOMES: readonly NonNullable<PriorCycle['outcome']>[] = ['still-alive', 'faded', 'rugged', 'unknown'];
@@ -55,8 +73,59 @@ const EVIDENCE_KINDS: readonly EvidenceKind[] = [
  */
 export type ReportDraft = Omit<
   ProvenanceReport,
-  'tokenId' | 'model' | 'promptVersion' | 'generatedAt' | 'usage' | 'anchor'
-> & { anchor: Anchor };
+  'tokenId' | 'model' | 'promptVersion' | 'generatedAt' | 'usage' | 'anchor' | 'organic'
+> & { anchor: Anchor; organic: OrganicRead };
+
+/** JSON schema for the `organic` object. */
+function organicSchema(): Record<string, unknown> {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['verdict', 'outsideTraction', 'signals', 'rivals', 'summary'],
+    properties: {
+      verdict: { type: 'string', enum: [...ORGANIC_VERDICTS] },
+      outsideTraction: {
+        type: 'integer',
+        minimum: 0,
+        maximum: 100,
+        description: 'Effort and attention from outside the launch. Paid or insider attention does not count.',
+      },
+      signals: {
+        type: 'array',
+        description: 'Each dated, sourced fact behind the verdict. organic=false for signs of manufacture.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['kind', 'organic', 'detail'],
+          properties: {
+            kind: { type: 'string', enum: [...SIGNAL_KINDS] },
+            organic: { type: 'boolean' },
+            detail: { type: 'string' },
+            date: { type: 'string' },
+            url: { type: 'string' },
+          },
+        },
+      },
+      rivals: {
+        type: 'array',
+        description: 'Other tokens carrying the same meme. Empty array when there are none.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['name'],
+          properties: {
+            name: { type: 'string' },
+            ticker: { type: 'string' },
+            chain: { type: 'string' },
+            address: { type: 'string' },
+            note: { type: 'string' },
+          },
+        },
+      },
+      summary: { type: 'string', description: 'One or two sentences: why, and against which rivals.' },
+    },
+  };
+}
 
 /** JSON schema mirroring ReportDraft field for field. */
 export const PROVENANCE_TOOL_SCHEMA: Anthropic.Tool.InputSchema = {
@@ -64,6 +133,7 @@ export const PROVENANCE_TOOL_SCHEMA: Anthropic.Tool.InputSchema = {
   additionalProperties: false,
   required: [
     'anchor',
+    'organic',
     'memeName',
     'narrativeCluster',
     'originSummary',
@@ -83,6 +153,8 @@ export const PROVENANCE_TOOL_SCHEMA: Anthropic.Tool.InputSchema = {
     // First, because it is the headline and the model fills fields in order.
     // `precedesLaunch` is deliberately absent: code computes it.
     anchor: anchorSchema(),
+    // Second: the anchor says the meme is real, this says the token is.
+    organic: organicSchema(),
     memeName: {
       type: 'string',
       description: "Canonical name of the underlying meme, not the ticker. 'dogwifhat', not '$WIF'.",
@@ -181,7 +253,7 @@ export function provenanceTool(cacheable = true): ToolSpec {
   return {
     name: PROVENANCE_TOOL_NAME,
     description:
-      'Record the provenance analysis for one token, leading with the anchor verdict. Call exactly once. Every field is required unless marked optional; omit originYear and anchor dates rather than guessing them.',
+      'Record the provenance analysis for one token, leading with the anchor verdict and then the organic read. Call exactly once. Every field is required unless marked optional; omit originYear and anchor dates rather than guessing them.',
     schema: PROVENANCE_TOOL_SCHEMA as unknown as Record<string, unknown>,
     // Anthropic renders tools before system and messages, so a cache
     // breakpoint here covers the whole static prefix.
@@ -338,6 +410,103 @@ function validateEvidence(raw: unknown, repairs: string[], retrievedAt: string):
   return out;
 }
 
+function validateSignals(raw: unknown, repairs: string[]): TractionSignal[] {
+  if (!Array.isArray(raw)) {
+    if (raw !== undefined) repairs.push('organic.signals was not an array; dropped');
+    return [];
+  }
+  const out: TractionSignal[] = [];
+  let dropped = 0;
+  for (const entry of raw) {
+    const detail = isRecord(entry) ? str(entry.detail) : undefined;
+    if (!isRecord(entry) || detail === undefined || typeof entry.organic !== 'boolean') {
+      dropped++;
+      continue;
+    }
+    const kindRaw = str(entry.kind);
+    const kind = SIGNAL_KINDS.find((candidate) => candidate === kindRaw);
+    if (kind === undefined) repairs.push(`signal "${truncate(detail, 40)}" had kind "${kindRaw ?? 'missing'}"; set to other`);
+    const signal: TractionSignal = { kind: kind ?? 'other', organic: entry.organic, detail: truncate(detail, 400) };
+    const date = str(entry.date);
+    const url = str(entry.url);
+    if (date !== undefined) signal.date = truncate(date, 32);
+    if (url !== undefined) signal.url = url;
+    out.push(signal);
+  }
+  if (dropped > 0) repairs.push(`dropped ${dropped} malformed organic signal(s)`);
+  return out;
+}
+
+function validateRivals(raw: unknown, repairs: string[]): RivalInstance[] {
+  if (!Array.isArray(raw)) {
+    if (raw !== undefined) repairs.push('organic.rivals was not an array; dropped');
+    return [];
+  }
+  const out: RivalInstance[] = [];
+  let dropped = 0;
+  for (const entry of raw) {
+    const name = isRecord(entry) ? str(entry.name) : undefined;
+    if (!isRecord(entry) || name === undefined) {
+      dropped++;
+      continue;
+    }
+    const rival: RivalInstance = { name: truncate(name, 160) };
+    for (const key of ['ticker', 'chain', 'address'] as const) {
+      const value = str(entry[key]);
+      if (value !== undefined) rival[key] = truncate(value, 64);
+    }
+    const note = str(entry.note);
+    if (note !== undefined) rival.note = truncate(note, 400);
+    out.push(rival);
+  }
+  if (dropped > 0) repairs.push(`dropped ${dropped} malformed rival(s)`);
+  return out;
+}
+
+/** An organic read that says nothing: what a missing or failed one becomes. */
+export function unresolvedOrganic(summary: string): OrganicRead {
+  return { verdict: 'unclear', outsideTraction: 0, signals: [], rivals: [], summary };
+}
+
+/**
+ * The organic block. Like the anchor, never rejects the report. A verdict
+ * with no signal on its side is a guess, so it falls back to `unclear`:
+ * "organic" with nothing organic behind it is exactly the confident blank
+ * the prompt forbids.
+ */
+function validateOrganic(raw: unknown, repairs: string[]): OrganicRead {
+  if (!isRecord(raw)) {
+    repairs.push('organic missing; set to unclear');
+    return unresolvedOrganic('The model returned no organic read.');
+  }
+  const verdictRaw = str(raw.verdict);
+  let verdict = ORGANIC_VERDICTS.find((candidate) => candidate === verdictRaw);
+  if (verdict === undefined) repairs.push(`organic verdict "${verdictRaw ?? 'missing'}" not recognised; set to unclear`);
+
+  const traction = intIn(raw.outsideTraction, 0, 100);
+  if (traction === undefined) repairs.push('organic.outsideTraction missing or not a number; set to 0');
+
+  const signals = validateSignals(raw.signals, repairs);
+  const rivals = validateRivals(raw.rivals, repairs);
+
+  const backing =
+    verdict === 'organic' ? signals.some((s) => s.organic)
+    : verdict === 'manufactured' ? signals.some((s) => !s.organic)
+    : true;
+  if (!backing) {
+    repairs.push(`organic verdict ${verdict} with no signal on its side; set to unclear`);
+    verdict = 'unclear';
+  }
+
+  return {
+    verdict: verdict ?? 'unclear',
+    outsideTraction: traction ?? 0,
+    signals,
+    rivals,
+    summary: truncate(str(raw.summary) ?? 'No organic summary was returned.', 600),
+  };
+}
+
 const CONFIDENCE_STEPS: readonly AnchorConfidence[] = ['high', 'medium', 'low'];
 
 function lowerOneStep(confidence: AnchorConfidence): AnchorConfidence {
@@ -473,6 +642,7 @@ export function validateReportDraft(raw: unknown, now: string = nowIso()): Valid
   // yet traced none and could not place it in the recycling chain. Possible
   // for an inciting event, so it is kept — but believed one step less.
   const anchor = validateAnchor(raw.anchor, repairs);
+  const organic = validateOrganic(raw.organic, repairs);
   const verdictResolved = verdict ?? 'unclear';
   if (
     anchor.verdict === 'anchored' &&
@@ -495,6 +665,7 @@ export function validateReportDraft(raw: unknown, now: string = nowIso()): Valid
 
   const draft: ReportDraft = {
     anchor,
+    organic,
     memeName: truncate(memeName, 160),
     narrativeCluster: truncate(narrativeCluster ?? 'unclassified', 64),
     originSummary: originSummary ?? 'The model returned no origin summary; the meme could not be dated here.',
@@ -536,6 +707,7 @@ export function buildDegradedReport(params: {
   return {
     tokenId: params.tokenId,
     anchor: unresolvedAnchor(`Anchor not established: ${params.reason}`, params.failed),
+    organic: unresolvedOrganic(`Organic read not established: ${params.reason}`),
     memeName: params.memeName,
     narrativeCluster: 'unclassified',
     originSummary: `Provenance could not be established: ${params.reason}. No lineage is claimed here; treat this token as unresearched rather than as researched-and-clean.`,

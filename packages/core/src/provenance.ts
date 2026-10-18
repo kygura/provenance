@@ -50,6 +50,71 @@ export interface Anchor {
 }
 
 /**
+ * The second question every report answers: is the attention this token gets
+ * coming from outside its own launch, or was it staged?
+ *
+ * - organic:      people with no stake in the launch did work for it — a
+ *                 community takeover, listings won on review, attention from
+ *                 figures who were not paid, coverage outside crypto
+ * - manufactured: the attention is the launch apparatus — sniped or bundled
+ *                 supply, an insider wallet cluster, paid KOL rounds, a
+ *                 listing that arrived faster than any community could form
+ * - mixed:        both are present and neither clearly dominates
+ * - unclear:      the evidence does not settle it
+ *
+ * The anchor says whether the meme is real. This says whether the token
+ * carrying it is. Neiro (2024) is the reference case: one anchor, several
+ * same-name tokens, and the market sorted the organic one from the staged one.
+ */
+export type OrganicVerdict = 'organic' | 'manufactured' | 'mixed' | 'unclear';
+
+export type TractionSignalKind =
+  | 'listing'
+  | 'notable-attention'
+  | 'community-effort'
+  | 'media'
+  | 'anchor-acknowledgement'
+  | 'sniped-launch'
+  | 'insider-cluster'
+  | 'paid-promotion'
+  | 'fast-tracked-listing'
+  | 'other';
+
+export interface TractionSignal {
+  kind: TractionSignalKind;
+  /** True when the signal argues for organic, false when it argues for manufactured. */
+  organic: boolean;
+  detail: string;
+  /** ISO date (or year) the signal happened, when known. */
+  date?: string;
+  url?: string;
+}
+
+/** Another token carrying the same meme, often the same name. */
+export interface RivalInstance {
+  name: string;
+  ticker?: string;
+  chain?: string;
+  address?: string;
+  /** How it differs from this token: deploy order, distribution, listings. */
+  note?: string;
+}
+
+export interface OrganicRead {
+  verdict: OrganicVerdict;
+  /**
+   * 0-100: effort and attention from outside the token's own launch that
+   * could keep the narrative alive. Paid or insider-driven attention does not
+   * count, however loud.
+   */
+  outsideTraction: number;
+  signals: TractionSignal[];
+  rivals: RivalInstance[];
+  /** One or two sentences: why organic or manufactured, and against which rivals. */
+  summary: string;
+}
+
+/**
  * The thesis this project encodes: most "new" narratives are old narratives with
  * new participants. A token's provenance — where its meme came from, how many
  * times that meme has already been monetised, and whether this instance is the
@@ -114,6 +179,11 @@ export interface ProvenanceReport {
    * only because reports written before the verdict existed lack it.
    */
   anchor?: Anchor;
+  /**
+   * Organic or manufactured, and how much outside traction. Optional only
+   * because reports written before prompt v4 lack it.
+   */
+  organic?: OrganicRead;
   /** Canonical name of the underlying meme/narrative, not the ticker. */
   memeName: string;
   /** Broad family: "dog", "frog", "political", "ai-agents", "nostalgia", etc. */

@@ -10,6 +10,14 @@ enough to distinguish a revival from an invention. Provenance treats a token's
 it has already been monetised, and whether this particular token is the instance the
 meme's audience would accept as canonical.
 
+A real meme does not make a real token. When a meme catches, several tokens take its
+name, and some of them are staged: sniped at launch, held by insiders, promoted with
+paid posts, fast-tracked to derivatives listings. Neiro in 2024 is the reference: one
+anchor, two Ethereum tokens, one carried by a community takeover to a Binance spot
+listing, the other flagged as sniped and listed for perps. So every trending token is
+read twice: is the meme anchored, and is the token organic, with enough outside
+traction to keep the narrative going once the launch money stops.
+
 ## What it does
 
 Twice a day, in the cloud:
@@ -22,8 +30,10 @@ Twice a day, in the cloud:
    authorities, LP burn/lock, creator holdings, risk flags. Free public RPCs only.
 4. **Research provenance** — hand Claude the measured facts and let it search the
    web itself, then have a second pass structure its own notes into a
-   `ProvenanceReport`: origin, lineage, prior cycles, recycle verdict and
-   generation, durability, cultural reach, authenticity.
+   `ProvenanceReport`: anchor verdict, organic read (organic or manufactured,
+   outside traction, signals, same-meme rivals), origin, lineage, prior
+   cycles, recycle verdict and generation, durability, cultural reach,
+   authenticity.
 5. **Score** — composite 0-100 from recycling strength, memetic durability,
    distribution health, liquidity depth, momentum and authenticity.
 6. **Alert** — rules fire into Telegram / Discord / webhook.

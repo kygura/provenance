@@ -60,17 +60,27 @@ describe('system prompt', () => {
     expect(SYSTEM_PROMPT).not.toContain(new Date().getFullYear().toString());
   });
 
-  test('version is bumped for the anchor-first restructure', () => {
-    expect(PROMPT_VERSION).toBe('provenance-research-v3');
+  test('version is bumped for the organic read', () => {
+    expect(PROMPT_VERSION).toBe('provenance-research-v4');
   });
 
   test('leads with the anchor question, quoting the shared rules verbatim', () => {
     const rulesAt = SYSTEM_PROMPT.indexOf(ANCHOR_RULES);
     expect(rulesAt).toBeGreaterThan(-1);
     // The lineage thesis and the field guidance are supporting detail, after it.
-    expect(SYSTEM_PROMPT.indexOf('The thesis behind the lineage')).toBeGreaterThan(rulesAt);
+    expect(SYSTEM_PROMPT.indexOf('Why recycling matters')).toBeGreaterThan(rulesAt);
     expect(SYSTEM_PROMPT.indexOf('# Field guidance')).toBeGreaterThan(rulesAt);
     expect(SYSTEM_PROMPT).toContain('`anchor`: the headline');
+  });
+
+  test('asks the organic question second, ahead of the lineage', () => {
+    const rulesAt = SYSTEM_PROMPT.indexOf(ANCHOR_RULES);
+    const organicAt = SYSTEM_PROMPT.indexOf('# The organic question');
+    expect(organicAt).toBeGreaterThan(rulesAt);
+    expect(SYSTEM_PROMPT.indexOf('Why recycling matters')).toBeGreaterThan(organicAt);
+    expect(SYSTEM_PROMPT).toContain('Neiro, 2024');
+    expect(SYSTEM_PROMPT).toContain('absence of a sniping report is not a clean launch');
+    expect(SYSTEM_PROMPT).toContain('A manufactured token should not score above 30');
   });
 
   test('ties the lineage to the verdict as its evidence', () => {
@@ -131,6 +141,17 @@ describe('buildResearchPrompt', () => {
     expect(prompt).toContain('Never cite it');
   });
 
+  test('asks for rivals and both kinds of organic signal before the lineage', () => {
+    const prompt = buildResearchPrompt(snapshot(), undefined, []);
+    const organicAt = prompt.indexOf('The organic read');
+    expect(organicAt).toBeGreaterThan(prompt.indexOf('EARLIEST INDEPENDENT SOURCE'));
+    expect(prompt.indexOf('The lineage')).toBeGreaterThan(organicAt);
+    expect(prompt).toContain('OTHER token carrying the same meme');
+    expect(prompt).toContain('sniping or bundling');
+    expect(prompt).toContain('spot or derivatives');
+    expect(prompt).toContain('organic, manufactured, mixed or unclear, and the signal');
+  });
+
   test('says prose is the deliverable, so the model does not write to the schema', () => {
     const prompt = buildResearchPrompt(snapshot(), undefined, []);
     expect(prompt).toContain('Do NOT call a tool in this turn');
@@ -165,6 +186,7 @@ describe('buildExtractionPrompt', () => {
   test('asks for the anchor first and leaves the date comparison to code', () => {
     const prompt = buildExtractionPrompt(snapshot(), undefined, 'notes', []);
     expect(prompt).toContain('Fill `anchor` first');
+    expect(prompt).toContain('Fill `organic` second');
     expect(prompt).toContain('the system compares');
   });
 
