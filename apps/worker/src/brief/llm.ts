@@ -25,14 +25,17 @@ export const BRIEF_TOOL_NAME = 'emit_brief';
 export const CONFIDENCE_WORDS = ['low-confidence', 'we lean', 'base case', 'tail case', 'risk skews'] as const;
 export type ConfidenceWord = (typeof CONFIDENCE_WORDS)[number];
 
-export const DEFAULT_BRIEF_MODEL = 'moonshot:kimi-k3';
-export const DEFAULT_BRIEF_FALLBACK = 'moonshot:kimi-k2.6';
+// Claude first. Opus 5, not 5.5: callTool forces tool_choice, which the 5.5 line rejects.
+// Kimi takes over when the Anthropic call fails (no credits, no key, outage).
+export const DEFAULT_BRIEF_MODEL = 'anthropic:claude-opus-5';
+export const DEFAULT_BRIEF_FALLBACK = 'moonshot:kimi-k3,moonshot:kimi-k2.6';
 export const DEFAULT_BRIEF_MAX_USD = 0.5;
 const MAX_TOKENS = 6000;
 const MAX_TEXT = 400;
 
 export interface BriefSettings {
   model: string;
+  /** Comma-separated specs, tried in order after `model`. */
   fallback: string;
   maxUsd: number;
 }
@@ -48,7 +51,7 @@ export function briefSettings(env: Record<string, string | undefined>): BriefSet
 
 /** Model specs that have a key, primary first. Empty means the brief runs without a model. */
 export function usableModels(app: AppConfig, settings: BriefSettings): string[] {
-  const specs = [...new Set([settings.model, settings.fallback])];
+  const specs = [...new Set([settings.model, ...settings.fallback.split(',').map((spec) => spec.trim()).filter(Boolean)])];
   return specs.filter((spec) => {
     const { provider } = parseModelSpec(spec);
     return Boolean(providerApiKey(app, provider));

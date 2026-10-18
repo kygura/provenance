@@ -79,12 +79,14 @@ jobs:
           bun run apps/worker/src/cli.ts "${args[@]}"
         env:
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
-          # Brief model, fallback and spend cap. Blank means Kimi K3, then
-          # K2.6, capped at $0.50 a run.
+          # Brief model, fallback and spend cap. Blank means Claude Opus 5,
+          # then Kimi K3, then K2.6, capped at $0.50 a run.
           LLM_BRIEF_MODEL: ${{ vars.LLM_BRIEF_MODEL }}
           LLM_BRIEF_FALLBACK: ${{ vars.LLM_BRIEF_FALLBACK }}
           LLM_BRIEF_MAX_USD: ${{ vars.LLM_BRIEF_MAX_USD }}
           LLM_PRICING: ${{ vars.LLM_PRICING }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_WORKSPACE_ID: ${{ secrets.ANTHROPIC_WORKSPACE_ID }}
           MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}

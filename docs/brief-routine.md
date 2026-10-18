@@ -1,8 +1,8 @@
 # Brief routine: provider-agnostic daily brief and token setups
 
 Status: spec for `cli.ts brief`, run from `.github/workflows/brief.yml`.
-It reuses the worker's own LLM layer (`packages/research/src/llm/`, Kimi on
-Moonshot by default) and alert sinks (`packages/alerts`). It replaces the
+It reuses the worker's own LLM layer (`packages/research/src/llm/`: Claude
+Opus 5 by default, Kimi on Moonshot when the Anthropic call fails) and alert sinks (`packages/alerts`). It replaces the
 Claude Code briefing session described in `CLAUDE.md` without needing it,
 and adds a small, gated **setups ledger** for tokens.
 
@@ -143,8 +143,13 @@ created_at TEXT, updated_at TEXT, expires_at TEXT   -- ISO-8601 Z
 `brief.yml`: cron `40 6 * * *` and `40 18 * * *` (40 min after each full
 run), plus `workflow_dispatch` (`dry_run`). Concurrency group
 `provenance-brief`. It needs `DATABASE_URL`, `DATABASE_AUTH_TOKEN`,
-`MOONSHOT_API_KEY` (or whatever the brief model names), `TELEGRAM_*`,
-`DISCORD_WEBHOOK_URL` (optional). Variables: `LLM_BRIEF_MODEL`
-(default `moonshot:kimi-k3`), `LLM_BRIEF_FALLBACK` (default
-`moonshot:kimi-k2.6`), `LLM_BRIEF_MAX_USD`. Missing LLM key → `--no-llm`
-brief, exit 0.
+`ANTHROPIC_API_KEY` and/or `MOONSHOT_API_KEY` (or whatever the brief
+models name), `TELEGRAM_*`, `DISCORD_WEBHOOK_URL` (optional). Variables:
+`LLM_BRIEF_MODEL` (default `anthropic:claude-opus-5`), `LLM_BRIEF_FALLBACK`
+(comma-separated, default `moonshot:kimi-k3,moonshot:kimi-k2.6`),
+`LLM_BRIEF_MAX_USD`. Models are tried in order; an Anthropic account out of
+credits answers with an HTTP error, so the brief moves on to Kimi with no
+change. Opus 5 rather than 5.5 because `callTool` forces `tool_choice`,
+which the 5.5 line rejects. To switch models, set the variables under
+Settings → Secrets and variables → Actions → Variables. Missing LLM key →
+`--no-llm` brief, exit 0.

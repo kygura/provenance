@@ -63,7 +63,7 @@ describe('validateBriefOutput', () => {
 
 describe('settings', () => {
   test('defaults and overrides', () => {
-    expect(briefSettings({})).toEqual({ model: 'moonshot:kimi-k3', fallback: 'moonshot:kimi-k2.6', maxUsd: 0.5 });
+    expect(briefSettings({})).toEqual({ model: 'anthropic:claude-opus-5', fallback: 'moonshot:kimi-k3,moonshot:kimi-k2.6', maxUsd: 0.5 });
     expect(briefSettings({ LLM_BRIEF_MODEL: 'deepseek:deepseek-chat', LLM_BRIEF_MAX_USD: '0.1' })).toMatchObject({
       model: 'deepseek:deepseek-chat',
       maxUsd: 0.1,
@@ -76,5 +76,9 @@ describe('settings', () => {
     expect(usableModels(app, briefSettings({}))).toEqual([]);
     const keyed = makeConfig({ llm: { ...app.llm, providers: { ...app.llm.providers, moonshot: { apiKey: 'k' } } } });
     expect(usableModels(keyed, briefSettings({}))).toEqual(['moonshot:kimi-k3', 'moonshot:kimi-k2.6']);
+    const both = makeConfig({
+      llm: { ...app.llm, providers: { ...app.llm.providers, anthropic: { apiKey: 'a' }, moonshot: { apiKey: 'k' } } },
+    });
+    expect(usableModels(both, briefSettings({}))).toEqual(['anthropic:claude-opus-5', 'moonshot:kimi-k3', 'moonshot:kimi-k2.6']);
   });
 });

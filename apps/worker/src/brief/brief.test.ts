@@ -435,7 +435,7 @@ describe('cli brief', () => {
     const harness = makeHarness();
     const { code, out } = await run(['brief', '--dry-run'], { ...harness.deps, createStore: () => db.store });
     expect(code).toBe(EXIT_OK);
-    expect(out).toContain('notice: no API key for moonshot:kimi-k3');
+    expect(out).toContain('notice: no API key for anthropic:claude-opus-5 or moonshot:kimi-k3');
     expect(out).toContain('Regime: meme');
     expect(out).toContain('dry run:');
     expect(harness.dispatched).toEqual([]);
