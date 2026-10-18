@@ -35,6 +35,7 @@ export {
   provenanceTool,
   validateReportDraft,
   buildDegradedReport,
+  unresolvedOrganic,
   degradeConfidence,
   type ReportDraft,
   type ValidationOutcome,

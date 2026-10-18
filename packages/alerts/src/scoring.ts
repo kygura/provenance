@@ -431,8 +431,8 @@ export function scoreMomentum(metrics?: MarketMetrics): number {
 /**
  * Is this the instance of the meme its audience would accept as canonical?
  *
- * Starts from the model's `authenticityScore` and adjusts for two cheap, external
- * corroborations: whether the token has any public presence at all, and whether more
+ * Starts from the model's `authenticityScore`, moves it by the organic read's
+ * outside traction, and adjusts for two cheap, external corroborations: whether the token has any public presence at all, and whether more
  * than one trending list independently surfaced it.
  *
  * Neutral when the report is missing: `NEUTRAL.authenticity` (40), still adjusted by
@@ -452,6 +452,15 @@ export function scoreAuthenticity(report?: ProvenanceReport, snapshot?: TokenSna
     else if (present === 1) value -= 4;
     else value += 4;
     if (socials.website) value += 3;
+  }
+
+  // Outside traction is the model's read of how much unpaid, outside work is
+  // carrying the token. It moves authenticity by at most 10 either way, and
+  // only when the organic read reached a verdict: `unclear` says nothing.
+  const organic = report?.organic;
+  const traction = finite(organic?.outsideTraction);
+  if (organic && organic.verdict !== 'unclear' && traction !== undefined) {
+    value += (clamp(traction, 0, 100) - 50) * ORGANIC_TRACTION_WEIGHT;
   }
 
   // Cross-source agreement is the cheapest independent evidence we have that this is
@@ -564,6 +573,15 @@ export function capTier(tier: ScoreTier, ceiling: ScoreTier | undefined): ScoreT
   return TIER_ORDER.indexOf(tier) >= TIER_ORDER.indexOf(ceiling) ? tier : ceiling;
 }
 
+/** Authenticity points per point of outside traction away from 50 (so ±10 at the ends). */
+export const ORGANIC_TRACTION_WEIGHT = 0.2;
+
+/** Points off a token judged `manufactured` at or above `LOW_CONFIDENCE_THRESHOLD`. */
+export const MANUFACTURED_PENALTY = 20;
+
+/** Points off a `mixed` organic read: some of the attention was staged. */
+export const MIXED_PENALTY = 6;
+
 /** Points off a meme judged `forced` at medium or high confidence. */
 export const FORCED_PENALTY = 25;
 
@@ -674,6 +692,27 @@ export function scoreToken(input: ScoringInput, options: ScoreOptions = {}): Pro
       penalties.push({ reason: `Forced meme: ${anchor.summary || 'no independent anchor found'}`, points: FORCED_PENALTY });
       ceiling = capTier(ceiling ?? 'S', 'C');
     }
+  }
+
+  // The organic read is the second question, and it bites the same way: a real
+  // meme on a sniped, insider-held token (the Neiro perps twin) must not read
+  // as tier A on the strength of the meme. Gated on the report's own
+  // confidence, since there is no per-verdict confidence for it.
+  const organic = input.provenance?.organic;
+  const reportConfidence = finite(input.provenance?.confidence) ?? 0;
+  if (organic?.verdict === 'manufactured') {
+    if (reportConfidence < LOW_CONFIDENCE_THRESHOLD) {
+      ceiling = capTier(ceiling ?? 'S', 'B');
+    } else {
+      penalties.push({
+        reason: `Manufactured token: ${organic.summary || 'attention traced to the launch, not outside it'}`,
+        points: MANUFACTURED_PENALTY,
+      });
+      ceiling = capTier(ceiling ?? 'S', 'C');
+    }
+  } else if (organic?.verdict === 'mixed') {
+    penalties.push({ reason: `Partly staged attention: ${organic.summary || 'organic and manufactured signals both present'}`, points: MIXED_PENALTY });
+    ceiling = capTier(ceiling ?? 'S', 'A');
   }
 
   // Low model confidence scales the provenance-derived components down rather than

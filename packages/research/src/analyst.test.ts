@@ -72,6 +72,13 @@ function goodDraft(): Record<string, unknown> {
       summary: 'A 2011 animation that spread on YouTube.',
       confidence: 'high',
     },
+    organic: {
+      verdict: 'mixed',
+      outsideTraction: 40,
+      signals: [{ kind: 'media', organic: true, detail: 'Covered outside crypto.' }],
+      rivals: [{ name: 'NYAN (Solana)', chain: 'solana' }],
+      summary: 'Some outside coverage; a same-name rival splits the audience.',
+    },
     memeName: 'Nyan Cat',
     narrativeCluster: 'cat',
     originYear: 2011,

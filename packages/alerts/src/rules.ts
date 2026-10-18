@@ -104,6 +104,8 @@ export const RUG_RISK_MIN_SCORE = 55;
 export const IMPOSTOR_MIN_MEMETIC = 65;
 /** Model authenticity at or below this means this token is not the meme's instance. */
 export const IMPOSTOR_MAX_AUTHENTICITY = 35;
+/** Below this report confidence a `manufactured` verdict is too thin to alert on. */
+export const MANUFACTURED_MIN_CONFIDENCE = 0.45;
 
 /**
  * The most recent comparable prior observation for the same token.
@@ -187,6 +189,8 @@ export const cleanRevivalRule: AlertRule = {
     if (cycles < 1) return null;
     if (input.score.total < input.config.pipeline.alertScoreThreshold) return null;
     if (assessRisk(input.chain).hasCritical) return null;
+    // A revival on a staged token is not clean, however good the lineage.
+    if (report.organic?.verdict === 'manufactured') return null;
 
     const lead = [
       `**Clean revival.** ${report.memeName} ran before${
@@ -383,10 +387,54 @@ export const canonicalImpostorRule: AlertRule = {
   },
 };
 
+/**
+ * The Neiro trap: the meme is real, and this token's attention was staged —
+ * sniped or bundled supply, an insider cluster, paid rounds, a fast-tracked
+ * listing. A forced meme is excluded: that is a different, already-penalised
+ * story. Fires whatever the score, because the token is trending either way.
+ */
+export const manufacturedCarrierRule: AlertRule = {
+  id: 'manufactured-carrier',
+  description: 'Real meme on a token the organic read judged manufactured.',
+  evaluate(input: AlertRuleInput): RuleResult | null {
+    const report = input.provenance;
+    const organic = report?.organic;
+    if (!report || organic?.verdict !== 'manufactured') return null;
+    if (report.anchor?.verdict === 'forced') return null;
+    if (!Number.isFinite(report.confidence) || report.confidence < MANUFACTURED_MIN_CONFIDENCE) return null;
+
+    const staged = organic.signals.filter((signal) => !signal.organic).slice(0, 3);
+    const rival = organic.rivals[0];
+    const lead = [
+      `**Real meme, staged token.** "${report.memeName}" is the narrative; the attention on this token traces to its launch.`,
+      ...staged.map((signal) => `• ${signal.kind}: ${signal.detail}${signal.date ? ` (${signal.date})` : ''}`),
+    ];
+    if (rival) {
+      lead.push(`Rival carrying the same meme: ${rival.name}${rival.chain ? ` on ${rival.chain}` : ''}${rival.note ? ` — ${rival.note}` : ''}.`);
+    }
+    return result(
+      input,
+      'manufactured-carrier',
+      'warn',
+      `Manufactured: $${input.snapshot.symbol} rides ${report.memeName} (traction ${Math.round(organic.outsideTraction)}/100)`,
+      {
+        lead,
+        payload: {
+          organicVerdict: organic.verdict,
+          outsideTraction: organic.outsideTraction,
+          stagedSignals: staged.map((signal) => signal.kind),
+          rivals: organic.rivals.map((r) => r.name),
+        },
+      },
+    );
+  },
+};
+
 /** Evaluation order is the order alerts appear for a token. Flagship first. */
 export const defaultRules: AlertRule[] = [
   cleanRevivalRule,
   rugRiskRule,
+  manufacturedCarrierRule,
   scoreSurgeRule,
   canonicalImpostorRule,
   narrativeClusterHeatRule,

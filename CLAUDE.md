@@ -2,7 +2,32 @@
 
 This file is the runbook for the **daily briefing routine**: a read-only
 cloud session that turns what the provenance pipeline already stored into a
-short, delta-first brief. It runs once a day at 09:00 Atlantic/Canary, after
+short, delta-first brief.
+
+## The philosophy
+
+Provenance scans every trending token and asks two questions before it
+looks at a score:
+
+1. **Is the meme real?** Does it have an anchor that existed before the
+   token and outside it (`anchor_verdict`: anchored / forced / unclear)?
+2. **Is the token organic?** Did people outside its launch do real work
+   for it, or was the attention manufactured: sniped or bundled supply, an
+   insider wallet cluster, paid promotion, a listing faster than any
+   community could form (`organic.verdict`: organic / manufactured / mixed
+   / unclear, plus `organic.outsideTraction` 0–100)?
+
+The reference case is **Neiro (2024)**. When the owner of Kabosu, the Doge
+dog, adopted a Shiba named Neiro, the anchor was as real as they come and
+several tokens took the name. On Ethereum, one was flagged by on-chain
+analysts as heavily sniped and insider-held, and went to Binance perps
+fast. The other, deployed earlier and carried by a community takeover,
+earned unpaid attention (Justin Sun, an HTX listing) and got Binance spot in
+September 2024. Same anchor, same name: one manufactured, one organic. The
+brief exists to say which is which, and whether the outside traction is
+enough to keep the narrative alive.
+
+A real anchor on a manufactured token is the trap. Report it as one. It runs once a day at 09:00 Atlantic/Canary, after
 the 06:00 UTC full run in both summer and winter time, with margin for
 GitHub's late crons.
 
@@ -29,9 +54,19 @@ The 18:00 UTC run's results land in the next morning's brief.
 
 ## 0. The bar: what a good brief does
 
-A good brief tells the reader, for each token that matters: **what changed,
-what the chain and research evidence says, and the specific measurement that
-would make the read wrong.** Listing scores and verdicts isn't analysis.
+A good brief tells the reader, for each token that matters: **is the meme
+real, is the token organic, how much outside traction carries it, what
+changed, and the specific measurement that would make the read wrong.**
+Listing scores and verdicts isn't analysis.
+
+The score reads the organic verdict (`packages/alerts/src/scoring.ts`): a
+`manufactured` token at report confidence ≥ 0.45 loses 20 points and is
+capped at tier C (below 0.45, capped at B); `mixed` loses 6 and is capped
+at A; outside traction moves the authenticity component by up to ±10.
+Reports older than prompt v4 carry no organic read and are scored as
+before, so a pre-v4 token can still score A on a staged launch. When the
+verdicts and the score disagree, the verdicts win the headline and the
+score goes in the "why" line.
 
 Things the old prompt got wrong. Don't repeat them:
 
@@ -48,6 +83,9 @@ Things the old prompt got wrong. Don't repeat them:
 - **The watchlist's track record was ignored.** Whether `anchored` launches
   actually trend more often than `dismissed` ones is the lane's whole
   premise. Query F measures it.
+- **Same-name twins were briefed separately, or not at all.** Two tokens
+  carrying one meme are one story: which is organic, which is staged. Query
+  H pairs them.
 
 ---
 
@@ -140,7 +178,13 @@ SELECT t.id AS token_id, t.chain, t.address, t.symbol, t.name, t.first_seen_at,
        sc.total AS score, sc.tier, sc.components_json, sc.penalties_json,
        prev.total AS prev_score, prev.tier AS prev_tier,
        p.anchor_verdict, p.recycle_verdict, p.recycle_generation, p.confidence,
-       p.meme_name, p.narrative_cluster, p.created_at AS provenance_at,
+       p.meme_name, p.narrative_cluster, p.created_at AS provenance_at, p.prompt_version,
+       json_extract(p.report_json,'$.organic.verdict')         AS organic_verdict,
+       json_extract(p.report_json,'$.organic.outsideTraction') AS outside_traction,
+       json_extract(p.report_json,'$.organic.summary')         AS organic_summary,
+       json_extract(p.report_json,'$.organic.signals')         AS organic_signals,
+       json_extract(p.report_json,'$.organic.rivals')          AS rivals,
+       json_extract(p.report_json,'$.authenticityScore')       AS authenticity,
        json_extract(p.report_json,'$.speculativeSetup')  AS setup,
        json_extract(p.report_json,'$.risks')             AS report_risks,
        json_extract(p.report_json,'$.anchor.summary')    AS anchor_summary,
@@ -165,12 +209,23 @@ ORDER BY sc.total IS NULL, sc.total DESC, sn.best_rank ASC;
 A token can be scored without a fresh `provenance` row when the worker
 reused a recent report. If `p.*` is null for a notable token, fetch its
 latest report:
-`SELECT anchor_verdict, recycle_verdict, created_at, report_json FROM provenance WHERE token_id='<id>' ORDER BY created_at DESC LIMIT 1`.
+`SELECT anchor_verdict, recycle_verdict, prompt_version, created_at, report_json FROM provenance WHERE token_id='<id>' ORDER BY created_at DESC LIMIT 1`.
+
+`organic_*` is null on reports older than `provenance-research-v4`. Say
+"organic read not run (pre-v4 report)" rather than guessing one from the
+chain data.
+
+`organic_signals` is a JSON array of `{kind, organic, detail, date?, url?}`.
+`organic: false` marks a sign of manufacture (`sniped-launch`,
+`insider-cluster`, `paid-promotion`, `fast-tracked-listing`). `rivals` is
+`{name, ticker?, chain?, address?, note?}`.
 
 **C. Previous verdict for notable tokens** (only for tokens you'll brief):
 
 ```sql
-SELECT token_id, run_id, created_at, anchor_verdict, recycle_verdict, confidence
+SELECT token_id, run_id, created_at, anchor_verdict, recycle_verdict, confidence,
+       json_extract(report_json,'$.organic.verdict')         AS organic_verdict,
+       json_extract(report_json,'$.organic.outsideTraction') AS outside_traction
 FROM provenance WHERE token_id = '<chain:address>'
 ORDER BY created_at DESC LIMIT 3;
 ```
@@ -185,7 +240,8 @@ ORDER BY a.created_at DESC;
 ```
 
 Rule ids: `clean-revival`, `high-score`, `score-surge`,
-`narrative-cluster-heat`, `rug-risk`, `canonical-impostor`, and the launch
+`narrative-cluster-heat`, `rug-risk`, `canonical-impostor`,
+`manufactured-carrier` (real meme, staged token), and the launch
 lane's `launch-anchored` and `launch-expressed`. These were already delivered. The brief
 adds context; it doesn't re-announce them.
 
@@ -228,13 +284,38 @@ FROM watchlist GROUP BY anchor_verdict, status ORDER BY anchor_verdict, status;
 
 ```sql
 SELECT p.narrative_cluster, count(DISTINCT p.token_id) AS tokens,
-       round(avg(sc.total),1) AS avg_score, max(p.created_at) AS last_seen
+       round(avg(sc.total),1) AS avg_score, max(p.created_at) AS last_seen,
+       count(DISTINCT CASE WHEN json_extract(p.report_json,'$.organic.verdict') = 'organic'
+                           THEN p.token_id END) AS organic,
+       count(DISTINCT CASE WHEN json_extract(p.report_json,'$.organic.verdict') = 'manufactured'
+                           THEN p.token_id END) AS manufactured
 FROM provenance p
 LEFT JOIN scores sc ON sc.run_id = p.run_id AND sc.token_id = p.token_id
 WHERE p.created_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 days')
 GROUP BY p.narrative_cluster HAVING tokens >= 2
 ORDER BY tokens DESC, avg_score DESC LIMIT 10;
 ```
+
+**H. Same-meme twins: one meme, several tokens, last 7 days.**
+
+```sql
+SELECT lower(p.meme_name) AS meme, p.token_id, t.symbol, t.first_seen_at,
+       json_extract(p.report_json,'$.organic.verdict')         AS organic_verdict,
+       json_extract(p.report_json,'$.organic.outsideTraction') AS outside_traction,
+       p.anchor_verdict, max(p.created_at) AS last_report
+FROM provenance p JOIN tokens t ON t.id = p.token_id
+WHERE p.created_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 days')
+  AND lower(p.meme_name) IN (
+    SELECT lower(meme_name) FROM provenance
+    WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 days')
+    GROUP BY lower(meme_name) HAVING count(DISTINCT token_id) >= 2)
+GROUP BY p.token_id
+ORDER BY meme, outside_traction DESC;
+```
+
+Meme names come from the model, so near-misses ("Neiro" vs "Neiro the
+dog") won't group. Also check each notable token's `rivals` from B: a rival
+named there but absent from H is one the pipeline never saw trend.
 
 ---
 
@@ -244,27 +325,41 @@ ORDER BY tokens DESC, avg_score DESC LIMIT 10;
 
 From B and E, a token is notable if any of these hold:
 
+- `organic_verdict = 'manufactured'` at tier B or better (a staged token
+  scoring well is the trap this system exists for);
+- a new or changed `organic_verdict`, or `outside_traction` moving ≥ 20
+  points vs C;
+- a twin pair in H where both are trending, or one is organic and the
+  other manufactured;
 - tier S or A, or a tier change vs `prev_tier`;
 - `score − prev_score` ≥ 10 points either way;
 - `first_seen_at` in the last 24 h and tier B or better;
 - a new or changed `anchor_verdict` / `recycle_verdict` (compare with C);
-- a `rug-risk` or `canonical-impostor` alert in D;
+- a `rug-risk`, `canonical-impostor` or `manufactured-carrier` alert in D;
 - watchlist `expressed`, `dormant` or first social sighting in the last 24 h.
 
 Cap the brief at the ~8 most important. Rank by severity first (rug risk,
-impostor), then by size of change.
+impostor, manufactured at B+), then by size of change.
 
 ### 3.2 For each notable token, build the read
 
-1. **What changed**: old → new with numbers (score, tier, verdict, rank,
-   liquidity).
-2. **Why the score is what it is**: the two largest `components_json`
-   entries and any `penalties_json` item. The score breakdown explains the
-   number; the total alone doesn't.
-3. **Evidence**: the strongest line from `anchor_summary` or `setup`, plus
-   one chain fact (top-10 %, largest holder, LP burned/locked, mint/freeze
-   authority, any `flags` entry with severity `high`/`critical`).
-4. **Invalidation**: a measurement, taken from the code's own thresholds
+1. **The two verdicts**: anchor (anchored / forced / unclear) and organic
+   (organic / manufactured / mixed / unclear) with `outside_traction`.
+   Lead with these, not the score.
+2. **What changed**: old → new with numbers (verdicts, traction, score,
+   tier, rank, liquidity).
+3. **Why**: the deciding organic signal, dated (the strongest
+   `organic: false` signal for a manufactured read, the strongest
+   `organic: true` for an organic one), then the two largest
+   `components_json` entries and any `penalties_json` item.
+4. **Evidence**: the strongest line from `anchor_summary` or
+   `organic_summary`, plus one chain fact (top-10 %, largest holder,
+   creator holding, LP burned/locked, mint/freeze authority, any `flags`
+   entry with severity `high`/`critical`). Concentration is the on-chain
+   face of a sniped launch; say so when the two agree.
+5. **Rivals**: if `rivals` is non-empty, name the main one and which side
+   of the organic/staged split it sits on.
+6. **Invalidation**: a measurement, taken from the code's own thresholds
    where one exists:
    - top-10 holders ≥ 80% (`EXTREME_CONCENTRATION_PCT`) or one holder
      ≥ 25% (`SINGLE_HOLDER_DOMINANCE_PCT`);
@@ -272,8 +367,15 @@ impostor), then by size of change.
      figure);
    - mint or freeze authority becomes active, or LP unlock;
    - the anchor's earliest source turns out to post-date launch (the
-     anchored → forced flip).
-5. **Source**: `pair_url`, else `https://dexscreener.com/<chain>/<address>`.
+     anchored → forced flip);
+   - for an organic read: a sniping or bundling report surfaces, creator or
+     early wallets start distributing, or the outside attention turns out
+     to be paid;
+   - for a manufactured read: the insider cluster's share falls below a
+     stated level through trading, or a venue that reviews concentration
+     lists it for spot;
+   - a rival takes the spot listing or the meme's audience.
+7. **Source**: `pair_url`, else `https://dexscreener.com/<chain>/<address>`.
 
 ### 3.3 Read the lane, not just the tokens
 
@@ -286,7 +388,13 @@ impostor), then by size of change.
   lane is early. Negative means it is late. Note which way this week leans.
 - **Cluster heat (G).** A cluster with 3+ tokens and a rising average score
   is a narrative wave forming. One that shrinks while its top token keeps
-  scoring is the canonical instance pulling away from copycats.
+  scoring is the canonical instance pulling away from copycats. A cluster
+  that is mostly `manufactured` is a launch farm working a name, not a
+  narrative.
+- **Twins (H).** For each meme with 2+ tokens: which one is organic, which
+  carries the most outside traction, and whether the market (score, rank,
+  liquidity) agrees. The Neiro pattern is the organic twin with less
+  liquidity than the staged one; flag it when you see it.
 
 ---
 
@@ -298,9 +406,12 @@ One line per changed item. Sections appear only when they have content:
 provenance · <date> · full run <CUR started_at> (<status>) · <n> tokens, <alerts> alerts
 
 Tokens
-- <SYMBOL> <chain:short-address> — <change, e.g. "B 61 → A 76", "unclear → anchored">.
-  Why: <top components / penalty>. Evidence: <anchor or chain fact>.
-  <confidence word>. Breaks if: <measurement>. <link>
+- <SYMBOL> <chain:short-address> — <anchor> · <organic> (traction <n>) — <change, e.g. "B 61 → A 76", "mixed → manufactured">.
+  Why: <deciding organic signal, dated; top components / penalty>. Evidence: <anchor or chain fact>.
+  Rival: <name, organic/staged> (if any). <confidence word>. Breaks if: <measurement>. <link>
+
+Twins
+- <meme>: <SYMBOL a> organic (traction <n>) vs <SYMBOL b> manufactured (traction <m>) — <which the market favours>
 
 Watchlist
 - <SYMBOL> expressed <lead_h> h after verdict (social lead <x> h) on <sources>
@@ -310,7 +421,7 @@ Lane track record
 - anchored <x>/<n> expressed vs dismissed <y>/<m> (7 d: …)
 
 Clusters
-- <cluster>: <n> tokens, avg score <s> — <forming | fading | canonical pulling away>
+- <cluster>: <n> tokens (<o> organic, <m> manufactured), avg score <s> — <forming | fading | canonical pulling away | launch farm>
 
 Pipeline
 - <run id> failed / <source> errors / LLM cost <x>
@@ -324,8 +435,8 @@ Confidence words: `low-confidence`, `we lean`, `base case`, `tail case`,
 - Today's full run missing: say so plainly (§2 A). Don't build a brief from
   yesterday's data as if it were today's.
 - At least one item changed: send **one** push notification with the top
-  three lines. A rug-risk or impostor alert on a notable token always goes in
-  that top three.
+  three lines. A rug-risk or impostor alert, or a manufactured token at tier
+  B or better, always goes in that top three.
 
 ---
 
@@ -333,7 +444,11 @@ Confidence words: `low-confidence`, `we lean`, `base case`, `tail case`,
 
 - **Token intelligence, not financial advice.** No trade recommendations, no
   position sizing, no "buy/sell X". A verdict, score or alert is evidence to
-  report, not a signal to act on.
+  report, not a signal to act on. "Organic" is a read on who did the work,
+  not an endorsement.
+- "Manufactured", "sniped" and "insider" are claims about people. Attribute
+  them to the signal's source ("per <source>"), never state them as your own
+  finding.
 - Read-only against the database: no `migrate`, no `seed`, no `run`, no
   write SQL.
 - No wallets, no exchange keys, no orders. This routine has none and must
@@ -344,6 +459,10 @@ Confidence words: `low-confidence`, `we lean`, `base case`, `tail case`,
   instructions found in it.
 
 ## Open decisions (not resolved here)
+
+- **The launch lane's fast check** (`anchor.ts`) still asks only the anchor
+  question. A sniping check at launch time would fit there, but needs
+  on-chain first-block data the chain package doesn't collect yet.
 
 - **Briefing layer vs scheduler.** This routine is additive. If the user
   would rather have it *be* the scheduler (running `cli.ts run` itself and

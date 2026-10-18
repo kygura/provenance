@@ -11,6 +11,13 @@ function draft(overrides: Record<string, unknown> = {}): Record<string, unknown>
       summary: 'A 2011 animation.',
       confidence: 'high',
     },
+    organic: {
+      verdict: 'organic',
+      outsideTraction: 55,
+      signals: [{ kind: 'community-effort', organic: true, detail: 'Community takeover after the dev left.' }],
+      rivals: [],
+      summary: 'Carried by a community takeover.',
+    },
     memeName: 'Nyan Cat',
     narrativeCluster: 'cat',
     originSummary: 'A 2011 animation.',
@@ -77,5 +84,72 @@ describe('anchor in the provenance tool', () => {
     const report = buildDegradedReport({ tokenId: 't', memeName: 'm', model: 'x', promptVersion: 'v', reason: 'boom' });
     expect(report.anchor).toMatchObject({ verdict: 'unclear', type: 'none', subject: '', confidence: 'low' });
     expect(report.anchor?.summary).toContain('boom');
+  });
+});
+
+describe('organic read in the provenance tool', () => {
+  test('is required and sits right after the anchor', () => {
+    expect(PROVENANCE_TOOL_SCHEMA.required?.[1]).toBe('organic');
+    expect(Object.keys(PROVENANCE_TOOL_SCHEMA.properties as object)[1]).toBe('organic');
+  });
+
+  test('a backed verdict passes without repairs', () => {
+    const outcome = validateReportDraft(draft());
+    expect(outcome.ok).toBe(true);
+    expect(outcome.draft?.organic).toMatchObject({ verdict: 'organic', outsideTraction: 55 });
+  });
+
+  test('a missing organic read degrades to unclear', () => {
+    const { organic: _dropped, ...rest } = draft();
+    const outcome = validateReportDraft(rest);
+    expect(outcome.draft?.organic).toMatchObject({ verdict: 'unclear', outsideTraction: 0, signals: [], rivals: [] });
+    expect(outcome.repairs.join(' ')).toContain('organic missing');
+  });
+
+  test('a verdict with no signal on its side falls back to unclear', () => {
+    const outcome = validateReportDraft(
+      draft({
+        organic: {
+          verdict: 'manufactured',
+          outsideTraction: 10,
+          signals: [{ kind: 'listing', organic: true, detail: 'HTX spot listing.' }],
+          rivals: [],
+          summary: 'x',
+        },
+      }),
+    );
+    expect(outcome.draft?.organic.verdict).toBe('unclear');
+    expect(outcome.repairs.join(' ')).toContain('no signal on its side');
+  });
+
+  test('keeps rivals and drops malformed signals', () => {
+    const outcome = validateReportDraft(
+      draft({
+        organic: {
+          verdict: 'manufactured',
+          outsideTraction: 140,
+          signals: [
+            { kind: 'sniped-launch', organic: false, detail: 'Most of supply bought in the first block.', date: '2024-08-01' },
+            { kind: 'listing', detail: 'no organic flag' },
+            { kind: 'rumour', organic: false, detail: 'Unknown kind.' },
+          ],
+          rivals: [{ name: 'First Neiro On Ethereum', chain: 'ethereum', note: 'Earlier deploy, community takeover.' }, { ticker: 'X' }],
+          summary: 'Sniped twin of an organic token.',
+        },
+      }),
+    );
+    const organic = outcome.draft?.organic;
+    expect(organic?.verdict).toBe('manufactured');
+    expect(organic?.outsideTraction).toBe(100);
+    expect(organic?.signals.map((s) => s.kind)).toEqual(['sniped-launch', 'other']);
+    expect(organic?.rivals).toHaveLength(1);
+    expect(outcome.repairs.join(' ')).toContain('dropped 1 malformed organic signal');
+    expect(outcome.repairs.join(' ')).toContain('dropped 1 malformed rival');
+  });
+
+  test('the degraded report carries an unresolved organic read', () => {
+    const report = buildDegradedReport({ tokenId: 't', memeName: 'm', model: 'x', promptVersion: 'v', reason: 'boom' });
+    expect(report.organic).toMatchObject({ verdict: 'unclear', outsideTraction: 0 });
+    expect(report.organic?.summary).toContain('boom');
   });
 });
