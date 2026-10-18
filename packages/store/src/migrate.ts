@@ -249,6 +249,41 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE watchlist ADD COLUMN social_lead_hours REAL`,
     ],
   },
+  {
+    version: 5,
+    name: 'setups',
+    statements: [
+      // ---- setups -------------------------------------------------------------
+      // The brief routine's ledger (docs/brief-routine.md). The only table
+      // `cli.ts brief` writes. No foreign key to `tokens`: a setup can be on a
+      // watchlist token that never got a snapshot, and it must outlive runs.
+      `CREATE TABLE IF NOT EXISTS setups (
+  id TEXT PRIMARY KEY,
+  token_id TEXT NOT NULL,
+  chain TEXT,
+  address TEXT,
+  symbol TEXT,
+  thesis TEXT,
+  trigger TEXT,
+  conviction TEXT,
+  regime_json TEXT,
+  entry_mcap_low REAL,
+  entry_mcap_high REAL,
+  invalidation_mcap REAL,
+  targets_json TEXT,
+  kill_json TEXT,
+  status TEXT,
+  status_note TEXT,
+  r_result REAL,
+  created_at TEXT,
+  updated_at TEXT,
+  expires_at TEXT
+)`,
+      `CREATE INDEX IF NOT EXISTS idx_setups_status ON setups (status, created_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_setups_token ON setups (token_id, created_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_setups_updated_at ON setups (updated_at DESC)`,
+    ],
+  },
 ];
 
 const BOOKKEEPING = `CREATE TABLE IF NOT EXISTS schema_migrations (

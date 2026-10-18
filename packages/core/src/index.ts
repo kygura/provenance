@@ -3,6 +3,7 @@ export * from './market';
 export * from './onchain';
 export * from './provenance';
 export * from './watchlist';
+export * from './setups';
 export * from './social';
 export * from './alerts';
 export * from './config';

@@ -16,6 +16,7 @@ export const COMMANDS = [
   'seed',
   'alerts:test',
   'report',
+  'brief',
   'help',
   'version',
 ] as const;

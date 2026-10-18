@@ -20,6 +20,8 @@ import type {
   RunStats,
   RunStatus,
   ScoreComponents,
+  Setup,
+  SetupKill,
   ScoreTier,
   SocialFirstSeen,
   SocialLinks,
@@ -33,7 +35,7 @@ import type {
   WatchEntry,
   WatchStatus,
 } from '@provenance/core';
-import { normalizeChain, parseTokenId, SOCIAL_PLATFORMS, silentLogger } from '@provenance/core';
+import { normalizeChain, parseTokenId, SETUP_STATUSES, SOCIAL_PLATFORMS, silentLogger } from '@provenance/core';
 
 /**
  * Row -> domain translation lives here, on its own, for two reasons: it is the
@@ -550,4 +552,67 @@ export function rowToSocialFirstSeen(row: SqlRow): SocialFirstSeen {
     platforms: SOCIAL_PLATFORMS.filter((platform) => platforms.has(platform)),
     peakMentions: num(row.peak_mentions),
   };
+}
+
+// ---------------------------------------------------------------------------
+// setups
+// ---------------------------------------------------------------------------
+
+const DEFAULT_KILL: SetupKill = { liquidityKillRatio: 0.5, maxTop10Pct: 80, maxSingleHolderPct: 25 };
+
+export function rowToSetup(row: SqlRow, logger: Logger = silentLogger): Setup {
+  const targets = parseArray<unknown>(row.targets_json, 'setups.targets_json', logger)
+    .map(asNumber)
+    .filter((value): value is number => value !== undefined);
+  const kill = parseObject<Partial<SetupKill>>(row.kill_json, 'setups.kill_json', {}, logger);
+  const rResult = asNumber(row.r_result);
+  const statusNote = asText(row.status_note);
+  return {
+    id: text(row.id),
+    tokenId: text(row.token_id),
+    chain: text(row.chain),
+    address: text(row.address),
+    symbol: text(row.symbol),
+    thesis: text(row.thesis),
+    trigger: text(row.trigger),
+    conviction: oneOf(row.conviction, ['low', 'medium', 'high'] as const, 'low'),
+    regime: parseObject<Record<string, unknown>>(row.regime_json, 'setups.regime_json', {}, logger),
+    entryMcapLow: num(row.entry_mcap_low),
+    entryMcapHigh: num(row.entry_mcap_high),
+    invalidationMcap: num(row.invalidation_mcap),
+    targets,
+    kill: { ...DEFAULT_KILL, ...kill },
+    // An unreadable status must not reopen a closed setup.
+    status: oneOf(row.status, SETUP_STATUSES, 'cancelled'),
+    ...(statusNote ? { statusNote } : {}),
+    ...(rResult !== undefined ? { rResult } : {}),
+    createdAt: text(row.created_at),
+    updatedAt: text(row.updated_at),
+    expiresAt: text(row.expires_at),
+  };
+}
+
+export function setupRowArgs(setup: Setup): (string | number | null)[] {
+  return [
+    setup.id,
+    setup.tokenId,
+    setup.chain,
+    setup.address,
+    setup.symbol,
+    setup.thesis,
+    setup.trigger,
+    setup.conviction,
+    JSON.stringify(setup.regime ?? {}),
+    setup.entryMcapLow,
+    setup.entryMcapHigh,
+    setup.invalidationMcap,
+    JSON.stringify(setup.targets),
+    JSON.stringify(setup.kill),
+    setup.status,
+    setup.statusNote ?? null,
+    setup.rResult ?? null,
+    setup.createdAt,
+    setup.updatedAt,
+    setup.expiresAt,
+  ];
 }
