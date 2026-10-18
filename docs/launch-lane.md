@@ -22,7 +22,8 @@ market gate        liquidity known and ≥ floor            ── reject: retri
 chain analysis     holders, LP burn/lock, bytecode, owner
         │
 chain gate         no live mint/blacklist/pause, LP secured,
-        │          holder floor, top-10 ceiling           ── reject: retried next run
+        │          holder floor, top-10 ceiling,
+        │          early-buying ceiling (sniping)         ── reject: retried next run
         │
 anchor check       triage model, ≤3 searches:
         │          anchored / forced / unclear,
@@ -68,6 +69,41 @@ needs at least one citation.
 A `forced` verdict at medium or high confidence costs a report 25 points and
 caps its tier at C, however good its lineage fields look.
 
+## The sniping check
+
+A sniped launch passes every other check. The snipers buy in the first block
+or two, spread across fresh wallets, so no holder is large and the top-10
+share looks normal. Neiro's perps twin in 2024 was flagged for exactly this.
+What gives it away is timing.
+
+The EVM analyser already replays the token's `Transfer` logs. Each
+transfer from the pool to a wallet is a buy (`packages/chain/src/sniping.ts`):
+
+- **Trading start** is the first block in which the pool sends tokens out,
+  not the block liquidity went in. Deployers often fund the pool and enable
+  trading later, and the snipe lands on the enable block.
+- **Early buying** is what the pool sent to wallets in the first 36 seconds
+  of trading: 3 blocks on Ethereum, the trading-start block included. Routers,
+  burn addresses and protocol contracts don't count as buyers.
+- **Still held** is what those wallets hold now, from the same replay.
+
+The result is stored as `ChainAnalysis.sniping` and drives three things:
+
+| Where | What |
+|---|---|
+| Flags | `sniped-launch` warns at 15% of supply bought early and is critical at 30%. `bundled-launch` warns when 3+ wallets bought in the opening block. |
+| Chain gate | Rejects when early buying is above `LAUNCHES_MAX_SNIPED_PCT`, or when it couldn't be measured (the scan didn't reach trading start, or nobody has bought yet). |
+| Research prompt | The `early_buying` line reaches the organic read as a measured fact. |
+
+The read only counts when the log scan covered the token's whole life, which
+is the normal case for a launch a few hours old. A scan that starts after the
+launch sees buys with no liquidity add before them and returns nothing rather
+than a wrong number.
+
+It doesn't trace funding. Twenty sniper wallets funded from one address in
+the same block are a cluster, but proving that needs native-ETH transfer
+tracing, which `eth_getLogs` can't provide.
+
 ## What carried over, and what changed
 
 | Dexscanner | Merged form | Why the change |
@@ -100,6 +136,7 @@ shown safe", and that rejects.
 | `LAUNCHES_MIN_LIQUIDITY_USD` | `40000` | Roughly dexscanner's 15 ETH |
 | `LAUNCHES_MIN_HOLDERS` | `50` | Lower than dexscanner's 100 so the verdict doesn't wait on distribution |
 | `LAUNCHES_MAX_TOP10_PCT` | `40` | Top-10 share excluding LP and burn |
+| `LAUNCHES_MAX_SNIPED_PCT` | `20` | Supply bought in the first 36 s of trading; unmeasured rejects |
 | `LAUNCHES_REQUIRE_LP_SECURED` | `true` | Reject when LP burn/lock can't be measured (V3 pools) |
 | `LAUNCHES_MIN_LP_SECURED_PCT` | `90` | Burned plus locked LP share |
 | `LAUNCHES_DORMANT_AFTER_HOURS` | `168` | `active` → `dormant` |
@@ -126,6 +163,12 @@ up to 21h old, so an offline demo needs `LAUNCHES_LOOKBACK_HOURS=48 ... run
 --fixtures --dry-run`.
 
 ## Known gaps
+
+- The sniping check measures timing, not funding. A cabal that buys a few
+  minutes in, or across many blocks, gets past it. Funding-source clustering
+  needs native-transfer tracing.
+- A launch with liquidity but no buys yet is rejected as "not measured" and
+  retried on the next run, like a launch below the holder floor.
 
 - `unclear` is stored as `dismissed` and never re-checked. An inciting event
   that only gets written up a day after the token launched stays unclear. A

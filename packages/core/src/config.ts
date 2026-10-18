@@ -206,6 +206,12 @@ export interface LaunchConfig {
   minHolderCount: number;
   /** Top-10 non-LP concentration ceiling, percent. */
   maxTop10Pct: number;
+  /**
+   * Ceiling on supply bought in the first blocks of trading, percent. Catches
+   * snipes spread across wallets, which the top-10 ceiling misses. Unknown
+   * (the scan did not reach trading start) is a rejection like any other.
+   */
+  maxSnipedPct: number;
   /** Reject when LP burn/lock could not be measured, not only when it is low. */
   requireLpSecured: boolean;
   /** Burned + locked LP share required to count as secured, percent. */
@@ -466,6 +472,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       minLiquidityUsd: num(env.LAUNCHES_MIN_LIQUIDITY_USD, 40_000),
       minHolderCount: num(env.LAUNCHES_MIN_HOLDERS, 50),
       maxTop10Pct: num(env.LAUNCHES_MAX_TOP10_PCT, 40),
+      maxSnipedPct: num(env.LAUNCHES_MAX_SNIPED_PCT, 20),
       requireLpSecured: bool(env.LAUNCHES_REQUIRE_LP_SECURED, true),
       minLpSecuredPct: num(env.LAUNCHES_MIN_LP_SECURED_PCT, 90),
       dormantAfterHours: num(env.LAUNCHES_DORMANT_AFTER_HOURS, 168),

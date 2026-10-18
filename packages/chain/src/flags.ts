@@ -26,6 +26,12 @@ export const RISK_THRESHOLDS = {
   lpBurnedMinPct: 50,
   /** `low-liquidity-ratio` fires when liquidity / market cap is below this. */
   lowLiquidityRatioPct: 2,
+  /** `sniped-launch` fires at warn when early-block buying took >= this share of supply. */
+  snipedWarnPct: 15,
+  /** ...and escalates to critical at >= this. */
+  snipedCriticalPct: 30,
+  /** `bundled-launch` fires when at least this many wallets bought in the opening block. */
+  bundledMinBuyers: 3,
 } as const;
 
 export type RiskThresholds = typeof RISK_THRESHOLDS;
@@ -45,6 +51,7 @@ export type FlagAnalysis = Pick<
   | 'lpLockedPct'
   | 'contractVerified'
   | 'privilegedFunctions'
+  | 'sniping'
 >;
 
 /**
@@ -213,6 +220,26 @@ export function evaluateFlags(input: FlagInput): RiskFlag[] {
       code: 'creator-holds-large',
       severity: 'warn',
       detail: `Creator/authority address holds ${pct(a.creatorHoldingPct)} of supply (>= ${t.creatorWarnPct}%).`,
+    });
+  }
+
+  // Supply taken in the first blocks of trading, before anyone outside the
+  // launch could see the pool. Spread across wallets, it evades top-10.
+  const snipe = a.sniping;
+  if (snipe !== undefined && snipe.earlyBuyPct >= t.snipedWarnPct) {
+    const held = snipe.stillHeldPct !== undefined ? `; they still hold ${pct(snipe.stillHeldPct)}` : '';
+    const critical = snipe.earlyBuyPct >= t.snipedCriticalPct;
+    flags.push({
+      code: 'sniped-launch',
+      severity: critical ? 'critical' : 'warn',
+      detail: `${snipe.earlyBuyers} wallet(s) bought ${pct(snipe.earlyBuyPct)} of supply in the first ${snipe.windowBlocks} block(s) of trading (>= ${critical ? t.snipedCriticalPct : t.snipedWarnPct}%)${held}.`,
+    });
+  }
+  if (snipe !== undefined && snipe.sameBlockBuyers >= t.bundledMinBuyers) {
+    flags.push({
+      code: 'bundled-launch',
+      severity: 'warn',
+      detail: `${snipe.sameBlockBuyers} wallets bought in the block trading opened (>= ${t.bundledMinBuyers}): a bundle, or bots watching the deploy.`,
     });
   }
 

@@ -32,6 +32,27 @@ export interface TokenSupply {
  */
 export type PrivilegedFunction = 'mint' | 'blacklist' | 'pause' | 'fee' | 'max-tx';
 
+/**
+ * Who bought in the first blocks of trading. Snipers and bundlers take supply
+ * before anyone outside the launch can see the pool, then spread it across
+ * fresh wallets so no single holder looks large — which is exactly what a
+ * top-10 ceiling misses. Measured from the pool's own Transfer logs.
+ */
+export interface LaunchSniping {
+  /** First block in which the pool sent tokens out: trading opened. */
+  tradingStartBlock: number;
+  /** Blocks counted as "early", trading-start block included. */
+  windowBlocks: number;
+  /** Distinct wallets that bought in the window. */
+  earlyBuyers: number;
+  /** Of those, wallets that bought in the trading-start block itself. */
+  sameBlockBuyers: number;
+  /** Share of total supply bought in the window, percent. */
+  earlyBuyPct: number;
+  /** Share of total supply the early buyers still hold, percent. */
+  stillHeldPct?: number;
+}
+
 export type AnalysisMethod = 'rpc' | 'explorer' | 'indexer' | 'partial' | 'unavailable';
 
 /**
@@ -80,6 +101,8 @@ export interface ChainAnalysis {
    * the code was read and none were found; undefined means it was not read.
    */
   privilegedFunctions?: PrivilegedFunction[];
+  /** EVM: early-block buying, when the scan reached the start of trading. */
+  sniping?: LaunchSniping;
   /** Buy/sell tax in percent where detectable. */
   buyTaxPct?: number;
   sellTaxPct?: number;

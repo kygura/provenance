@@ -96,6 +96,18 @@ export function gateLaunchChain(chain: ChainAnalysis | undefined, config: Launch
     reasons.push(`concentration: top-10 non-LP ${chain.top10Pct.toFixed(1)}% > ${config.maxTop10Pct}%`);
   }
 
+  // What a top-10 ceiling misses: supply taken before anyone outside the
+  // launch could see the pool, then spread thin.
+  const snipe = chain.sniping;
+  if (snipe === undefined) {
+    reasons.push('sniping: early buying not measured (scan did not reach the start of trading)');
+  } else if (snipe.earlyBuyPct > config.maxSnipedPct) {
+    reasons.push(
+      `sniping: ${snipe.earlyBuyPct.toFixed(1)}% of supply bought by ${snipe.earlyBuyers} wallet(s) in the first ` +
+        `${snipe.windowBlocks} block(s) > ${config.maxSnipedPct}%`,
+    );
+  }
+
   return gate(reasons);
 }
 

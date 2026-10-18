@@ -60,8 +60,8 @@ describe('system prompt', () => {
     expect(SYSTEM_PROMPT).not.toContain(new Date().getFullYear().toString());
   });
 
-  test('version is bumped for the organic read', () => {
-    expect(PROMPT_VERSION).toBe('provenance-research-v4');
+  test('version is bumped for the early-buying line', () => {
+    expect(PROMPT_VERSION).toBe('provenance-research-v5');
   });
 
   test('leads with the anchor question, quoting the shared rules verbatim', () => {
@@ -170,6 +170,29 @@ describe('buildResearchPrompt', () => {
   test('an empty evidence pack is stated as a condition, not hidden', () => {
     const prompt = buildResearchPrompt(snapshot(), undefined, []);
     expect(prompt).toContain('NONE was pre-collected');
+  });
+});
+
+describe('on-chain block', () => {
+  test('states early buying as a measured fact', () => {
+    const prompt = buildResearchPrompt(
+      snapshot(),
+      {
+        tokenId: 'solana:abc',
+        chain: 'solana',
+        tokenAddress: 'abc',
+        method: 'rpc',
+        sniping: { tradingStartBlock: 1, windowBlocks: 3, earlyBuyers: 41, sameBlockBuyers: 17, earlyBuyPct: 38.5, stillHeldPct: 30.25 },
+        topHolders: [],
+        flags: [],
+        notes: [],
+        fetchedAt: nowIso(),
+      },
+      [],
+    );
+    expect(prompt).toContain(
+      '- early_buying: 38.50% of supply bought by 41 wallet(s) in the first 3 block(s) of trading, 17 in the opening block; they still hold 30.25%',
+    );
   });
 });
 
