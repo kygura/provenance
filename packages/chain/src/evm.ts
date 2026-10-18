@@ -45,6 +45,7 @@ import { measureLp } from './lp';
 import { concentration } from './metrics';
 import { isEvmBurnAddress, lookupEvmAddress } from './labels';
 import { Budget, RpcClient, type TransportProvider } from './rpc';
+import { measureSniping, snipeWindowBlocks, type PoolTransfer } from './sniping';
 
 export interface EvmAnalyzerOptions {
   /** Wall-clock ceiling for one token's analysis. */
@@ -208,12 +209,21 @@ export async function analyzeEvm(
 
   const seconds = BLOCK_SECONDS[snapshot.chain] ?? 12;
   const created = snapshot.metrics.poolCreatedAt ? Date.parse(snapshot.metrics.poolCreatedAt) : Number.NaN;
+  // Pool creation times are estimates; the margin keeps the liquidity add
+  // inside the window so the sniping read can see trading start.
   const ageBlocks = Number.isFinite(created)
-    ? Math.ceil((Date.now() - created) / 1000 / seconds)
+    ? Math.ceil((Date.now() - created) / 1000 / seconds) + 2 * snipeWindowBlocks(seconds) + 10
     : opts.chunkBlocks * opts.maxChunks;
   const span = Math.min(ageBlocks, opts.chunkBlocks * opts.maxChunks);
   const fromBlock = Math.max(0, latestBlock - span);
 
+  // Uniswap v4 pairs are keyed by a 32-byte pool id, not a contract address;
+  // their tokens sit in the PoolManager singleton, which labels.ts covers.
+  const poolAddresses = new Set(
+    snapshot.pairs.filter((pair) => isAddress(pair.pairAddress)).map((pair) => normalizeAddress(pair.pairAddress)),
+  );
+  const poolTransfers: PoolTransfer[] = [];
+  const seen = new Set<string>();
   const balances = new Map<string, bigint>();
   let scannedFrom = latestBlock;
   let chunks = 0;
@@ -232,7 +242,9 @@ export async function analyzeEvm(
     }
     const start = Math.max(fromBlock, end - chunkBlocks + 1);
     try {
-      const logs = await client.call<Array<{ topics: string[]; data: string }>>('eth_getLogs', [
+      const logs = await client.call<
+        Array<{ topics: string[]; data: string; blockNumber?: string; transactionHash?: string; logIndex?: string }>
+      >('eth_getLogs', [
         {
           address,
           topics: [TRANSFER_TOPIC0],
@@ -246,6 +258,12 @@ export async function analyzeEvm(
         // Only the 3-topic ERC-20 shape is a transfer of fungible value.
         const topics = entry.topics ?? [];
         if (topics.length !== 3) continue;
+        // Replaying a log twice doubles a balance. A live node returns each
+        // log once; a proxy that ignores ranges, or a recorded mock, may not.
+        const key = `${entry.transactionHash ?? ''}:${entry.logIndex ?? ''}:${entry.blockNumber ?? ''}:${topics.join()}:${entry.data}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const block = entry.blockNumber ? quantityToNumber(entry.blockNumber) : undefined;
         const fromTopic = topics[1];
         const toTopic = topics[2];
         if (fromTopic === undefined || toTopic === undefined) continue;
@@ -255,6 +273,9 @@ export async function analyzeEvm(
         if (value === undefined) continue;
         if (from) balances.set(from, (balances.get(from) ?? 0n) - value);
         if (to) balances.set(to, (balances.get(to) ?? 0n) + value);
+        if (from && to && block !== undefined && (poolAddresses.has(from) || poolAddresses.has(to))) {
+          poolTransfers.push({ block, from, to, value });
+        }
       }
       scannedFrom = start;
       chunks += 1;
@@ -287,11 +308,6 @@ export async function analyzeEvm(
   // Balances derived from a partial window can go negative for wallets that
   // held before the window opened. Those are not holders we measured, so drop
   // them rather than clamping to zero and inventing a distribution.
-  // Uniswap v4 pairs are keyed by a 32-byte pool id, not a contract address;
-  // their tokens sit in the PoolManager singleton, which labels.ts covers.
-  const poolAddresses = new Set(
-    snapshot.pairs.filter((pair) => isAddress(pair.pairAddress)).map((pair) => normalizeAddress(pair.pairAddress)),
-  );
   const rows: HolderRow[] = [];
   for (const [holder, raw] of balances) {
     if (raw <= 0n) continue;
@@ -322,6 +338,29 @@ export async function analyzeEvm(
       'window scanned, not a full holder census.',
   );
 
+  // Only a scan that covered the token's whole life can see trading start
+  // and say what the early buyers still hold.
+  const sniping =
+    !truncated && Number.isFinite(created)
+      ? measureSniping({
+          transfers: poolTransfers,
+          pools: poolAddresses,
+          totalRaw,
+          balances,
+          blockSeconds: seconds,
+          isExcluded: (addr) =>
+            isZeroAddress(addr) || isEvmBurnAddress(addr) || lookupEvmAddress(addr)?.label?.startsWith('protocol:') === true,
+        })
+      : undefined;
+  if (sniping) {
+    notes.push(
+      `Early buying: ${sniping.earlyBuyPct.toFixed(1)}% of supply to ${sniping.earlyBuyers} wallet(s) in the first ` +
+        `${sniping.windowBlocks} block(s) of trading (${sniping.sameBlockBuyers} in the opening block).`,
+    );
+  } else {
+    notes.push('Early buying not measured: the scan did not reach the start of trading.');
+  }
+
   const analysis: ChainAnalysis = {
     ...base,
     method: truncated ? 'partial' : 'rpc',
@@ -335,6 +374,7 @@ export async function analyzeEvm(
     gini: conc.gini,
     ownerRenounced,
     ...surface,
+    ...(sniping ? { sniping } : {}),
     topHolders: rows.slice(0, opts.topN),
     fetchedAt: nowIso(),
     durationMs: Date.now() - started,

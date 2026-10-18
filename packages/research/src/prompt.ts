@@ -37,7 +37,7 @@ import { classify, describeHits } from './lexicon';
 import { buildQueries } from './queries';
 import { UNTRUSTED_POLICY, fence, scrub } from './untrusted';
 
-export const PROMPT_VERSION = 'provenance-research-v4';
+export const PROMPT_VERSION = 'provenance-research-v5';
 
 export const SYSTEM_PROMPT = `You are the provenance analyst for a research system that reads every trending memecoin and answers two questions before anything else:
 
@@ -268,13 +268,18 @@ function chainBlock(chain: ChainAnalysis | undefined): string {
     line('freeze_authority_active', chain.freezeAuthorityActive?.toString()),
     line('owner_renounced', chain.ownerRenounced?.toString()),
     line('contract_verified', chain.contractVerified?.toString()),
+    chain.sniping !== undefined
+      ? `- early_buying: ${chain.sniping.earlyBuyPct.toFixed(2)}% of supply bought by ${chain.sniping.earlyBuyers} wallet(s) in the first ${chain.sniping.windowBlocks} block(s) of trading, ${chain.sniping.sameBlockBuyers} in the opening block${
+          chain.sniping.stillHeldPct !== undefined ? `; they still hold ${chain.sniping.stillHeldPct.toFixed(2)}%` : ''
+        }`
+      : null,
     chain.flags.length > 0
       ? `- risk_flags: ${chain.flags.map((flag) => `[${flag.severity}] ${flag.code} — ${flag.detail}`).join('; ')}`
       : null,
     chain.notes.length > 0 ? `- notes: ${chain.notes.join('; ')}` : null,
   ].filter((row): row is string => row !== null);
 
-  return `## On-chain analysis\n\n${rows.join('\n')}\n\nThese facts bear on the organic read and on risk: heavy concentration or a large creator holding is what a sniped or insider-held launch looks like. They say nothing about the meme's age.`;
+  return `## On-chain analysis\n\n${rows.join('\n')}\n\nThese facts bear on the organic read and on risk: heavy concentration, a large creator holding or heavy early buying is what a sniped or insider-held launch looks like. They say nothing about the meme's age.`;
 }
 
 /**

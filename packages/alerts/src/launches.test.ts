@@ -29,6 +29,7 @@ function cleanChain(over: Partial<ChainAnalysis> = {}): ChainAnalysis {
     ownerRenounced: true,
     privilegedFunctions: [],
     lpBurnedPct: 100,
+    sniping: { tradingStartBlock: 100, windowBlocks: 3, earlyBuyers: 4, sameBlockBuyers: 1, earlyBuyPct: 6, stillHeldPct: 2 },
     topHolders: [],
     flags: [],
     notes: [],
@@ -70,6 +71,17 @@ describe('gateLaunchChain', () => {
     expect(gateLaunchChain(cleanChain({ holderCount: undefined }), config).reasons).toEqual([
       'holders: count unknown (partial log scan)',
     ]);
+  });
+
+  test('early buying at the ceiling passes; above it, or unmeasured, rejects', () => {
+    const snipe = (earlyBuyPct: number) =>
+      cleanChain({ sniping: { tradingStartBlock: 100, windowBlocks: 3, earlyBuyers: 40, sameBlockBuyers: 12, earlyBuyPct } });
+    expect(gateLaunchChain(snipe(config.maxSnipedPct), config).passed).toBe(true);
+    const sniped = gateLaunchChain(snipe(config.maxSnipedPct + 0.1), config);
+    expect(sniped.passed).toBe(false);
+    expect(sniped.reasons.join(' ')).toContain('40 wallet(s)');
+    const unmeasured = gateLaunchChain(cleanChain({ sniping: undefined }), config);
+    expect(unmeasured.reasons.join(' ')).toContain('sniping: early buying not measured');
   });
 
   test('burned and locked LP add up; unmeasured LP rejects only when required', () => {

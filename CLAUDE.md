@@ -195,7 +195,11 @@ SELECT t.id AS token_id, t.chain, t.address, t.symbol, t.name, t.first_seen_at,
        json_extract(ca.data_json,'$.lpLockedPct')        AS lp_locked_pct,
        json_extract(ca.data_json,'$.mintAuthorityActive')   AS mint_active,
        json_extract(ca.data_json,'$.freezeAuthorityActive') AS freeze_active,
-       json_extract(ca.data_json,'$.flags')              AS flags
+       json_extract(ca.data_json,'$.flags')              AS flags,
+       json_extract(ca.data_json,'$.sniping.earlyBuyPct')    AS early_buy_pct,
+       json_extract(ca.data_json,'$.sniping.earlyBuyers')    AS early_buyers,
+       json_extract(ca.data_json,'$.sniping.sameBlockBuyers') AS same_block_buyers,
+       json_extract(ca.data_json,'$.sniping.stillHeldPct')   AS early_still_held_pct
 FROM snapshots sn
 JOIN tokens t ON t.id = sn.token_id
 LEFT JOIN scores sc         ON sc.run_id = sn.run_id AND sc.token_id = sn.token_id
@@ -355,8 +359,11 @@ impostor, manufactured at B+), then by size of change.
 4. **Evidence**: the strongest line from `anchor_summary` or
    `organic_summary`, plus one chain fact (top-10 %, largest holder,
    creator holding, LP burned/locked, mint/freeze authority, any `flags`
-   entry with severity `high`/`critical`). Concentration is the on-chain
-   face of a sniped launch; say so when the two agree.
+   entry with severity `high`/`critical`). Concentration and early buying
+   (`early_buy_pct`, `sniped-launch` / `bundled-launch` flags) are the
+   on-chain face of a sniped launch; say so when they agree with the
+   organic read. `early_buy_pct` is null when the scan didn't reach the
+   start of trading, which is normal for older trending tokens.
 5. **Rivals**: if `rivals` is non-empty, name the main one and which side
    of the organic/staged split it sits on.
 6. **Invalidation**: a measurement, taken from the code's own thresholds
@@ -460,9 +467,10 @@ Confidence words: `low-confidence`, `we lean`, `base case`, `tail case`,
 
 ## Open decisions (not resolved here)
 
-- **The launch lane's fast check** (`anchor.ts`) still asks only the anchor
-  question. A sniping check at launch time would fit there, but needs
-  on-chain first-block data the chain package doesn't collect yet.
+- **The launch lane's sniping check measures timing only**
+  (`packages/chain/src/sniping.ts`, `docs/launch-lane.md`). It doesn't
+  cluster wallets by funding source, so a cabal that buys across several
+  minutes gets past it.
 
 - **Briefing layer vs scheduler.** This routine is additive. If the user
   would rather have it *be* the scheduler (running `cli.ts run` itself and

@@ -47,6 +47,9 @@ describe('launch lane against fixtures', () => {
       expect(dossier?.chain?.privilegedFunctions).toEqual([]);
       expect(dossier?.chain?.lpBurnedPct).toBeCloseTo(55, 1);
       expect(dossier?.chain?.lpLockedPct).toBeCloseTo(45, 1);
+      // An organic start: one small buy in the first three blocks of trading.
+      expect(dossier?.chain?.sniping).toMatchObject({ windowBlocks: 3, earlyBuyers: 1, sameBlockBuyers: 1 });
+      expect(dossier?.chain?.sniping?.earlyBuyPct).toBeLessThan(1);
       expect(dossier?.provenance?.anchor).toBeDefined();
       expect(dossier?.alerts.map((alert) => alert.rule)).toContain('launch-anchored');
     } finally {
