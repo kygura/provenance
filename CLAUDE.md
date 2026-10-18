@@ -59,9 +59,13 @@ real, is the token organic, how much outside traction carries it, what
 changed, and the specific measurement that would make the read wrong.**
 Listing scores and verdicts isn't analysis.
 
-The composite score does not yet read the organic verdict (see Open
-decisions). A manufactured token can score A on a strong anchor and good
-momentum. When the two disagree, the organic read wins the headline and the
+The score reads the organic verdict (`packages/alerts/src/scoring.ts`): a
+`manufactured` token at report confidence ≥ 0.45 loses 20 points and is
+capped at tier C (below 0.45, capped at B); `mixed` loses 6 and is capped
+at A; outside traction moves the authenticity component by up to ±10.
+Reports older than prompt v4 carry no organic read and are scored as
+before, so a pre-v4 token can still score A on a staged launch. When the
+verdicts and the score disagree, the verdicts win the headline and the
 score goes in the "why" line.
 
 Things the old prompt got wrong. Don't repeat them:
@@ -236,7 +240,8 @@ ORDER BY a.created_at DESC;
 ```
 
 Rule ids: `clean-revival`, `high-score`, `score-surge`,
-`narrative-cluster-heat`, `rug-risk`, `canonical-impostor`, and the launch
+`narrative-cluster-heat`, `rug-risk`, `canonical-impostor`,
+`manufactured-carrier` (real meme, staged token), and the launch
 lane's `launch-anchored` and `launch-expressed`. These were already delivered. The brief
 adds context; it doesn't re-announce them.
 
@@ -330,7 +335,7 @@ From B and E, a token is notable if any of these hold:
 - `score − prev_score` ≥ 10 points either way;
 - `first_seen_at` in the last 24 h and tier B or better;
 - a new or changed `anchor_verdict` / `recycle_verdict` (compare with C);
-- a `rug-risk` or `canonical-impostor` alert in D;
+- a `rug-risk`, `canonical-impostor` or `manufactured-carrier` alert in D;
 - watchlist `expressed`, `dormant` or first social sighting in the last 24 h.
 
 Cap the brief at the ~8 most important. Rank by severity first (rug risk,
@@ -455,12 +460,6 @@ Confidence words: `low-confidence`, `we lean`, `base case`, `tail case`,
 
 ## Open decisions (not resolved here)
 
-- **Scoring doesn't read the organic verdict yet.** `organic.verdict` and
-  `outsideTraction` are stored in `report_json` (prompt v4) but
-  `packages/alerts/src/scoring.ts` ignores them; only `authenticityScore`,
-  which the prompt now caps at 30 for manufactured tokens, carries it into
-  the total. Wiring it in (a penalty, or an `organic` score component and
-  matching alert rule) is an app change. Flag it, don't do it here.
 - **The launch lane's fast check** (`anchor.ts`) still asks only the anchor
   question. A sniping check at launch time would fit there, but needs
   on-chain first-block data the chain package doesn't collect yet.

@@ -4,11 +4,16 @@ import {
   DEFAULT_WEIGHTS,
   EXTREME_CONCENTRATION_PCT,
   FORCED_PENALTY,
+  MANUFACTURED_PENALTY,
+  MIXED_PENALTY,
   SINGLE_HOLDER_DOMINANCE_PCT,
   assertWeights,
   assessRisk,
+  scoreAuthenticity,
   scoreToken,
 } from './scoring';
+import { manufacturedCarrierRule, cleanRevivalRule } from './rules';
+import type { OrganicRead } from '@provenance/core';
 import { NOW, strongInput } from './test-support';
 
 function chain(overrides: Partial<ChainAnalysis> = {}): ChainAnalysis {
@@ -162,5 +167,70 @@ describe('anchor verdict', () => {
       );
       expect(other).toEqual(clean);
     }
+  });
+});
+
+describe('organic verdict', () => {
+  const read = (over: Partial<OrganicRead> = {}): OrganicRead => ({
+    verdict: 'manufactured',
+    outsideTraction: 50,
+    signals: [{ kind: 'sniped-launch', organic: false, detail: 'Most of supply bought in the first block, per an analytics firm.' }],
+    rivals: [{ name: 'Earlier same-name token', chain: 'ethereum', note: 'community takeover, spot listed' }],
+    summary: 'Sniped twin of an organic token.',
+    ...over,
+  });
+  const withOrganic = (organic: OrganicRead | undefined, confidence = 0.82) => {
+    const input = strongInput();
+    return { ...input, provenance: { ...input.provenance!, organic, confidence } };
+  };
+
+  test('a confidently manufactured token is penalised and capped at C, however real the meme', () => {
+    const clean = scoreToken(strongInput(), { now: NOW });
+    const staged = scoreToken(withOrganic(read()), { now: NOW });
+    expect(staged.total).toBeCloseTo(clean.total - MANUFACTURED_PENALTY, 1);
+    expect(['C', 'D']).toContain(staged.tier);
+    expect(staged.penalties.some((p) => p.reason.startsWith('Manufactured token'))).toBe(true);
+  });
+
+  test('a low-confidence manufactured verdict only caps at B', () => {
+    const staged = scoreToken(withOrganic(read(), 0.4), { now: NOW });
+    expect(staged.penalties.some((p) => p.reason.startsWith('Manufactured token'))).toBe(false);
+    expect(['B', 'C', 'D']).toContain(staged.tier);
+  });
+
+  test('mixed costs a little and caps at A; unclear and missing change nothing', () => {
+    const clean = scoreToken(strongInput(), { now: NOW });
+    const mixed = scoreToken(withOrganic(read({ verdict: 'mixed' })), { now: NOW });
+    expect(mixed.total).toBeCloseTo(clean.total - MIXED_PENALTY, 1);
+    expect(mixed.tier).not.toBe('S');
+    expect(scoreToken(withOrganic(read({ verdict: 'unclear', outsideTraction: 95 })), { now: NOW })).toEqual(clean);
+    expect(scoreToken(withOrganic(undefined), { now: NOW })).toEqual(clean);
+  });
+
+  test('outside traction moves authenticity by at most 10 either way', () => {
+    const input = withOrganic(read({ verdict: 'organic', signals: [] }));
+    const at = (outsideTraction: number) =>
+      scoreAuthenticity({ ...input.provenance!, authenticityScore: 50, organic: read({ verdict: 'organic', outsideTraction }) });
+    expect(at(100) - at(50)).toBeCloseTo(10, 5);
+    expect(at(50) - at(0)).toBeCloseTo(10, 5);
+  });
+
+  test('the manufactured-carrier rule fires on a real meme with a staged token, and clean-revival stands down', () => {
+    const input = withOrganic(read());
+    const score = scoreToken(input, { now: NOW });
+    const fired = manufacturedCarrierRule.evaluate({ ...input, score });
+    expect(fired?.rule).toBe('manufactured-carrier');
+    expect(fired?.body).toContain('sniped-launch');
+    expect(fired?.body).toContain('Earlier same-name token');
+    expect(cleanRevivalRule.evaluate({ ...input, score: { ...score, total: 99 } })).toBeNull();
+  });
+
+  test('the rule stays quiet on a forced meme, a thin report, or an organic token', () => {
+    const score = scoreToken(strongInput(), { now: NOW });
+    const forced = withOrganic(read());
+    forced.provenance.anchor = { verdict: 'forced', type: 'none', subject: '', summary: 'x', confidence: 'high' };
+    expect(manufacturedCarrierRule.evaluate({ ...forced, score })).toBeNull();
+    expect(manufacturedCarrierRule.evaluate({ ...withOrganic(read(), 0.3), score })).toBeNull();
+    expect(manufacturedCarrierRule.evaluate({ ...withOrganic(read({ verdict: 'organic' })), score })).toBeNull();
   });
 });
