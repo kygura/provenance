@@ -9,6 +9,10 @@
  *   2. EXTRACTION — `SYSTEM_PROMPT` + `buildExtractionPrompt`, run with no
  *      tools and a forced tool call, over those notes.
  *
+ * With `LLM_SEARCH_MODEL` set the same two calls split by model instead
+ * (`buildGatherPrompt`, `buildJudgePrompt`): a cheap model searches and
+ * gathers without deciding, and the strong model judges from its notes.
+ *
  * They are separate calls on purpose. A model asked to research and to fill a
  * twelve-field schema in one turn starts optimising for the schema partway
  * through the research, and the lineage is the first thing to suffer.
@@ -38,6 +42,12 @@ import { buildQueries } from './queries';
 import { UNTRUSTED_POLICY, fence, scrub } from './untrusted';
 
 export const PROMPT_VERSION = 'provenance-research-v5';
+/**
+ * Reports from the gather/judge split carry this instead: same system prompt
+ * and schema, but the verdict is reached by a different model from different
+ * notes, so the two populations must stay tellable apart.
+ */
+export const SPLIT_PROMPT_VERSION = 'provenance-research-v5-split';
 
 export const SYSTEM_PROMPT = `You are the provenance analyst for a research system that reads every trending memecoin and answers two questions before anything else:
 
@@ -391,6 +401,126 @@ export function buildResearchPrompt(
     'Do NOT call a tool in this turn and do NOT produce a structured report. The',
     'structuring happens in a second pass over these notes. If step 1 or 2 fails,',
     'say so plainly rather than compensating with invention.',
+  ].join('\n');
+}
+
+/**
+ * Split mode, phase 1 (`LLM_SEARCH_MODEL`): the cheap model searches and
+ * writes evidence, and is told not to reach either verdict. Same blocks and
+ * the same search order as `buildResearchPrompt`, so the judge sees the
+ * evidence a full research pass would have gathered; only the conclusion
+ * moves to the stronger model. The system prompt stays `SYSTEM_PROMPT`, so the
+ * gatherer knows which signals each verdict turns on.
+ */
+export function buildGatherPrompt(
+  snapshot: TokenSnapshot,
+  chain: ChainAnalysis | undefined,
+  evidence: readonly EvidenceItem[],
+): string {
+  return [
+    snapshotBlock(snapshot),
+    '',
+    deployerBlock(snapshot),
+    '',
+    lexiconBlock(snapshot),
+    '',
+    chainBlock(chain),
+    '',
+    evidenceBlock(evidence),
+    '',
+    '## Task: gather evidence, in prose. Do not decide.',
+    '',
+    'You are the first of two passes. A second analyst will read your notes and',
+    'decide both verdicts; your job is to give them the evidence, dated and',
+    'sourced, on both sides of each question. Use web search freely; the',
+    'supplied evidence is a starting point, not a boundary.',
+    '',
+    'For the anchor',
+    '1. Identify what the ticker or name refers to OUTSIDE this token. Search for',
+    '   the THING, not for the token.',
+    '2. Find the EARLIEST INDEPENDENT SOURCE: the earliest page about that thing',
+    '   that does not mention the token. Record its title, URL and publication',
+    '   date exactly as the page gives them.',
+    '3. If the only sources are the token\'s own site, socials, launch posts or',
+    '   paid promotion, say so plainly.',
+    '',
+    'For the organic read',
+    '4. Find every OTHER token carrying the same meme or name, on any chain:',
+    '   deploy order, who holds the listings, which one the meme\'s audience',
+    '   talks about.',
+    '5. Search for signs of manufacture: sniping or bundling reports (analytics',
+    '   firms, explorer traces), linked insider wallets, paid influencer rounds,',
+    '   a derivatives listing within days of launch.',
+    '6. Search for attention from outside the launch: listings (spot or',
+    '   derivatives), notable figures with no stake, a community takeover, media',
+    '   outside crypto, the anchor\'s subject acknowledging it. Note who is',
+    '   speaking in each case.',
+    '',
+    'For the lineage',
+    '7. Date the meme\'s first appearance in culture and trace its lineage.',
+    '8. Find every PRIOR tokenisation of the same meme and what became of each.',
+    '',
+    'Write one line per finding: the fact, its date, its URL, and who is speaking.',
+    'Keep findings that cut against each other side by side; do not reconcile',
+    'them. Say what you searched and found nothing for: an absence is a finding.',
+    '',
+    'Do NOT state an anchored/forced or organic/manufactured verdict, a',
+    'confidence, or a score, and do NOT call a tool or produce a structured',
+    'report. Where you know something from recall rather than a page you read,',
+    'mark the line "(recall)".',
+  ].join('\n');
+}
+
+/**
+ * Split mode, phase 2: the strong model reads the gatherer's notes and makes
+ * the calls the gatherer was told not to. Unlike extraction this is the
+ * judgement itself, so the caller asks for full reasoning.
+ */
+export function buildJudgePrompt(
+  snapshot: TokenSnapshot,
+  chain: ChainAnalysis | undefined,
+  notes: string,
+  citations: readonly string[],
+): string {
+  const sources =
+    citations.length > 0
+      ? ['', '## Sources consulted', '', citations.map((url, i) => `[S${i + 1}] ${url}`).join('\n')].join('\n')
+      : '';
+  return [
+    snapshotBlock(snapshot),
+    '',
+    chainBlock(chain),
+    '',
+    '## Evidence gathered by the search pass',
+    '',
+    'A cheaper model searched and wrote these notes. It was told to gather, not',
+    'to judge. Treat its lines as leads with sources, not as conclusions: weigh',
+    'who is speaking in each, and discount lines marked "(recall)".',
+    '',
+    notes,
+    sources,
+    '',
+    '## Task: judge, then structure',
+    '',
+    'Decide whether the meme is anchored, forced or unclear, and whether this',
+    'token is organic, manufactured, mixed or unclear, from the evidence above',
+    'and the measured on-chain facts. Then call the provenance tool exactly once.',
+    '',
+    'Fill `anchor` first. Its `earliestSource` must be a source the notes name,',
+    'and the notes must date it; if they do not, omit the date rather than',
+    'supplying one. Do not judge whether the anchor precedes the launch: record',
+    'the date and the system compares.',
+    '',
+    'Fill `organic` second. Each signal and each rival must come from the notes,',
+    'with the date and URL the notes give. A verdict with no signal on its side',
+    'is `unclear`; finding nothing bad is not organic.',
+    '',
+    'Do not add an anchor, a signal, a rival, a lineage step, a prior cycle or an',
+    'origin year the notes do not support. Nothing new can be verified now. Thin',
+    'or contradictory notes are what `confidence` and `unclear` are for.',
+    '',
+    'Record as `model-knowledge` evidence any claim you carry from recall,',
+    'including lines the notes mark "(recall)".',
   ].join('\n');
 }
 

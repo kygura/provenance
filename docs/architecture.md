@@ -96,7 +96,10 @@ Twice-daily runs over ~15 tokens would re-research the same tokens repeatedly, s
 - evidence pages are cached in the DB by URL hash,
 - cumulative LLM spend is tracked per run against `LLM_MAX_COST_USD_PER_RUN`,
   after which the pipeline keeps collecting market and chain data but stops
-  calling the model.
+  calling the model,
+- `LLM_MAX_COST_USD_PER_DAY`, when set, shrinks each run's ceiling to what the
+  trailing 24 hours of runs leave, so a faster cadence
+  ([cadence.md](cadence.md)) cannot multiply the spend.
 
 ## Extending it
 

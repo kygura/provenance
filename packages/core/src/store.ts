@@ -25,6 +25,8 @@ export interface RunStats {
   llmCostUsd: number;
   sourceErrors: { source: string; error: string }[];
   durationMs?: number;
+  /** Which lane wrote the run. Absent on runs from before it was recorded. */
+  lane?: 'full' | 'launches';
   /** Launch-lane counters. Absent on runs from before the lane existed. */
   launches?: LaunchStats;
   /** Crypto-social step. Absent on runs from before it existed. */

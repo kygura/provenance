@@ -11,6 +11,7 @@ import {
 } from '@provenance/core';
 import { WebSearchAnalyst, citationsToEvidence, harvest, mergeEvidence, searchErrorCode } from './analyst';
 import { CostTracker } from './cost';
+import { PROMPT_VERSION, SPLIT_PROMPT_VERSION } from './prompt';
 import { PROVENANCE_TOOL_NAME } from './schema';
 
 // --- fixtures ---------------------------------------------------------------
@@ -439,6 +440,54 @@ describe('WebSearchAnalyst', () => {
 
     expect(tracker.callCount).toBe(2);
     expect(tracker.totalUsd).toBeGreaterThan(0);
+  });
+});
+
+describe('gather/judge split', () => {
+  const splitConfig = () => app({ searchModel: 'claude-sonnet-5', extractModel: 'claude-sonnet-5' });
+
+  test('the search model gathers without deciding; the main model judges', async () => {
+    const { subject, recorded } = analyst(
+      [textMessage('2011-04-02 Nyan Cat on YouTube, https://example.invalid/nyan')],
+      [toolMessage(goodDraft())],
+      splitConfig(),
+    );
+
+    const report = await subject.research(snapshot(), undefined, [], ctx);
+
+    const gather = recorded.stream[0] as Anthropic.MessageCreateParams;
+    expect(gather.model).toBe('claude-sonnet-5');
+    expect(JSON.stringify(gather.messages)).toContain('gather evidence, in prose. Do not decide.');
+
+    // The judge is `model`, not `extractModel`: the split replaces extraction.
+    const judge = recorded.create[0] as Anthropic.MessageCreateParams;
+    expect(judge.model).toBe('claude-opus-5');
+    expect(judge.tool_choice).toEqual({ type: 'tool', name: PROVENANCE_TOOL_NAME });
+    const judgeText = JSON.stringify(judge.messages);
+    expect(judgeText).toContain('judge, then structure');
+    expect(judgeText).toContain('2011-04-02 Nyan Cat on YouTube');
+
+    expect(report.promptVersion).toBe(SPLIT_PROMPT_VERSION);
+    expect(report.model).toBe('claude-sonnet-5+claude-opus-5');
+    expect(report.anchor?.verdict).toBe('anchored');
+  });
+
+  test('a degraded split report is still labelled as a split report', async () => {
+    const { subject } = analyst([new Error('overloaded')], [], splitConfig());
+    const report = await subject.research(snapshot(), undefined, [], ctx);
+    expect(report.anchor?.failed).toContain('overloaded');
+    expect(report.promptVersion).toBe(SPLIT_PROMPT_VERSION);
+  });
+
+  test('a search model equal to the main model keeps the single-researcher flow', async () => {
+    const { subject, recorded } = analyst(
+      [textMessage('notes')],
+      [toolMessage(goodDraft())],
+      app({ searchModel: 'claude-opus-5' }),
+    );
+    const report = await subject.research(snapshot(), undefined, [], ctx);
+    expect(JSON.stringify(recorded.stream[0]?.messages)).toContain('research, in prose');
+    expect(report.promptVersion).toBe(PROMPT_VERSION);
   });
 });
 

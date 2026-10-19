@@ -153,6 +153,14 @@ export interface LlmConfig {
   /** Cheaper model for triage/classification passes. Same spec format as `model`. */
   triageModel: string;
   /**
+   * Gather/judge split (`LLM_SEARCH_MODEL`). When set, this cheaper model runs
+   * the web-search pass and only gathers dated evidence; `model` then judges
+   * both verdicts from those notes in one structured call, and `extractModel`
+   * is not used. Unset keeps the single-researcher flow. Not swapped by
+   * Anthropic-first: naming it is already the choice.
+   */
+  searchModel?: string;
+  /**
    * Under Anthropic-first, the non-Anthropic spec each role switches to when
    * Anthropic fails at runtime (credits exhausted, auth, rate limit, overload,
    * network). Undefined when the role's model is not Anthropic-first or the
@@ -170,6 +178,12 @@ export interface LlmConfig {
   maxOutputTokens: number;
   /** Hard ceiling on spend per run; the pipeline stops analysing past it. */
   maxCostUsdPerRun: number;
+  /**
+   * Ceiling on spend across every run (both lanes) in the trailing 24 hours;
+   * 0 turns it off. A run's budget is the smaller of the two. Without it, a
+   * faster cadence multiplies the worst case by the number of runs.
+   */
+  maxCostUsdPerDay: number;
   temperature: number;
   /**
    * Ceiling on server-side web searches in one token's research pass. The
@@ -264,6 +278,17 @@ export interface AlertConfig {
   fileSink?: string;
 }
 
+/**
+ * How often the full run fires (apps/worker/src/cadence.ts). The workflow's
+ * cron is hourly; `cli.ts cadence` decides whether this hour is due.
+ */
+export interface CadenceConfig {
+  /** `auto` follows measured activity; a level pins it. */
+  mode: 'auto' | CadenceLevel;
+}
+
+export type CadenceLevel = 'base' | 'elevated' | 'peak';
+
 export interface AppConfig {
   databaseUrl: string;
   databaseAuthToken?: string;
@@ -278,6 +303,7 @@ export interface AppConfig {
   llm: LlmConfig;
   rpc: ChainRpcConfig;
   alerts: AlertConfig;
+  cadence: CadenceConfig;
   /** Root for fixtures, artifacts and the local sqlite file. */
   dataDir: string;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
@@ -456,10 +482,12 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
         if (!env.ANTHROPIC_API_KEY || !bool(env.LLM_ANTHROPIC_FIRST, true)) return configured;
         return anthropicFirst(configured, (spec) => Boolean(providers[parseModelSpec(spec).provider].apiKey));
       })(),
+      ...(env.LLM_SEARCH_MODEL?.trim() ? { searchModel: env.LLM_SEARCH_MODEL.trim() } : {}),
       providers,
       pricing: pricing(env.LLM_PRICING),
       maxOutputTokens: num(env.LLM_MAX_OUTPUT_TOKENS, 4096),
       maxCostUsdPerRun: num(env.LLM_MAX_COST_USD_PER_RUN, 5),
+      maxCostUsdPerDay: num(env.LLM_MAX_COST_USD_PER_DAY, 0),
       temperature: num(env.LLM_TEMPERATURE, 0.2),
       maxWebSearches: num(env.LLM_MAX_WEB_SEARCHES, 6),
       searchBackend: env.LLM_SEARCH_BACKEND?.trim().toLowerCase() === 'native' ? 'native' : 'exa',
@@ -515,5 +543,11 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       genericWebhookUrl: env.ALERT_WEBHOOK_URL,
       fileSink: env.ALERT_FILE_SINK,
     },
+    cadence: { mode: cadenceMode(env.CADENCE_MODE) },
   };
+}
+
+function cadenceMode(value: string | undefined): CadenceConfig['mode'] {
+  const mode = value?.trim().toLowerCase();
+  return mode === 'base' || mode === 'elevated' || mode === 'peak' ? mode : 'auto';
 }

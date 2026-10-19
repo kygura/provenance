@@ -134,6 +134,17 @@ describe('validateEnv', () => {
     expect(validateEnv('run', app, parseArgs(['run']))[0]).toContain('DATABASE_AUTH_TOKEN');
   });
 
+  test('a search model needs its own key, and the unused extract model does not', () => {
+    const base = makeConfig();
+    const app = makeConfig({
+      anthropicApiKey: 'sk-test',
+      llm: { ...base.llm, model: 'claude-opus-5', searchModel: 'moonshot:kimi-k2.6', extractModel: 'deepseek:deepseek-chat' },
+    });
+    const errors = validateEnv('run', app, parseArgs(['run']));
+    expect(errors.some((e) => e.includes('MOONSHOT_API_KEY'))).toBe(true);
+    expect(errors.some((e) => e.includes('DEEPSEEK_API_KEY'))).toBe(false);
+  });
+
   test('names the key of whichever provider each configured model needs', () => {
     const base = makeConfig();
     const app = makeConfig({

@@ -26,12 +26,16 @@ export const MODEL_PRICING_USD_PER_MTOK: Readonly<Record<string, ModelPricing>> 
   'claude-fable-5-1': { inputPerMTok: 10, outputPerMTok: 50 },
   'claude-mythos-5-1': { inputPerMTok: 10, outputPerMTok: 50 },
   'claude-fable-5': { inputPerMTok: 10, outputPerMTok: 50 },
+  'claude-opus-5-5': { inputPerMTok: 4, outputPerMTok: 20 },
   'claude-opus-5': { inputPerMTok: 5, outputPerMTok: 25 },
   'claude-opus-4-8': { inputPerMTok: 5, outputPerMTok: 25 },
   'claude-opus-4-7': { inputPerMTok: 5, outputPerMTok: 25 },
   'claude-opus-4-6': { inputPerMTok: 5, outputPerMTok: 25 },
+  'claude-sonnet-5-5': { inputPerMTok: 2, outputPerMTok: 10 },
   'claude-sonnet-5': { inputPerMTok: 2, outputPerMTok: 10 },
   'claude-sonnet-4-6': { inputPerMTok: 3, outputPerMTok: 15 },
+  // Up to 100K-token prompts; $0.50 / $2.50 beyond, which this table under-counts.
+  'claude-haiku-5-5': { inputPerMTok: 0.1, outputPerMTok: 0.5 },
   'claude-haiku-4-5': { inputPerMTok: 1, outputPerMTok: 5 },
   // Moonshot first-party, cache-miss input, from platform.kimi.ai/docs/pricing/chat,
   // read 2026-10-10. A cache hit is $0.16, which the 0.1x read multiplier

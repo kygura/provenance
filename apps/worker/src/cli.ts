@@ -7,6 +7,7 @@
  *   1  the run failed (or an alert channel rejected us)
  *   2  configuration error — the message names the variable to set
  */
+import { appendFile } from 'node:fs/promises';
 import {
   type Alert,
   type AppConfig,
@@ -36,6 +37,7 @@ import { type SetupStore, briefAlerts, briefSettings, runBrief, usableModels, wr
 import type { SqlExecutor } from './brief/queries';
 import type { FetchLike } from './brief/regime';
 import { runPipeline } from './pipeline';
+import { RUN_HISTORY_LIMIT, decideCadence, inSlot } from './cadence';
 import {
   type ReportFormat,
   type Style,
@@ -70,6 +72,8 @@ commands:
   report                   print a run's results
   brief                    daily brief + setups ledger from stored runs (docs/brief-routine.md);
                            writes only the setups table, delivers through the alert channels
+  cadence                  is this hour due a full run? reads stored runs, writes nothing;
+                           sets due=true|false in $GITHUB_OUTPUT for the hourly workflow
   help, version
 
 options:
@@ -127,7 +131,10 @@ async function cmdRun(
   deps: PipelineDeps,
   style: Style,
 ): Promise<number> {
-  const record = await runPipeline(app, logger, deps, { skipLlm: llmDisabled(app, parsed) });
+  const record = await runPipeline(app, logger, deps, {
+    skipLlm: llmDisabled(app, parsed),
+    lane: flagString(parsed.flags, 'lane') === 'launches' ? 'launches' : 'full',
+  });
   print('');
   print(
     `${style.bold('run')} ${record.id} ${statusColor(style, record.status)} ` +
@@ -438,9 +445,52 @@ async function cmdBrief(
   }
 }
 
+/**
+ * The hourly workflow's gate. Always exits 0 with an answer: a database that
+ * cannot be read falls back to the base slots, which is the old schedule.
+ */
+async function cmdCadence(
+  app: AppConfig,
+  logger: Logger,
+  deps: PipelineDeps,
+  style: Style,
+  env: Record<string, string | undefined>,
+  nowMs = Date.now(),
+): Promise<number> {
+  let due: boolean;
+  let level: string;
+  const store = deps.createStore(app);
+  try {
+    const runs = await store.listRuns(RUN_HISTORY_LIMIT);
+    const decision = decideCadence(runs, {
+      mode: app.cadence.mode,
+      maxCostUsdPerDay: app.llm.maxCostUsdPerDay,
+      nowMs,
+    });
+    for (const reason of decision.reasons) print(style.dim(reason));
+    due = decision.due;
+    level = decision.level;
+  } catch (error) {
+    due = inSlot('base', nowMs);
+    level = 'base';
+    logger.warn('could not read run history; falling back to the base slots', { error: errorMessage(error) });
+  } finally {
+    await store.close().catch(() => undefined);
+  }
+  print(`${style.bold('cadence')} ${level} ${due ? style.green('due') : style.dim('not due')}`);
+  if (env.GITHUB_OUTPUT) await appendFile(env.GITHUB_OUTPUT, `due=${due}\nlevel=${level}\n`);
+  return EXIT_OK;
+}
+
 export async function main(
   argv: readonly string[],
-  overrides: { deps?: PipelineDeps; env?: Record<string, string | undefined>; fetch?: FetchLike } = {},
+  overrides: {
+    deps?: PipelineDeps;
+    env?: Record<string, string | undefined>;
+    fetch?: FetchLike;
+    /** Injected in tests so the cadence gate's clock is fixed. */
+    nowMs?: number;
+  } = {},
 ): Promise<number> {
   const parsed = parseArgs(argv);
   const env = overrides.env ?? process.env;
@@ -510,6 +560,8 @@ export async function main(
         return await cmdReport(app, parsed, deps, style);
       case 'brief':
         return await cmdBrief(app, parsed, logger, deps, style, env, overrides.fetch);
+      case 'cadence':
+        return await cmdCadence(app, logger, deps, style, env, overrides.nowMs);
       default:
         print(HELP);
         return EXIT_CONFIG;

@@ -46,7 +46,8 @@ trending lists → any judged token on them → `expressed`, hours since verdict
 ```
 
 The launch lane runs before the trending lane in a full run, so the verdict at
-launch gets the LLM budget first. Both lanes share `LLM_MAX_COST_USD_PER_RUN`.
+launch gets the LLM budget first. Both lanes share `LLM_MAX_COST_USD_PER_RUN`,
+and `LLM_MAX_COST_USD_PER_DAY` when set.
 
 ## The verdict
 

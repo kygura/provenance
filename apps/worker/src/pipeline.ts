@@ -56,6 +56,8 @@ export interface RunOptions {
   concurrency?: number;
   /** Injected in tests so run ids are predictable. */
   runId?: string;
+  /** Recorded in the run's stats so the cadence gate can tell the lanes apart. */
+  lane?: 'full' | 'launches';
 }
 
 /** Re-exported: callers and tests already import it from here. */
@@ -102,6 +104,7 @@ export async function runPipeline(
     alertsFired: 0,
     llmCostUsd: 0,
     sourceErrors: [],
+    lane: options.lane ?? 'full',
     launches: emptyLaunchStats(),
     social: emptySocialStats(),
   };
@@ -156,15 +159,22 @@ export async function runPipeline(
       log.error('social collection failed', { error: errorMessage(error) });
     }
 
-    const budget: LlmBudget = {
-      spent: 0,
-      limit: app.llm.maxCostUsdPerRun,
-      exhausted: app.llm.maxCostUsdPerRun <= 0,
-    };
+    // The per-run ceiling, shrunk to what the last 24 h leave under the daily one.
+    const perDay = app.llm.maxCostUsdPerDay;
+    const spent24h = perDay > 0 && !options.skipLlm ? await spendLast24h(store, id, log) : undefined;
+    const limit =
+      spent24h === undefined ? app.llm.maxCostUsdPerRun : Math.min(app.llm.maxCostUsdPerRun, Math.max(0, perDay - spent24h));
+    const budget: LlmBudget = { spent: 0, limit, exhausted: limit <= 0 };
     if (budget.exhausted && !options.skipLlm) {
-      log.warn('LLM budget is zero; running market-only', {
-        maxCostUsdPerRun: app.llm.maxCostUsdPerRun,
-      });
+      if (spent24h !== undefined && app.llm.maxCostUsdPerRun > 0) {
+        const detail = `daily LLM ceiling reached: $${spent24h.toFixed(4)} of $${perDay} in the last 24 h; no LLM work this run`;
+        stats.sourceErrors.push({ source: BUDGET_SOURCE, error: detail });
+        log.warn(detail, { spent24hUsd: spent24h, ceilingUsd: perDay });
+      } else {
+        log.warn('LLM budget is zero; running market-only', {
+          maxCostUsdPerRun: app.llm.maxCostUsdPerRun,
+        });
+      }
     }
 
     const analyzerCtx: AnalyzerContext = { app, logger: log.child('chain') };
@@ -379,6 +389,34 @@ export async function runPipeline(
   };
   if (fatal) record.error = fatal;
   return record;
+}
+
+/**
+ * LLM spend recorded by every other run in the trailing 24 hours. A run still
+ * in flight counts with what it has recorded, which is nothing until it
+ * finishes; the per-run ceiling bounds that gap. A store that cannot answer
+ * returns undefined and the run keeps its per-run ceiling.
+ */
+async function spendLast24h(store: ProvenanceStore, currentRunId: string, log: Logger): Promise<number | undefined> {
+  try {
+    return dailySpend(await store.listRuns(DAILY_SPEND_RUN_LIMIT), currentRunId, Date.now());
+  } catch (error) {
+    log.warn('could not read the last 24 h of spend; per-run ceiling only', { error: errorMessage(error) });
+    return undefined;
+  }
+}
+
+/** Enough rows for 24 h at the fastest cadence: 48 launch-lane runs plus 24 full ones, with room. */
+const DAILY_SPEND_RUN_LIMIT = 200;
+
+export function dailySpend(runs: RunRecord[], excludeId: string, nowMs: number): number {
+  const since = nowMs - 24 * 3_600_000;
+  let total = 0;
+  for (const run of runs) {
+    if (run.id === excludeId || Date.parse(run.startedAt) < since) continue;
+    total += run.stats.llmCostUsd ?? 0;
+  }
+  return total;
 }
 
 /**

@@ -29,7 +29,8 @@ Local development instead: leave `DATABASE_URL` at its default
 
 ## 2. Scheduled runner — GitHub Actions
 
-`.github/workflows/provenance.yml` (full run, twice daily) and `launches.yml`
+`.github/workflows/provenance.yml` (full run, hourly cron behind a cadence
+gate: twice daily at quiet volume, see [cadence.md](cadence.md)) and `launches.yml`
 (launch lane, every 30 minutes) both run on a cron and on manual dispatch. They
 share one job, `run-lane.yml`, which is the only place secrets and variables are
 forwarded to the worker; a new provider's key is one line there. Add the
@@ -94,6 +95,27 @@ LLM_TRIAGE_MODEL=qwen:qwen3.8-flash
 LLM_PRICING=qwen3.7-plus=0.4/1.6,qwen3.8-flash=0.15/0.47
 ```
 
+### Gather/judge split
+
+`LLM_SEARCH_MODEL` splits research by model. The search pass, which is the
+token-heavy part (each search turn re-reads everything gathered so far), runs
+on the cheaper model named there. That model only gathers dated, sourced
+evidence and is told not to decide. `LLM_MODEL` then reads those notes and
+makes both calls, anchor and organic, in one structured pass. `LLM_EXTRACT_MODEL`
+goes unused in this mode. Reports carry
+`promptVersion = provenance-research-v5-split` so the two populations can be
+compared.
+
+```
+LLM_MODEL=claude-opus-5            # the judge
+LLM_SEARCH_MODEL=moonshot:kimi-k2.6  # gathers through Exa; or claude-sonnet-5
+```
+
+Both calls run in real time, so no verdict waits on the split. The judge's
+system prompt is static and carries a cache breakpoint, so from the second
+token of a run onward most of the judge's input is read from cache. Unset
+keeps the single-researcher flow.
+
 A run refuses to start if a configured model has no key, or no price (OpenRouter
 excepted), naming the variable to set.
 
@@ -139,3 +161,8 @@ A run over 15 tokens makes at most 15 model calls, most of them skipped by the
 reanalysis window after the first few days. `LLM_MAX_COST_USD_PER_RUN` is a hard
 ceiling: once it is hit the pipeline keeps collecting market and chain data and
 stops calling the model, and the run stats record that it happened. Start it low.
+
+`LLM_MAX_COST_USD_PER_DAY` caps the trailing 24 hours across every run of both
+lanes; a run's budget is the smaller of the two. It is off (0) by default, and
+the cadence gate will not raise the full run above twice daily until it is set,
+since a faster cadence multiplies the per-run worst case.
