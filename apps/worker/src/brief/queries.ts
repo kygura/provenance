@@ -90,10 +90,27 @@ FROM runs
 WHERE started_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours')
 ORDER BY started_at DESC`;
 
-export const SQL_A_FULL_RUNS = `SELECT id, started_at, status FROM runs r
-WHERE status IN ('ok','partial')
-  AND EXISTS (SELECT 1 FROM snapshots s WHERE s.run_id = r.id)
-ORDER BY started_at DESC, id DESC LIMIT 2`;
+/**
+ * PREV is the latest full run at least 11 h before CUR, not simply the one
+ * before it: once the cadence gate runs hourly, the run before CUR is an hour
+ * old and every delta would read as noise. At the base cadence (12 h) it is
+ * the same row as before.
+ */
+export const SQL_A_FULL_RUNS = `WITH fr AS (
+  SELECT id, started_at, status FROM runs r
+  WHERE status IN ('ok','partial')
+    AND EXISTS (SELECT 1 FROM snapshots s WHERE s.run_id = r.id)
+),
+cur AS (SELECT id, started_at, status FROM fr ORDER BY started_at DESC, id DESC LIMIT 1),
+prev AS (
+  SELECT fr.id, fr.started_at, fr.status FROM fr, cur
+  WHERE fr.started_at <= strftime('%Y-%m-%dT%H:%M:%fZ', cur.started_at, '-11 hours')
+  ORDER BY fr.started_at DESC, fr.id DESC LIMIT 1
+)
+SELECT 0 AS ord, id, started_at, status FROM cur
+UNION ALL
+SELECT 1 AS ord, id, started_at, status FROM prev
+ORDER BY ord`;
 
 export const SQL_A_RUN_ERRORS = `SELECT json_extract(stats_json,'$.sourceErrors') AS source_errors, error FROM runs WHERE id=?`;
 
@@ -121,7 +138,7 @@ export async function queryRuns24h(db: SqlExecutor): Promise<RunRow[]> {
   }));
 }
 
-/** `[CUR, PREV]`: the two latest finished runs that wrote snapshots. Launch-lane runs never do. */
+/** `[CUR, PREV]`: finished runs that wrote snapshots (launch-lane runs never do), PREV ≥ 11 h before CUR. */
 export async function queryFullRuns(db: SqlExecutor): Promise<{ cur?: FullRun; prev?: FullRun }> {
   const rows = (await select(db, SQL_A_FULL_RUNS)).map((row) => ({
     id: toStr(row.id) ?? '',

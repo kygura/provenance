@@ -29,7 +29,8 @@ Local development instead: leave `DATABASE_URL` at its default
 
 ## 2. Scheduled runner — GitHub Actions
 
-`.github/workflows/provenance.yml` (full run, twice daily) and `launches.yml`
+`.github/workflows/provenance.yml` (full run, hourly cron behind a cadence
+gate: twice daily at quiet volume, see [cadence.md](cadence.md)) and `launches.yml`
 (launch lane, every 30 minutes) both run on a cron and on manual dispatch. They
 share one job, `run-lane.yml`, which is the only place secrets and variables are
 forwarded to the worker; a new provider's key is one line there. Add the
@@ -139,3 +140,8 @@ A run over 15 tokens makes at most 15 model calls, most of them skipped by the
 reanalysis window after the first few days. `LLM_MAX_COST_USD_PER_RUN` is a hard
 ceiling: once it is hit the pipeline keeps collecting market and chain data and
 stops calling the model, and the run stats record that it happened. Start it low.
+
+`LLM_MAX_COST_USD_PER_DAY` caps the trailing 24 hours across every run of both
+lanes; a run's budget is the smaller of the two. It is off (0) by default, and
+the cadence gate will not raise the full run above twice daily until it is set,
+since a faster cadence multiplies the per-run worst case.

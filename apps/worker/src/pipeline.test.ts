@@ -154,6 +154,48 @@ describe('cost ceiling', () => {
     expect(record.status).toBe('partial');
   });
 
+  test('the daily ceiling shrinks the run budget to what the last 24 h leave', async () => {
+    const snapshots = ['aaa', 'bbb', 'ccc'].map((id) => makeSnapshot(`solana:${id}`));
+    const harness = makeHarness({ snapshots, costPerReport: 0.3 });
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+    const prior = (id: string, startedAt: string, llmCostUsd: number) =>
+      harness.store.runs.set(id, {
+        id,
+        startedAt,
+        status: 'ok',
+        stats: { discovered: 1, afterFilter: 1, analysed: 1, reused: 0, alertsFired: 0, llmCostUsd, sourceErrors: [] },
+      });
+    prior('run_recent', hoursAgo(3), 1.8);
+    prior('run_old', hoursAgo(30), 50); // outside the window
+    const base = makeConfig();
+    const app = makeConfig({ llm: { ...base.llm, maxCostUsdPerRun: 5, maxCostUsdPerDay: 2 } });
+
+    const record = await runPipeline(app, silentLogger, harness.deps, { runId: RUN, concurrency: 1 });
+
+    // $0.20 left: the first report crosses it and the rest go market-only.
+    expect(harness.researchCalls).toEqual(['solana:aaa']);
+    expect(record.stats.sourceErrors.some((e) => e.source === BUDGET_SOURCE)).toBe(true);
+    expect(record.stats.lane).toBe('full');
+  });
+
+  test('a spent daily ceiling means no LLM work, and says why', async () => {
+    const harness = makeHarness({ snapshots: [makeSnapshot('solana:aaa')] });
+    harness.store.runs.set('run_recent', {
+      id: 'run_recent',
+      startedAt: new Date(Date.now() - 3_600_000).toISOString(),
+      status: 'ok',
+      stats: { discovered: 1, afterFilter: 1, analysed: 1, reused: 0, alertsFired: 0, llmCostUsd: 3, sourceErrors: [] },
+    });
+    const base = makeConfig();
+    const app = makeConfig({ llm: { ...base.llm, maxCostUsdPerDay: 3 } });
+
+    const record = await runPipeline(app, silentLogger, harness.deps, { runId: RUN });
+
+    expect(harness.researchCalls).toEqual([]);
+    const budget = record.stats.sourceErrors.find((e) => e.source === BUDGET_SOURCE);
+    expect(budget?.error).toContain('daily LLM ceiling');
+  });
+
   test('a zero budget means market-only from the first token', async () => {
     const harness = makeHarness({ snapshots: [makeSnapshot('solana:aaa')] });
     const base = makeConfig();

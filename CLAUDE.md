@@ -41,7 +41,7 @@ Turso DB:
 
 | Workflow | Cron (UTC) | What it writes |
 |---|---|---|
-| `provenance.yml` | `0 6 * * *`, `0 18 * * *` | Full run: trending discovery → chain analysis → research → score → alerts. Rows in `runs`, `snapshots`, `chain_analysis`, `provenance`, `scores`, `alerts`. |
+| `provenance.yml` | `0 * * * *`, gated (`docs/cadence.md`): 06:00 and 18:00 at quiet volume, every 4 h or hourly when the meme market heats up | Full run: trending discovery → chain analysis → research → score → alerts. Rows in `runs`, `snapshots`, `chain_analysis`, `provenance`, `scores`, `alerts`. |
 | `launches.yml` | `*/30 * * * *` | Launch lane (`--lane launches`): new pools → market gate → chain gate → anchor check. Rows in `runs`, `watchlist`, `alerts`, sometimes `provenance`. No trending snapshots. |
 
 **Never run `cli.ts run`, `migrate` or `seed` here.** It would duplicate
@@ -149,13 +149,26 @@ ORDER BY started_at DESC;
 ```
 
 ```sql
-SELECT id, started_at, status FROM runs r
-WHERE status IN ('ok','partial')
-  AND EXISTS (SELECT 1 FROM snapshots s WHERE s.run_id = r.id)
-ORDER BY started_at DESC, id DESC LIMIT 2;
+WITH fr AS (
+  SELECT id, started_at, status FROM runs r
+  WHERE status IN ('ok','partial')
+    AND EXISTS (SELECT 1 FROM snapshots s WHERE s.run_id = r.id)
+),
+cur AS (SELECT id, started_at, status FROM fr ORDER BY started_at DESC, id DESC LIMIT 1),
+prev AS (
+  SELECT fr.id, fr.started_at, fr.status FROM fr, cur
+  WHERE fr.started_at <= strftime('%Y-%m-%dT%H:%M:%fZ', cur.started_at, '-11 hours')
+  ORDER BY fr.started_at DESC, fr.id DESC LIMIT 1
+)
+SELECT 0 AS ord, id, started_at, status FROM cur
+UNION ALL
+SELECT 1 AS ord, id, started_at, status FROM prev
+ORDER BY ord;
 ```
 
-The first row is `CUR`, the second `PREV`. Then check:
+The first row is `CUR`, the second `PREV`: the latest full run at least 11 h
+before `CUR`. When the cadence gate runs hourly, the run just before `CUR` is
+an hour old and every delta against it is noise. Then check:
 
 - No full run in the last 24 h, or `CUR` is `running`: say "today's full run
   hasn't landed (latest: `<started_at>`, `<status>`)" and brief only on the

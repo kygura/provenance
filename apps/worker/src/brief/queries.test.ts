@@ -61,6 +61,16 @@ describe('query A: CUR/PREV selection', () => {
     expect(prev?.id).toBe('run_prev');
   });
 
+  test('at an hourly cadence PREV is the full run at least 11 h before CUR, not the one before it', async () => {
+    await seedTwoFullRunsAndLaunchLane();
+    // run_cur is 2 h ago and run_prev 13 h ago; an hourly run sits between.
+    await seedRun(db.store, 'run_hourly', hoursAgo(3));
+    await seedToken(db.store, 'run_hourly', { tokenId: Y, at: hoursAgo(3) });
+    const { cur, prev } = await queryFullRuns(db.store.raw);
+    expect(cur?.id).toBe('run_cur');
+    expect(prev?.id).toBe('run_prev');
+  });
+
   test('a failed or running run with snapshots is not CUR', async () => {
     await seedTwoFullRunsAndLaunchLane();
     await seedRun(db.store, 'run_failed', hoursAgo(0.2), 'failed');

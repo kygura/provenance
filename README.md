@@ -63,7 +63,7 @@ up on a list. See [`docs/launch-lane.md`](docs/launch-lane.md).
 | Piece | Runs on | Cost |
 |---|---|---|
 | Launch lane: new pools, gate, verdict, research | GitHub Actions cron, every 30 min | ~1.5–3k Actions min/month: free on a public repo, over the 2k private quota |
-| Trending lane: lists, analysis, research | GitHub Actions cron, twice daily | free tier |
+| Trending lane: lists, analysis, research | GitHub Actions cron, hourly behind a cadence gate (twice daily at quiet volume) | free tier |
 | Database | libSQL / Turso (or a local SQLite file) | free tier |
 | Dashboard | Vercel | free tier |
 | LLM | Claude (Opus 5 research and extraction, Sonnet 5 anchor check) when `ANTHROPIC_API_KEY` is set, switching mid-run to Kimi K3 / K2.6 on Moonshot if Anthropic fails; Kimi alone with only `MOONSHOT_API_KEY` | paid, per token |

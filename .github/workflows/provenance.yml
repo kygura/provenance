@@ -2,13 +2,15 @@ name: Provenance run
 
 on:
   schedule:
-    # Twice daily, straddling the two sessions where meme-coin rotation is
-    # busiest: 06:00 UTC catches the Asia afternoon into the European morning,
-    # 18:00 UTC catches the US afternoon. GitHub's scheduler is best-effort and
-    # routinely fires late under load, so treat these as approximate. It also
-    # stops running on repositories with no activity for 60 days.
-    - cron: '0 6 * * *'
-    - cron: '0 18 * * *'
+    # Hourly, gated. `cli.ts cadence` decides whether this hour is due from
+    # the trailing week of stored runs (apps/worker/src/cadence.ts): at quiet
+    # volume only 06:00 and 18:00 UTC are, as before; a hotter meme market
+    # tightens it to every 4 h, then every hour. CADENCE_MODE pins a level;
+    # auto mode stays at base until LLM_MAX_COST_USD_PER_DAY is set. GitHub's
+    # scheduler is best-effort and fires late under load, so the gate also
+    # runs an overdue slot. It also stops running on repositories with no
+    # activity for 60 days.
+    - cron: '0 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -35,6 +37,8 @@ jobs:
     uses: ./.github/workflows/run-lane.yml
     secrets: inherit
     with:
+      # A manual dispatch always runs; only the hourly schedule asks the gate.
+      cadence_gate: ${{ github.event_name == 'schedule' }}
       dry_run: ${{ inputs.dry_run == true }}
       limit: ${{ inputs.limit || '' }}
       chains: ${{ inputs.chains || '' }}

