@@ -116,6 +116,7 @@ jobs:
           LLM_ANTHROPIC_FIRST: ${{ vars.LLM_ANTHROPIC_FIRST }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
           LLM_EXTRACT_MODEL: ${{ vars.LLM_EXTRACT_MODEL }}
+          LLM_SEARCH_MODEL: ${{ vars.LLM_SEARCH_MODEL }}
           LLM_TRIAGE_MODEL: ${{ vars.LLM_TRIAGE_MODEL }}
           LLM_PRICING: ${{ vars.LLM_PRICING }}
           # The launch lane runs every 30 minutes, so it can carry its own

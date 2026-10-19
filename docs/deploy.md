@@ -95,6 +95,27 @@ LLM_TRIAGE_MODEL=qwen:qwen3.8-flash
 LLM_PRICING=qwen3.7-plus=0.4/1.6,qwen3.8-flash=0.15/0.47
 ```
 
+### Gather/judge split
+
+`LLM_SEARCH_MODEL` splits research by model. The search pass, which is the
+token-heavy part (each search turn re-reads everything gathered so far), runs
+on the cheaper model named there. That model only gathers dated, sourced
+evidence and is told not to decide. `LLM_MODEL` then reads those notes and
+makes both calls, anchor and organic, in one structured pass. `LLM_EXTRACT_MODEL`
+goes unused in this mode. Reports carry
+`promptVersion = provenance-research-v5-split` so the two populations can be
+compared.
+
+```
+LLM_MODEL=claude-opus-5            # the judge
+LLM_SEARCH_MODEL=moonshot:kimi-k2.6  # gathers through Exa; or claude-sonnet-5
+```
+
+Both calls run in real time, so no verdict waits on the split. The judge's
+system prompt is static and carries a cache breakpoint, so from the second
+token of a run onward most of the judge's input is read from cache. Unset
+keeps the single-researcher flow.
+
 A run refuses to start if a configured model has no key, or no price (OpenRouter
 excepted), naming the variable to set.
 

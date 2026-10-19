@@ -153,6 +153,14 @@ export interface LlmConfig {
   /** Cheaper model for triage/classification passes. Same spec format as `model`. */
   triageModel: string;
   /**
+   * Gather/judge split (`LLM_SEARCH_MODEL`). When set, this cheaper model runs
+   * the web-search pass and only gathers dated evidence; `model` then judges
+   * both verdicts from those notes in one structured call, and `extractModel`
+   * is not used. Unset keeps the single-researcher flow. Not swapped by
+   * Anthropic-first: naming it is already the choice.
+   */
+  searchModel?: string;
+  /**
    * Under Anthropic-first, the non-Anthropic spec each role switches to when
    * Anthropic fails at runtime (credits exhausted, auth, rate limit, overload,
    * network). Undefined when the role's model is not Anthropic-first or the
@@ -474,6 +482,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
         if (!env.ANTHROPIC_API_KEY || !bool(env.LLM_ANTHROPIC_FIRST, true)) return configured;
         return anthropicFirst(configured, (spec) => Boolean(providers[parseModelSpec(spec).provider].apiKey));
       })(),
+      ...(env.LLM_SEARCH_MODEL?.trim() ? { searchModel: env.LLM_SEARCH_MODEL.trim() } : {}),
       providers,
       pricing: pricing(env.LLM_PRICING),
       maxOutputTokens: num(env.LLM_MAX_OUTPUT_TOKENS, 4096),

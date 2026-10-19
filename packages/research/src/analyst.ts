@@ -31,7 +31,16 @@ import {
 import { resolveAnchor } from './anchor';
 import { CostTracker } from './cost';
 import { createLlm, type CreateLlmOptions, type LlmClient, type UsageSink } from './llm';
-import { PROMPT_VERSION, SYSTEM_PROMPT, buildExtractionPrompt, buildResearchPrompt } from './prompt';
+import {
+  PROMPT_VERSION,
+  SPLIT_PROMPT_VERSION,
+  SYSTEM_PROMPT,
+  buildExtractionPrompt,
+  buildGatherPrompt,
+  buildJudgePrompt,
+  buildResearchPrompt,
+} from './prompt';
+import { parseModelSpec } from './llm/spec';
 import { PROVENANCE_TOOL_NAME, buildDegradedReport, provenanceTool, validateReportDraft } from './schema';
 
 // Re-exported so existing importers keep one entry point for the analyst.
@@ -98,6 +107,9 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
   private readonly extractLlm: LlmClient;
   private readonly attempts: number;
   private readonly maxWebSearches: number;
+  /** Gather/judge split: a cheap model searches, `model` judges. */
+  private readonly split: boolean;
+  private readonly promptVersion: string;
   private readonly onUsage: UsageSink;
 
   constructor(
@@ -112,15 +124,26 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
       maxPauseTurnRestarts: options.maxPauseTurnRestarts,
       warn: (message) => logger.warn(message),
     };
-    this.researchLlm =
-      options.researchLlm ?? createLlm(app, app.llm.model, { ...build, fallback: app.llm.fallbackModel });
-    const extractSpec = app.llm.extractModel ?? app.llm.model;
-    const extractFallback = app.llm.fallbackExtractModel;
-    this.extractLlm =
-      options.extractLlm ??
-      (extractSpec === app.llm.model && extractFallback === app.llm.fallbackModel && !options.researchLlm
-        ? this.researchLlm
-        : createLlm(app, extractSpec, { ...build, fallback: extractFallback }));
+    const searchSpec = app.llm.searchModel;
+    this.split = searchSpec !== undefined && searchSpec !== app.llm.model;
+    this.promptVersion = this.split ? SPLIT_PROMPT_VERSION : PROMPT_VERSION;
+    if (this.split && searchSpec !== undefined) {
+      // The gatherer's runtime fallback is the cheap extract role's, and only
+      // under Anthropic-first, which is the one case a fallback exists for.
+      const searchFallback = parseModelSpec(searchSpec).provider === 'anthropic' ? app.llm.fallbackExtractModel : undefined;
+      this.researchLlm = options.researchLlm ?? createLlm(app, searchSpec, { ...build, fallback: searchFallback });
+      this.extractLlm = options.extractLlm ?? createLlm(app, app.llm.model, { ...build, fallback: app.llm.fallbackModel });
+    } else {
+      this.researchLlm =
+        options.researchLlm ?? createLlm(app, app.llm.model, { ...build, fallback: app.llm.fallbackModel });
+      const extractSpec = app.llm.extractModel ?? app.llm.model;
+      const extractFallback = app.llm.fallbackExtractModel;
+      this.extractLlm =
+        options.extractLlm ??
+        (extractSpec === app.llm.model && extractFallback === app.llm.fallbackModel && !options.researchLlm
+          ? this.researchLlm
+          : createLlm(app, extractSpec, { ...build, fallback: extractFallback }));
+    }
     this.attempts = options.attempts ?? 2;
     this.maxWebSearches = options.maxWebSearches ?? app.llm.maxWebSearches ?? 6;
     this.onUsage = (model, usage, costUsd) => {
@@ -169,7 +192,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
         tokenId: snapshot.tokenId,
         memeName: snapshot.name || snapshot.symbol,
         model: this.modelLabel(),
-        promptVersion: PROMPT_VERSION,
+        promptVersion: this.promptVersion,
         reason: `Web research pass failed: ${reason}`,
         failed: reason,
         evidence,
@@ -191,7 +214,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
         tokenId: snapshot.tokenId,
         memeName: snapshot.name || snapshot.symbol,
         model: this.modelLabel(),
-        promptVersion: PROMPT_VERSION,
+        promptVersion: this.promptVersion,
         reason: 'The research pass produced no notes to extract a report from.',
         evidence: allEvidence,
       }), this.spentSince(spentBefore));
@@ -217,7 +240,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     const found = await this.researchLlm.search(
       {
         system: SYSTEM_PROMPT,
-        prompt: buildResearchPrompt(snapshot, chain, evidence),
+        prompt: this.split ? buildGatherPrompt(snapshot, chain, evidence) : buildResearchPrompt(snapshot, chain, evidence),
         maxTokens: this.app.llm.maxOutputTokens,
         maxSearches: this.maxWebSearches,
         long: true,
@@ -244,7 +267,9 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
     log: Logger,
     spentBefore: number,
   ): Promise<ProvenanceReport> {
-    const prompt = buildExtractionPrompt(snapshot, chain, found.notes, found.citations);
+    const prompt = this.split
+      ? buildJudgePrompt(snapshot, chain, found.notes, found.citations)
+      : buildExtractionPrompt(snapshot, chain, found.notes, found.citations);
     let lastIssues: string[] = [];
     // Set only while the latest attempt threw: a call that failed, not a bad answer.
     let lastError: string | undefined;
@@ -258,8 +283,8 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
             tool: provenanceTool(),
             maxTokens: this.app.llm.maxOutputTokens,
             temperature: this.app.llm.temperature,
-            // Copying notes into a schema needs no deliberation.
-            reasoningEffort: 'low',
+            // Copying notes into a schema needs no deliberation; judging them does.
+            reasoningEffort: this.split ? 'high' : 'low',
           },
           this.onUsage,
         );
@@ -304,7 +329,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
           evidence: mergeEvidence(outcome.draft.evidence, evidence),
           confidence: clamp(outcome.draft.confidence * (grounded ? 1 : 0.7) - penalty, 0, 1),
           model: this.modelLabel(),
-          promptVersion: PROMPT_VERSION,
+          promptVersion: this.promptVersion,
           generatedAt: nowIso(),
           usage: {
             inputTokens: usage.inputTokens,
@@ -323,7 +348,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
       tokenId: snapshot.tokenId,
       memeName: snapshot.name || snapshot.symbol,
       model: this.modelLabel(),
-      promptVersion: PROMPT_VERSION,
+      promptVersion: this.promptVersion,
       reason: lastIssues[0] ?? 'The model did not return a usable provenance report.',
       ...(lastError !== undefined ? { failed: lastError } : {}),
       evidence,

@@ -30,7 +30,10 @@ export const PROVIDER_KEY_ENV: Readonly<Record<LlmProvider, string>> = {
 
 /** Every model spec a live run may call, deduped. */
 export function configuredModelSpecs(app: AppConfig): ModelSpec[] {
-  const specs = [app.llm.model, app.llm.extractModel ?? app.llm.model, app.llm.triageModel].map(parseModelSpec);
+  const roles = app.llm.searchModel
+    ? [app.llm.searchModel, app.llm.model, app.llm.triageModel]
+    : [app.llm.model, app.llm.extractModel ?? app.llm.model, app.llm.triageModel];
+  const specs = roles.map(parseModelSpec);
   const seen = new Set<string>();
   return specs.filter((spec) => {
     const key = `${spec.provider}:${spec.model}`;
