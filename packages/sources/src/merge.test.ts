@@ -41,6 +41,23 @@ describe('SOURCE_PRECEDENCE', () => {
   });
 });
 
+describe('mergeToSnapshots address validity', () => {
+  test('drops unknown-chain and malformed-address entries, keeps valid ones', () => {
+    const snapshots = mergeToSnapshots([
+      entry('dexscreener', A),
+      entry('dexscreener', '0x7', { chain: 'unknown' }),
+      entry('dextools', '0xe', { chain: 'unknown' }),
+      entry('geckoterminal', '0x7'),
+      entry('geckoterminal', '0x' + 'b'.repeat(39)),
+      entry('dexscreener', B, { chain: 'solana', tokenAddress: 'So11111111111111111111111111111111111111112' }),
+    ]);
+    expect(snapshots.map((s) => s.tokenId).sort()).toEqual([
+      'ethereum:' + A,
+      'solana:So11111111111111111111111111111111111111112',
+    ]);
+  });
+});
+
 describe('splitLanes', () => {
   test('launch-only goes to launches; trending, manual and mixes stay trending', () => {
     const snapshots = mergeToSnapshots([

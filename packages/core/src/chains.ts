@@ -70,6 +70,34 @@ export function normalizeChain(raw: string | null | undefined): Chain {
   return CHAIN_ALIASES[key] ?? (isChain(key) ? key : 'unknown');
 }
 
+/**
+ * Whether `address` is a well-formed token address for `chain`. Malformed ids from
+ * scraped links (e.g. `unknown:0x7`) reached the store, so every ingest path checks this.
+ */
+const TON_FRIENDLY = /^[A-Za-z0-9_-]{48}$/;
+const TON_RAW = /^-?\d+:[0-9a-fA-F]{64}$/;
+const SUI_COIN_TYPE = /^0x[0-9a-fA-F]{1,64}::\w+::\w+$/;
+const SOLANA_MINT = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+const HYPERLIQUID_TOKEN = /^0x[0-9a-fA-F]{32}$|^0x[0-9a-fA-F]{40}$/;
+
+export function isTokenAddress(chain: Chain, address: string): boolean {
+  const value = address.trim();
+  if (isEvm(chain)) return EVM_ADDRESS.test(value);
+  switch (chain) {
+    case 'solana':
+      return SOLANA_MINT.test(value);
+    case 'sui':
+      return SUI_COIN_TYPE.test(value);
+    case 'ton':
+      return TON_FRIENDLY.test(value) || TON_RAW.test(value);
+    case 'hyperliquid':
+      return HYPERLIQUID_TOKEN.test(value);
+    default:
+      return false;
+  }
+}
+
 /** Canonical token id used as the primary key everywhere: `chain:address`. */
 export function tokenId(chain: Chain, address: string): string {
   return `${chain}:${isEvm(chain) ? address.toLowerCase() : address}`;
