@@ -57,7 +57,7 @@ secrets under **Settings → Secrets and variables → Actions**:
 | `RPC_ETHEREUM` / `RPC_SOLANA` | no | your own RPC endpoints, comma-separated and tried in order. A set list is tried first and the public defaults (Allnodes' publicnode.com, drpc, …) follow as fallbacks; set `RPC_PUBLIC_FALLBACK=false` to use only your list. A keyed URL (Alchemy, Helius) must be a secret so the logs mask it. Blank keeps the public defaults |
 
 Tuning knobs (`MAX_TOKENS_PER_RUN`, `MIN_LIQUIDITY_USD`,
-`ALERT_SCORE_THRESHOLD`, `LLM_MAX_COST_USD_PER_RUN`, …) belong in **Variables**
+`ALERT_SCORE_THRESHOLD`, …) belong in **Variables**
 rather than Secrets; every one is listed in `.env.example`. So do the model
 choices: `LLM_MODEL`, `LLM_EXTRACT_MODEL`, `LLM_TRIAGE_MODEL` and `LLM_PRICING`.
 Only the keys for the providers those models name are needed.
@@ -160,7 +160,9 @@ function should.
 A run over 15 tokens makes at most 15 model calls, most of them skipped by the
 reanalysis window after the first few days. `LLM_MAX_COST_USD_PER_RUN` is a hard
 ceiling: once it is hit the pipeline keeps collecting market and chain data and
-stops calling the model, and the run stats record that it happened. Start it low.
+stops calling the model, and the run stats record that it happened. It is not a
+repo variable: the workflow does not forward it, so the default in
+`packages/core/src/config.ts` ($15) applies to both lanes. Change it there.
 
 `LLM_MAX_COST_USD_PER_DAY` caps the trailing 24 hours across every run of both
 lanes; a run's budget is the smaller of the two. It is off (0) by default, and

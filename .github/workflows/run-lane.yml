@@ -119,9 +119,6 @@ jobs:
           LLM_SEARCH_MODEL: ${{ vars.LLM_SEARCH_MODEL }}
           LLM_TRIAGE_MODEL: ${{ vars.LLM_TRIAGE_MODEL }}
           LLM_PRICING: ${{ vars.LLM_PRICING }}
-          # The launch lane runs every 30 minutes, so it can carry its own
-          # ceiling; blank falls back to the shared one.
-          LLM_MAX_COST_USD_PER_RUN: ${{ inputs.lane == 'launches' && vars.LAUNCHES_MAX_COST_USD_PER_RUN || vars.LLM_MAX_COST_USD_PER_RUN }}
           # Shared by both lanes across the trailing 24 h; blank or 0 = off.
           LLM_MAX_COST_USD_PER_DAY: ${{ vars.LLM_MAX_COST_USD_PER_DAY }}
           LLM_MAX_WEB_SEARCHES: ${{ vars.LLM_MAX_WEB_SEARCHES }}
