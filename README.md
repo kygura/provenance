@@ -66,7 +66,7 @@ up on a list. See [`docs/launch-lane.md`](docs/launch-lane.md).
 | Trending lane: lists, analysis, research | GitHub Actions cron, hourly behind a cadence gate (twice daily at quiet volume) | free tier |
 | Database | libSQL / Turso (or a local SQLite file) | free tier |
 | Dashboard | Vercel | free tier |
-| LLM | Claude (Opus 5 research and extraction, Sonnet 5 anchor check) when `ANTHROPIC_API_KEY` is set, switching mid-run to Kimi K3 / K2.6 on Moonshot if Anthropic fails; Kimi alone with only `MOONSHOT_API_KEY` | paid, per token |
+| LLM | Claude (Haiku 5.5 gathers evidence, Sonnet 5 judges and runs the anchor check) when `ANTHROPIC_API_KEY` is set, switching mid-run to Kimi K3 / K2.6 on Moonshot if Anthropic fails; Kimi alone with only `MOONSHOT_API_KEY` | paid, per token |
 | Search | Anthropic's web search; Exa (`EXA_API_KEY`) for every other provider | paid, per query |
 | Social yardstick (optional) | Elfa trending-CA feeds, `ELFA_API_KEY` | free tier; ~720 of 1,000 monthly credits ([docs/social.md](docs/social.md)) |
 

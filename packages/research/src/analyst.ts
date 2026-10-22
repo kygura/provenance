@@ -145,7 +145,7 @@ export class WebSearchAnalyst implements ProvenanceResearcher {
           : createLlm(app, extractSpec, { ...build, fallback: extractFallback }));
     }
     this.attempts = options.attempts ?? 2;
-    this.maxWebSearches = options.maxWebSearches ?? app.llm.maxWebSearches ?? 6;
+    this.maxWebSearches = options.maxWebSearches ?? app.llm.maxWebSearches ?? 8;
     this.onUsage = (model, usage, costUsd) => {
       this.tracker.add(model, usage, costUsd);
     };

@@ -85,14 +85,14 @@ export function parseModelSpec(spec: string): ModelSpec {
 
 /** Anthropic model each role runs on under Anthropic-first (the default with an Anthropic key). */
 export const ANTHROPIC_ROLE_MODELS = {
-  model: 'claude-opus-5',
-  extractModel: 'claude-opus-5',
+  model: 'claude-sonnet-5',
+  extractModel: 'claude-sonnet-5',
   triageModel: 'claude-sonnet-5',
 } as const;
 
 /**
  * Gatherer under Anthropic-first when LLM_SEARCH_MODEL is unset: Haiku runs the
- * token-heavy search pass, and Opus (`model`) judges both verdicts from its
+ * token-heavy search pass, and Sonnet (`model`) judges both verdicts from its
  * notes (the gather/judge split in docs/deploy.md).
  */
 export const ANTHROPIC_SEARCH_MODEL = 'claude-haiku-5-5';
@@ -194,7 +194,7 @@ export interface LlmConfig {
   temperature: number;
   /**
    * Ceiling on server-side web searches in one token's research pass. The
-   * single biggest lever on both cost and research depth — six is enough to
+   * single biggest lever on both cost and research depth — eight is enough to
    * date a meme and find two prior cycles without wandering.
    */
   maxWebSearches: number;
@@ -501,7 +501,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       maxCostUsdPerRun: num(env.LLM_MAX_COST_USD_PER_RUN, 15),
       maxCostUsdPerDay: num(env.LLM_MAX_COST_USD_PER_DAY, 0),
       temperature: num(env.LLM_TEMPERATURE, 0.2),
-      maxWebSearches: num(env.LLM_MAX_WEB_SEARCHES, 6),
+      maxWebSearches: num(env.LLM_MAX_WEB_SEARCHES, 8),
       searchBackend: env.LLM_SEARCH_BACKEND?.trim().toLowerCase() === 'native' ? 'native' : 'exa',
     },
     launches: {

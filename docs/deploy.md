@@ -63,7 +63,7 @@ choices: `LLM_MODEL`, `LLM_EXTRACT_MODEL`, `LLM_TRIAGE_MODEL` and `LLM_PRICING`.
 Only the keys for the providers those models name are needed.
 
 With the `ANTHROPIC_API_KEY` secret set, every role runs on Claude by default
-(`claude-haiku-5-5` gathers evidence in the search pass, `claude-opus-5` judges
+(`claude-haiku-5-5` gathers evidence in the search pass, `claude-sonnet-5` judges
 anchor and organic from its notes, `claude-sonnet-5` runs the triage check; see
 the gather/judge split below). Set `LLM_SEARCH_MODEL` to change the gatherer. Each role keeps a fallback: the
 non-Anthropic model its `LLM_*_MODEL` variable names, else its Kimi default.
