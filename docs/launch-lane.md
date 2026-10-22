@@ -86,7 +86,10 @@ transfer from the pool to a wallet is a buy (`packages/chain/src/sniping.ts`):
 - **Early buying** is what the pool sent to wallets in the first 36 seconds
   of trading: 3 blocks on Ethereum, the trading-start block included. Routers,
   burn addresses and protocol contracts don't count as buyers.
-- **Still held** is what those wallets hold now, from the same replay.
+- **Still held** is what those wallets hold now, from the same replay. It
+  also counts wallets they fed: any wallet that got at least 90% of its
+  inbound tokens from the tracked set joins it, and chains (A to B to C) are
+  followed, so moving tokens to a fresh wallet isn't read as a sale.
 
 The result is stored as `ChainAnalysis.sniping` and drives three things:
 
@@ -117,8 +120,10 @@ native transfers, so this read uses the explorer (`packages/chain/src/funding.ts
   `txlistinternal`. Funding that came through a disperse contract is
   attributed to the EOA that called it.
 - **Hubs**: a funder shared by two or more buyers is dropped as a hub when it
-  is a labelled exchange or protocol, or has sent 1,000+ transactions.
-  Two strangers withdrawing from Binance share a funder, not an owner.
+  is a labelled protocol address, a contract, an EOA that has sent 1,000+
+  transactions, or can't be checked. Two strangers withdrawing from Binance
+  share a funder, not an owner. If the budget runs out before the check, the
+  read is dropped rather than guessed.
 - **Clusters**: buyers joined through shared funders, chains included (A funds
   B, B funds C). A cluster is 2+ buyers; `clusteredPct` is the supply they
   bought in the window.

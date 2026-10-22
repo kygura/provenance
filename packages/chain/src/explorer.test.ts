@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { Budget } from './rpc';
 import { loadConfig, type AppConfig, type Chain } from '@provenance/core';
 import { checkContractVerified, ETHERSCAN_CHAIN_IDS, lookupFirstFunders } from './explorer';
 
@@ -110,6 +111,7 @@ describe('lookupFirstFunders', () => {
   const W1 = '0x1111111111111111111111111111111111111111';
   const W2 = '0x2222222222222222222222222222222222222222';
   const FUNDER = '0xAAAAaaaaAAAAaaaaAAAAaaaaAAAAaaaaAAAAaaaa';
+  const DISPERSE = '0xd15d15d15d15d15d15d15d15d15d15d15d15d15d';
   const ok = (result: unknown[]) => json({ status: result.length ? '1' : '0', message: result.length ? 'OK' : 'No transactions found', result });
 
   async function run(
@@ -135,6 +137,7 @@ describe('lookupFirstFunders', () => {
     expect(p.get('module')).toBe('account');
     expect(p.get('action')).toBe('txlist');
     expect(p.get('sort')).toBe('asc');
+    expect(p.get('offset')).toBe('50');
     expect(p.get('address')).toBe(W1);
     expect(p.get('apikey')).toBe(KEY);
   });
@@ -155,7 +158,7 @@ describe('lookupFirstFunders', () => {
       (url) =>
         url.searchParams.get('action') === 'txlist'
           ? ok([])
-          : ok([{ from: '0xd15perse00000000000000000000000000000000', to: W1, value: '9', hash: '0xabc' }]),
+          : ok([{ from: DISPERSE, to: W1, value: '9', hash: '0xabc' }]),
       { txSender: async (h) => (h === '0xabc' ? FUNDER : undefined) },
     );
     expect(funders.get(W1)).toBe(FUNDER.toLowerCase());
@@ -163,12 +166,22 @@ describe('lookupFirstFunders', () => {
     expect(seen[1]!.searchParams.get('sort')).toBe('asc');
   });
 
-  test('txSender throwing falls back to the internal entry sender', async () => {
+  test('internal funding without a usable txSender stays untraced, never the contract', async () => {
     const { funders } = await run(
       (url) => (url.searchParams.get('action') === 'txlist' ? ok([]) : ok([{ from: FUNDER, to: W1, value: '9', hash: '0xabc' }])),
       { txSender: async () => { throw new Error('rpc down'); } },
     );
-    expect(funders.get(W1)).toBe(FUNDER.toLowerCase());
+    expect(funders.has(W1)).toBe(true);
+    expect(funders.get(W1)).toBeUndefined();
+    const none = await run(
+      (url) => (url.searchParams.get('action') === 'txlist' ? ok([]) : ok([{ from: DISPERSE, to: W1, value: '9', hash: '0xabc' }])),
+    );
+    expect(none.funders.get(W1)).toBeUndefined();
+    const empty = await run(
+      (url) => (url.searchParams.get('action') === 'txlist' ? ok([]) : ok([{ from: DISPERSE, to: W1, value: '9', hash: '0xabc' }])),
+      { txSender: async () => undefined },
+    );
+    expect(empty.funders.get(W1)).toBeUndefined();
   });
 
   test('no transactions at all is looked up but not found', async () => {
@@ -203,6 +216,81 @@ describe('lookupFirstFunders', () => {
     expect(funders.get(W1)).toBeUndefined();
     expect(funders.get(W2)).toBe(FUNDER.toLowerCase());
     expect(notes).toEqual(['funding lookup: 1 of 2 wallet(s) failed: Etherscan answered HTTP 500']);
+  });
+
+  test('a malformed funder is recorded as untraced', async () => {
+    const { funders } = await run(() => ok([{ from: 'not-an-address', to: W1, value: '1' }]));
+    expect(funders.has(W1)).toBe(true);
+    expect(funders.get(W1)).toBeUndefined();
+    const missing = await run(() => ok([{ to: W1, value: '1' }]));
+    expect(missing.funders.get(W1)).toBeUndefined();
+  });
+
+  test('failed transfers are skipped', async () => {
+    const { funders } = await run(() =>
+      ok([
+        { from: DISPERSE, to: W1, value: '1', isError: '1' },
+        { from: DISPERSE, to: W1, value: '1', txreceipt_status: '0' },
+        { from: FUNDER, to: W1, value: '1', isError: '0', txreceipt_status: '1' },
+      ]),
+    );
+    expect(funders.get(W1)).toBe(FUNDER.toLowerCase());
+  });
+
+  test('an expired budget stops before the next call; remaining wallets are absent, not failed', async () => {
+    let now = 0;
+    const budget = new Budget(1000, () => now);
+    const { funders, notes, seen } = await run(
+      () => {
+        now = 5000;
+        return ok([{ from: FUNDER, to: W1, value: '1' }]);
+      },
+      { budget },
+      [W1, W2],
+    );
+    expect(funders.get(W1)).toBe(FUNDER.toLowerCase());
+    expect(funders.has(W2)).toBe(false);
+    expect(seen).toHaveLength(1);
+    expect(notes).toEqual(['funding not traced past 1 wallet(s): analysis budget exhausted']);
+  });
+
+  test('budget expiring before txSender stops without calling it', async () => {
+    let now = 0;
+    let called = false;
+    const { funders, notes } = await run(
+      (url) => {
+        if (url.searchParams.get('action') === 'txlistinternal') now = 5000;
+        return url.searchParams.get('action') === 'txlist' ? ok([]) : ok([{ from: DISPERSE, to: W1, value: '1', hash: '0x1' }]);
+      },
+      { budget: new Budget(1000, () => now), txSender: async () => { called = true; return FUNDER; } },
+    );
+    expect(called).toBe(false);
+    expect(funders.size).toBe(0);
+    expect(notes[0]).toContain('budget exhausted');
+  });
+
+  test('a rate-limit answer is retried once after a backoff', async () => {
+    let n = 0;
+    const { funders, notes, seen } = await run(() =>
+      ++n === 1
+        ? json({ status: '0', message: 'NOTOK', result: 'Max rate limit reached' })
+        : ok([{ from: FUNDER, to: W1, value: '1' }]),
+    );
+    expect(funders.get(W1)).toBe(FUNDER.toLowerCase());
+    expect(seen).toHaveLength(2);
+    expect(notes).toHaveLength(0);
+  });
+
+  test('a persistent rate limit becomes systemic', async () => {
+    const { funders, notes, seen } = await run(
+      () => json({ status: '0', message: 'NOTOK', result: 'Max rate limit reached' }),
+      {},
+      [W1, W2],
+    );
+    expect(funders.size).toBe(0);
+    expect(seen).toHaveLength(2);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('rate limit');
   });
 
   test('no key, fixtures and unsupported chains return an empty map without fetching', async () => {

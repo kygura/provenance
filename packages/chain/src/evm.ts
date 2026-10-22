@@ -232,6 +232,7 @@ export async function analyzeEvm(
     snapshot.pairs.filter((pair) => isAddress(pair.pairAddress)).map((pair) => normalizeAddress(pair.pairAddress)),
   );
   const poolTransfers: PoolTransfer[] = [];
+  const allTransfers: PoolTransfer[] = [];
   const seen = new Set<string>();
   const balances = new Map<string, bigint>();
   let scannedFrom = latestBlock;
@@ -282,8 +283,9 @@ export async function analyzeEvm(
         if (value === undefined) continue;
         if (from) balances.set(from, (balances.get(from) ?? 0n) - value);
         if (to) balances.set(to, (balances.get(to) ?? 0n) + value);
-        if (from && to && block !== undefined && (poolAddresses.has(from) || poolAddresses.has(to))) {
-          poolTransfers.push({ block, from, to, value });
+        if (from && to && block !== undefined) {
+          allTransfers.push({ block, from, to, value });
+          if (poolAddresses.has(from) || poolAddresses.has(to)) poolTransfers.push({ block, from, to, value });
         }
       }
       scannedFrom = start;
@@ -358,6 +360,7 @@ export async function analyzeEvm(
           pools: poolAddresses,
           totalRaw,
           balances,
+          walletTransfers: allTransfers,
           blockSeconds: seconds,
           isExcluded,
         })
@@ -442,6 +445,45 @@ interface TraceFundingInput {
  * (known exchanges, or any address with a hub-sized nonce) before clustering.
  * Undefined when nothing could be looked up: no key, or the explorer refused.
  */
+/**
+ * Funders shared by 2+ buyers that serve everyone, so cannot mark a cabal: a
+ * labelled protocol, any contract (bridges, exchange contract wallets; a
+ * cabal's disperse call is already resolved to its sender), or an EOA with a
+ * hub-sized nonce. A funder that cannot be checked is treated as a hub: one
+ * unchecked exchange wallet would otherwise cluster strangers. Undefined when
+ * the budget runs out first, since then nothing can be told apart.
+ */
+export async function findHubFunders(
+  client: RpcClient,
+  funders: ReadonlyMap<string, string | undefined>,
+  budget: Budget,
+): Promise<Set<string> | undefined> {
+  const counts = new Map<string, number>();
+  for (const funder of funders.values()) if (funder) counts.set(funder, (counts.get(funder) ?? 0) + 1);
+  const hubs = new Set<string>();
+  for (const [funder, count] of counts) {
+    if (count < 2) continue;
+    if (labelIsExcluded(lookupEvmAddress(funder)?.label)) {
+      hubs.add(funder);
+      continue;
+    }
+    if (budget.expired()) return undefined;
+    try {
+      const [nonce, code] = await client.callMany([
+        { method: 'eth_getTransactionCount', params: [funder, 'latest'] },
+        { method: 'eth_getCode', params: [funder, 'latest'] },
+      ]);
+      const sent = typeof nonce?.result === 'string' ? quantityToNumber(nonce.result) : undefined;
+      const bytecode = typeof code?.result === 'string' ? code.result : undefined;
+      if (sent === undefined || bytecode === undefined || bytecode !== '0x' || sent >= HUB_MIN_NONCE) hubs.add(funder);
+    } catch {
+      if (budget.expired()) return undefined;
+      hubs.add(funder);
+    }
+  }
+  return hubs;
+}
+
 async function traceFunding(input: TraceFundingInput): Promise<LaunchFunding | undefined> {
   const { client, notes } = input;
   const windowBlocks = fundingWindowBlocks(input.blockSeconds);
@@ -470,24 +512,10 @@ async function traceFunding(input: TraceFundingInput): Promise<LaunchFunding | u
   });
   if (funders.size === 0) return undefined;
 
-  // Only a funder shared by two or more buyers can form a cluster, so only
-  // those are worth a nonce read.
-  const counts = new Map<string, number>();
-  for (const funder of funders.values()) if (funder) counts.set(funder, (counts.get(funder) ?? 0) + 1);
-  const hubs = new Set<string>();
-  for (const [funder, count] of counts) {
-    if (count < 2) continue;
-    if (labelIsExcluded(lookupEvmAddress(funder)?.label) || lookupEvmAddress(funder)?.label?.startsWith('cex:')) {
-      hubs.add(funder);
-      continue;
-    }
-    try {
-      const nonce = quantityToNumber(await client.call<string>('eth_getTransactionCount', [funder, 'latest']));
-      if (nonce >= HUB_MIN_NONCE) hubs.add(funder);
-    } catch {
-      // Unknown is kept as a funder: a missed hub overstates clustering, which
-      // the flag detail names, rather than hiding a real cabal.
-    }
+  const hubs = await findHubFunders(client, funders, input.budget);
+  if (hubs === undefined) {
+    notes.push('Funding not traced: analysis budget exhausted before the hub check.');
+    return undefined;
   }
 
   const funding = clusterFunding({
