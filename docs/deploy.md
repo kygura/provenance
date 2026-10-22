@@ -57,14 +57,15 @@ secrets under **Settings → Secrets and variables → Actions**:
 | `RPC_ETHEREUM` / `RPC_SOLANA` | no | your own RPC endpoints, comma-separated and tried in order. A set list is tried first and the public defaults (Allnodes' publicnode.com, drpc, …) follow as fallbacks; set `RPC_PUBLIC_FALLBACK=false` to use only your list. A keyed URL (Alchemy, Helius) must be a secret so the logs mask it. Blank keeps the public defaults |
 
 Tuning knobs (`MAX_TOKENS_PER_RUN`, `MIN_LIQUIDITY_USD`,
-`ALERT_SCORE_THRESHOLD`, `LLM_MAX_COST_USD_PER_RUN`, …) belong in **Variables**
+`ALERT_SCORE_THRESHOLD`, …) belong in **Variables**
 rather than Secrets; every one is listed in `.env.example`. So do the model
 choices: `LLM_MODEL`, `LLM_EXTRACT_MODEL`, `LLM_TRIAGE_MODEL` and `LLM_PRICING`.
 Only the keys for the providers those models name are needed.
 
 With the `ANTHROPIC_API_KEY` secret set, every role runs on Claude by default
-(`claude-opus-5` for research and extract, `claude-sonnet-5` for triage), at
-about twice the cost per report of Kimi. Each role keeps a fallback: the
+(`claude-haiku-5-5` gathers evidence in the search pass, `claude-sonnet-5` judges
+anchor and organic from its notes, `claude-sonnet-5` runs the triage check; see
+the gather/judge split below). Set `LLM_SEARCH_MODEL` to change the gatherer. Each role keeps a fallback: the
 non-Anthropic model its `LLM_*_MODEL` variable names, else its Kimi default.
 When Anthropic fails mid-run (credit balance too low, a rejected key, a rate
 limit or overload that outlasts the SDK's retries, the network), the run logs
@@ -114,7 +115,8 @@ LLM_SEARCH_MODEL=moonshot:kimi-k2.6  # gathers through Exa; or claude-sonnet-5
 Both calls run in real time, so no verdict waits on the split. The judge's
 system prompt is static and carries a cache breakpoint, so from the second
 token of a run onward most of the judge's input is read from cache. Unset
-keeps the single-researcher flow.
+keeps the single-researcher flow, except under Anthropic-first, where it
+defaults to `claude-haiku-5-5`.
 
 A run refuses to start if a configured model has no key, or no price (OpenRouter
 excepted), naming the variable to set.
@@ -160,7 +162,9 @@ function should.
 A run over 15 tokens makes at most 15 model calls, most of them skipped by the
 reanalysis window after the first few days. `LLM_MAX_COST_USD_PER_RUN` is a hard
 ceiling: once it is hit the pipeline keeps collecting market and chain data and
-stops calling the model, and the run stats record that it happened. Start it low.
+stops calling the model, and the run stats record that it happened. It is not a
+repo variable: the workflow does not forward it, so the default in
+`packages/core/src/config.ts` ($15) applies to both lanes. Change it there.
 
 `LLM_MAX_COST_USD_PER_DAY` caps the trailing 24 hours across every run of both
 lanes; a run's budget is the smaller of the two. It is off (0) by default, and
