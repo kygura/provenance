@@ -31,6 +31,14 @@ export const PAIR_CREATED_TOPIC = '0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8
 /** keccak256("PoolCreated(address,address,uint24,int24,address)") — Uniswap V3 factory. */
 export const POOL_CREATED_TOPIC = '0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118';
 
+/**
+ * keccak256("PoolCreated(address,address,bool,address,uint256)") — Aerodrome
+ * (Base). Same data layout as V2 `PairCreated` (pool, then a counter), with the
+ * stable flag as topic 3, and Aerodrome pools are fungible-LP pairs, so it
+ * decodes and measures as `v2`.
+ */
+export const AERODROME_POOL_CREATED_TOPIC = '0x2128d88d14c80cb081c1252a5acff7a264671bf199ce226b53788fb26065005e';
+
 export type FactoryVersion = 'v2' | 'v3';
 
 export interface LaunchFactory {
@@ -69,6 +77,22 @@ export const LAUNCH_FACTORIES: readonly LaunchChainSpec[] = [
       '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'USDC',
       '0xdac17f958d2ee523a2206206994597c13d831ec7': 'USDT',
       '0x6b175474e89094c44da98b954eedeac495271d0f': 'DAI',
+    },
+  },
+  {
+    // Factory addresses and topics checked against live Base logs, Oct 2026.
+    chain: 'base',
+    blockSeconds: 2,
+    factories: [
+      { dexId: 'uniswap', version: 'v2', address: '0x8909dc15e40173ff4699343b6eb8132c65e18ec6', topic0: PAIR_CREATED_TOPIC },
+      { dexId: 'uniswap', version: 'v3', address: '0x33128a8fc17869897dce68ed026d694621f6fdfd', topic0: POOL_CREATED_TOPIC },
+      { dexId: 'aerodrome', version: 'v2', address: '0x420dd381b31aef6683db6b902084cb0ffece40da', topic0: AERODROME_POOL_CREATED_TOPIC },
+    ],
+    quoteTokens: {
+      '0x4200000000000000000000000000000000000006': 'WETH',
+      '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'USDC',
+      // Virtuals agent tokens launch against VIRTUAL rather than WETH.
+      '0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b': 'VIRTUAL',
     },
   },
 ];
