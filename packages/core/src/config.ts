@@ -486,7 +486,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       providers,
       pricing: pricing(env.LLM_PRICING),
       maxOutputTokens: num(env.LLM_MAX_OUTPUT_TOKENS, 4096),
-      maxCostUsdPerRun: num(env.LLM_MAX_COST_USD_PER_RUN, 5),
+      maxCostUsdPerRun: num(env.LLM_MAX_COST_USD_PER_RUN, 15),
       maxCostUsdPerDay: num(env.LLM_MAX_COST_USD_PER_DAY, 0),
       temperature: num(env.LLM_TEMPERATURE, 0.2),
       maxWebSearches: num(env.LLM_MAX_WEB_SEARCHES, 6),
