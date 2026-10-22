@@ -63,8 +63,9 @@ choices: `LLM_MODEL`, `LLM_EXTRACT_MODEL`, `LLM_TRIAGE_MODEL` and `LLM_PRICING`.
 Only the keys for the providers those models name are needed.
 
 With the `ANTHROPIC_API_KEY` secret set, every role runs on Claude by default
-(`claude-opus-5` for research and extract, `claude-sonnet-5` for triage), at
-about twice the cost per report of Kimi. Each role keeps a fallback: the
+(`claude-haiku-5-5` gathers evidence in the search pass, `claude-opus-5` judges
+anchor and organic from its notes, `claude-sonnet-5` runs the triage check; see
+the gather/judge split below). Set `LLM_SEARCH_MODEL` to change the gatherer. Each role keeps a fallback: the
 non-Anthropic model its `LLM_*_MODEL` variable names, else its Kimi default.
 When Anthropic fails mid-run (credit balance too low, a rejected key, a rate
 limit or overload that outlasts the SDK's retries, the network), the run logs
@@ -114,7 +115,8 @@ LLM_SEARCH_MODEL=moonshot:kimi-k2.6  # gathers through Exa; or claude-sonnet-5
 Both calls run in real time, so no verdict waits on the split. The judge's
 system prompt is static and carries a cache breakpoint, so from the second
 token of a run onward most of the judge's input is read from cache. Unset
-keeps the single-researcher flow.
+keeps the single-researcher flow, except under Anthropic-first, where it
+defaults to `claude-haiku-5-5`.
 
 A run refuses to start if a configured model has no key, or no price (OpenRouter
 excepted), naming the variable to set.

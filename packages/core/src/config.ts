@@ -90,6 +90,13 @@ export const ANTHROPIC_ROLE_MODELS = {
   triageModel: 'claude-sonnet-5',
 } as const;
 
+/**
+ * Gatherer under Anthropic-first when LLM_SEARCH_MODEL is unset: Haiku runs the
+ * token-heavy search pass, and Opus (`model`) judges both verdicts from its
+ * notes (the gather/judge split in docs/deploy.md).
+ */
+export const ANTHROPIC_SEARCH_MODEL = 'claude-haiku-5-5';
+
 type RoleModels = Pick<LlmConfig, 'model' | 'extractModel' | 'triageModel'>;
 type RoleFallbacks = Pick<LlmConfig, 'fallbackModel' | 'fallbackExtractModel' | 'fallbackTriageModel'>;
 
@@ -482,7 +489,12 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
         if (!env.ANTHROPIC_API_KEY || !bool(env.LLM_ANTHROPIC_FIRST, true)) return configured;
         return anthropicFirst(configured, (spec) => Boolean(providers[parseModelSpec(spec).provider].apiKey));
       })(),
-      ...(env.LLM_SEARCH_MODEL?.trim() ? { searchModel: env.LLM_SEARCH_MODEL.trim() } : {}),
+      ...((): { searchModel?: string } => {
+        const explicit = env.LLM_SEARCH_MODEL?.trim();
+        if (explicit) return { searchModel: explicit };
+        const anthropicFirstOn = env.ANTHROPIC_API_KEY && bool(env.LLM_ANTHROPIC_FIRST, true);
+        return anthropicFirstOn ? { searchModel: ANTHROPIC_SEARCH_MODEL } : {};
+      })(),
       providers,
       pricing: pricing(env.LLM_PRICING),
       maxOutputTokens: num(env.LLM_MAX_OUTPUT_TOKENS, 4096),

@@ -44,6 +44,16 @@ describe('loadConfig', () => {
     expect(fallbacks(llm)).toEqual(KIMI);
   });
 
+  test('Claude-first splits gather and judge: Haiku searches, Opus judges, Sonnet triages', () => {
+    const llm = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant' }).llm;
+    expect(llm.searchModel).toBe('claude-haiku-5-5');
+    expect(llm.model).toBe('claude-opus-5');
+    expect(llm.triageModel).toBe('claude-sonnet-5');
+    expect(loadConfig({ ANTHROPIC_API_KEY: 'sk-ant', LLM_SEARCH_MODEL: 'claude-sonnet-5' }).llm.searchModel).toBe('claude-sonnet-5');
+    expect(loadConfig({ ANTHROPIC_API_KEY: 'sk-ant', LLM_ANTHROPIC_FIRST: 'false' }).llm.searchModel).toBeUndefined();
+    expect(loadConfig({}).llm.searchModel).toBeUndefined();
+  });
+
   test('Claude-first without a Moonshot key has no fallback', () => {
     const llm = loadConfig({ ANTHROPIC_API_KEY: 'sk-ant' }).llm;
     expect(roles(llm)).toEqual(['claude-opus-5', 'claude-opus-5', 'claude-sonnet-5']);
