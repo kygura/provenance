@@ -19,6 +19,7 @@ import {
   type ChainAnalyzer,
   type Chain,
   type HolderRow,
+  type LaunchFunding,
   type Logger,
   type TokenSnapshot,
 } from '@provenance/core';
@@ -39,11 +40,12 @@ import {
   TRANSFER_TOPIC0,
 } from './abi';
 import { readPrivilegedFunctions } from './bytecode';
-import { checkContractVerified } from './explorer';
+import { checkContractVerified, lookupFirstFunders } from './explorer';
+import { clusterFunding, fundingWindowBlocks, MAX_TRACED_BUYERS, selectEarlyBuyers } from './funding';
 import { evaluateFlags } from './flags';
 import { measureLp } from './lp';
 import { concentration } from './metrics';
-import { isEvmBurnAddress, lookupEvmAddress } from './labels';
+import { isEvmBurnAddress, labelIsExcluded, lookupEvmAddress } from './labels';
 import { Budget, RpcClient, type TransportProvider } from './rpc';
 import { measureSniping, snipeWindowBlocks, type PoolTransfer } from './sniping';
 
@@ -59,6 +61,13 @@ export interface EvmAnalyzerOptions {
   /** Top holders retained on the report. */
   topN?: number;
 }
+
+/**
+ * A funder with at least this many sent transactions serves everyone: an
+ * exchange hot wallet, a bridge, a faucet. Two strangers withdrawing from
+ * Binance share a funder without sharing an owner.
+ */
+export const HUB_MIN_NONCE = 1_000;
 
 const DEFAULTS: Required<EvmAnalyzerOptions> = {
   budgetMs: 45_000,
@@ -340,6 +349,8 @@ export async function analyzeEvm(
 
   // Only a scan that covered the token's whole life can see trading start
   // and say what the early buyers still hold.
+  const isExcluded = (addr: string) =>
+    isZeroAddress(addr) || isEvmBurnAddress(addr) || lookupEvmAddress(addr)?.label?.startsWith('protocol:') === true;
   const sniping =
     !truncated && Number.isFinite(created)
       ? measureSniping({
@@ -348,8 +359,7 @@ export async function analyzeEvm(
           totalRaw,
           balances,
           blockSeconds: seconds,
-          isExcluded: (addr) =>
-            isZeroAddress(addr) || isEvmBurnAddress(addr) || lookupEvmAddress(addr)?.label?.startsWith('protocol:') === true,
+          isExcluded,
         })
       : undefined;
   if (sniping) {
@@ -360,6 +370,25 @@ export async function analyzeEvm(
   } else {
     notes.push('Early buying not measured: the scan did not reach the start of trading.');
   }
+
+  const funding = sniping
+    ? await traceFunding({
+        client,
+        app,
+        chain: snapshot.chain,
+        tradingStartBlock: sniping.tradingStartBlock,
+        transfers: poolTransfers,
+        pools: poolAddresses,
+        totalRaw,
+        balances,
+        blockSeconds: seconds,
+        isExcluded,
+        notes,
+        timeoutMs: opts.callTimeoutMs,
+        budget,
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
+      })
+    : undefined;
 
   const analysis: ChainAnalysis = {
     ...base,
@@ -375,6 +404,7 @@ export async function analyzeEvm(
     ownerRenounced,
     ...surface,
     ...(sniping ? { sniping } : {}),
+    ...(funding ? { funding } : {}),
     topHolders: rows.slice(0, opts.topN),
     fetchedAt: nowIso(),
     durationMs: Date.now() - started,
@@ -387,6 +417,93 @@ export async function analyzeEvm(
   });
 
   return analysis;
+}
+
+interface TraceFundingInput {
+  client: RpcClient;
+  app: AppConfig;
+  chain: Chain;
+  tradingStartBlock: number;
+  transfers: readonly PoolTransfer[];
+  pools: ReadonlySet<string>;
+  totalRaw: bigint;
+  balances: ReadonlyMap<string, bigint>;
+  blockSeconds: number;
+  isExcluded: (address: string) => boolean;
+  notes: string[];
+  timeoutMs: number;
+  budget: Budget;
+  signal?: AbortSignal;
+}
+
+/**
+ * Who paid for the early buyers' wallets. Looks up the largest buyers of the
+ * first half hour on the explorer, then drops funders that serve everyone
+ * (known exchanges, or any address with a hub-sized nonce) before clustering.
+ * Undefined when nothing could be looked up: no key, or the explorer refused.
+ */
+async function traceFunding(input: TraceFundingInput): Promise<LaunchFunding | undefined> {
+  const { client, notes } = input;
+  const windowBlocks = fundingWindowBlocks(input.blockSeconds);
+  const buyers = selectEarlyBuyers({
+    transfers: input.transfers,
+    pools: input.pools,
+    tradingStartBlock: input.tradingStartBlock,
+    windowBlocks,
+    isExcluded: input.isExcluded,
+    max: MAX_TRACED_BUYERS,
+  });
+  if (buyers.length === 0) return undefined;
+
+  const funders = await lookupFirstFunders({
+    app: input.app,
+    chain: input.chain,
+    addresses: buyers.map((buyer) => buyer.address),
+    notes,
+    timeoutMs: input.timeoutMs,
+    budget: input.budget,
+    ...(input.signal ? { signal: input.signal } : {}),
+    txSender: async (hash) => {
+      const tx = await client.call<{ from?: string } | null>('eth_getTransactionByHash', [hash]);
+      return tx?.from ? normalizeAddress(tx.from) : undefined;
+    },
+  });
+  if (funders.size === 0) return undefined;
+
+  // Only a funder shared by two or more buyers can form a cluster, so only
+  // those are worth a nonce read.
+  const counts = new Map<string, number>();
+  for (const funder of funders.values()) if (funder) counts.set(funder, (counts.get(funder) ?? 0) + 1);
+  const hubs = new Set<string>();
+  for (const [funder, count] of counts) {
+    if (count < 2) continue;
+    if (labelIsExcluded(lookupEvmAddress(funder)?.label) || lookupEvmAddress(funder)?.label?.startsWith('cex:')) {
+      hubs.add(funder);
+      continue;
+    }
+    try {
+      const nonce = quantityToNumber(await client.call<string>('eth_getTransactionCount', [funder, 'latest']));
+      if (nonce >= HUB_MIN_NONCE) hubs.add(funder);
+    } catch {
+      // Unknown is kept as a funder: a missed hub overstates clustering, which
+      // the flag detail names, rather than hiding a real cabal.
+    }
+  }
+
+  const funding = clusterFunding({
+    buyers,
+    funders,
+    isHub: (address) => hubs.has(address),
+    totalRaw: input.totalRaw,
+    balances: input.balances,
+    windowBlocks,
+  });
+  notes.push(
+    `Funding: ${funding.traced} of ${buyers.length} early buyer(s) traced over the first ${windowBlocks} block(s); ` +
+      `${funding.clusters.length} cluster(s) holding ${funding.clusteredPct.toFixed(1)}% of supply bought` +
+      (hubs.size > 0 ? `; ${hubs.size} hub funder(s) ignored.` : '.'),
+  );
+  return funding;
 }
 
 export function createEvmAnalyzer(

@@ -283,6 +283,11 @@ function chainBlock(chain: ChainAnalysis | undefined): string {
           chain.sniping.stillHeldPct !== undefined ? `; they still hold ${chain.sniping.stillHeldPct.toFixed(2)}%` : ''
         }`
       : null,
+    chain.funding !== undefined
+      ? `- funding_clusters: ${chain.funding.clusteredPct.toFixed(2)}% of supply bought by early wallets that share a funding source (${chain.funding.clusters.length} cluster(s), ${chain.funding.traced} of ${chain.funding.traced + chain.funding.untraced} buyer(s) traced over the first ${chain.funding.windowBlocks} block(s))${
+          chain.funding.clusters[0] ? `; largest: ${chain.funding.clusters[0].wallets} wallets funded by ${chain.funding.clusters[0].funder}` : ''
+        }`
+      : null,
     chain.flags.length > 0
       ? `- risk_flags: ${chain.flags.map((flag) => `[${flag.severity}] ${flag.code} — ${flag.detail}`).join('; ')}`
       : null,

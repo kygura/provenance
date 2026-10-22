@@ -121,3 +121,133 @@ export async function checkContractVerified(input: VerificationInput): Promise<b
     return undefined;
   }
 }
+
+export interface FunderLookupInput {
+  app: AppConfig;
+  chain: Chain;
+  /** Lowercase wallet addresses, looked up in order. */
+  addresses: readonly string[];
+  notes: string[];
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  budget?: Budget;
+  signal?: AbortSignal;
+  /** Pause between Etherscan calls; free tier allows 5/s. Default 220. */
+  rateLimitMs?: number;
+  /**
+   * Resolves the EOA that sent a tx (eth_getTransactionByHash). Funding that
+   * arrived as an internal tx (disperse contracts) was really sent by the
+   * parent tx's sender.
+   */
+  txSender?: (hash: string) => Promise<string | undefined>;
+}
+
+interface TxEntry {
+  from?: unknown;
+  to?: unknown;
+  value?: unknown;
+  hash?: unknown;
+}
+
+/** Etherscan refused the call itself (bad key, rate limit, chain not on plan): stop. */
+class SystemicError extends Error {}
+
+function paysTo(entry: TxEntry, address: string): boolean {
+  if (typeof entry?.to !== 'string' || entry.to.toLowerCase() !== address) return false;
+  try {
+    return BigInt(String(entry.value)) > 0n;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Who sent each wallet its first native funds (its gas). Wallets funded from
+ * one source are the clustering signal a timing-only sniping check misses.
+ *
+ * Returns wallet -> funder (lowercase). A key that is absent was not looked up
+ * (no key, fixtures, budget ran out, systemic error); a value of `undefined`
+ * was looked up and nothing was found or the request failed. Never throws.
+ */
+export async function lookupFirstFunders(input: FunderLookupInput): Promise<Map<string, string | undefined>> {
+  const { app, chain, notes } = input;
+  const out = new Map<string, string | undefined>();
+  const key = app.etherscanApiKey?.trim() ?? '';
+  const chainId = ETHERSCAN_CHAIN_IDS[chain];
+
+  if (!key) return skip('ETHERSCAN_API_KEY is not set.');
+  if (app.pipeline.useFixtures) return skip('explorer lookups are skipped in fixture mode.');
+  if (chainId === undefined) return skip(`no Etherscan V2 chain id for ${chain}.`);
+
+  function skip(reason: string) {
+    notes.push(`funding not traced: ${reason}`);
+    return out;
+  }
+
+  const pause = input.rateLimitMs ?? 220;
+  const wanted = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  let requests = 0;
+
+  async function list(action: 'txlist' | 'txlistinternal', address: string): Promise<TxEntry[]> {
+    if (pause > 0 && requests > 0) await new Promise((resolve) => setTimeout(resolve, pause));
+    requests++;
+    const url = new URL(ETHERSCAN_V2_URL);
+    for (const [k, v] of Object.entries({
+      chainid: String(chainId), module: 'account', action, address,
+      startblock: '0', endblock: '99999999', page: '1', offset: '10', sort: 'asc', apikey: key,
+    })) url.searchParams.set(k, v);
+    const timeoutMs = input.budget ? input.budget.clampMs(wanted) : wanted;
+    const response = await (input.fetchImpl ?? fetch)(url.toString(), {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(input.signal ? [input.signal] : [])]),
+    });
+    if (!response.ok) throw new Error(`Etherscan answered HTTP ${response.status}`);
+    const body = (await response.json()) as EtherscanBody;
+    // "No transactions found" is status "0" with an empty result: not an error.
+    if (Array.isArray(body?.result)) return body.result as TxEntry[];
+    if (/no transactions found/i.test(String(body?.message))) return [];
+    const reason = typeof body?.result === 'string' ? body.result : String(body?.message ?? 'unknown error');
+    throw new SystemicError(reason);
+  }
+
+  let failed = 0;
+  let firstFailure = '';
+  for (const address of input.addresses) {
+    if (input.budget?.expired()) {
+      notes.push('funding not traced for remaining wallets: analysis budget exhausted.');
+      break;
+    }
+    try {
+      let funder: string | undefined;
+      const first = (await list('txlist', address)).find((e) => paysTo(e, address));
+      if (first) {
+        funder = String(first.from).toLowerCase();
+      } else {
+        const internal = (await list('txlistinternal', address)).find((e) => paysTo(e, address));
+        if (internal) {
+          let sender: string | undefined;
+          try {
+            sender = typeof internal.hash === 'string' ? await input.txSender?.(internal.hash) : undefined;
+          } catch {
+            // fall back to the internal tx's own sender
+          }
+          funder = (sender ?? String(internal.from)).toLowerCase();
+        }
+      }
+      out.set(address, funder);
+    } catch (error) {
+      const message = redact(error instanceof Error ? error.message : String(error), key).slice(0, 160);
+      if (error instanceof SystemicError) {
+        notes.push(`funding not traced: Etherscan said "${message}".`);
+        return out;
+      }
+      out.set(address, undefined);
+      failed++;
+      firstFailure ||= message;
+    }
+  }
+  if (failed > 0) {
+    notes.push(`funding lookup: ${failed} of ${input.addresses.length} wallet(s) failed: ${firstFailure}`);
+  }
+  return out;
+}

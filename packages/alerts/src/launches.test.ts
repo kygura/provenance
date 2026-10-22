@@ -84,6 +84,24 @@ describe('gateLaunchChain', () => {
     expect(unmeasured.reasons.join(' ')).toContain('sniping: early buying not measured');
   });
 
+  test('funding clusters at the ceiling pass; above it reject; untraced is not a rejection', () => {
+    const funded = (clusteredPct: number) =>
+      cleanChain({
+        funding: {
+          windowBlocks: 150,
+          traced: 18,
+          untraced: 2,
+          clusters: [{ funder: '0xf', wallets: 6, boughtPct: clusteredPct }],
+          clusteredPct,
+        },
+      });
+    expect(gateLaunchChain(funded(config.maxClusteredPct), config).passed).toBe(true);
+    const clustered = gateLaunchChain(funded(config.maxClusteredPct + 0.1), config);
+    expect(clustered.passed).toBe(false);
+    expect(clustered.reasons.join(' ')).toContain('sharing a funder');
+    expect(gateLaunchChain(cleanChain({ funding: undefined }), config).passed).toBe(true);
+  });
+
   test('burned and locked LP add up; unmeasured LP rejects only when required', () => {
     expect(gateLaunchChain(cleanChain({ lpBurnedPct: 50, lpLockedPct: 45 }), config).passed).toBe(true);
     expect(gateLaunchChain(cleanChain({ lpBurnedPct: 50, lpLockedPct: 30 }), config).passed).toBe(false);

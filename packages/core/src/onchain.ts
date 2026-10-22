@@ -53,6 +53,36 @@ export interface LaunchSniping {
   stillHeldPct?: number;
 }
 
+/**
+ * Wallets that bought early and trace back to one funding source. A cabal
+ * that buys over several minutes, or across many blocks, slips past the
+ * timing read in `LaunchSniping`, but each wallet still had to be funded with
+ * gas from somewhere, and fresh wallets are usually funded from one place.
+ */
+export interface FundingCluster {
+  /** The shared funder: the address that sent each wallet its first native funds. */
+  funder: string;
+  /** Early buyers in this cluster. */
+  wallets: number;
+  /** Share of total supply these wallets bought in the window, percent. */
+  boughtPct: number;
+  /** Share of total supply they still hold, percent. */
+  stillHeldPct?: number;
+}
+
+export interface LaunchFunding {
+  /** Blocks counted from trading start, trading-start block included. */
+  windowBlocks: number;
+  /** Early buyers whose first funding was found. */
+  traced: number;
+  /** Early buyers looked up whose funding could not be read. */
+  untraced: number;
+  /** Clusters of 2+ buyers sharing a funder, largest `boughtPct` first. Hubs excluded. */
+  clusters: FundingCluster[];
+  /** Sum of `boughtPct` over `clusters`, percent. */
+  clusteredPct: number;
+}
+
 export type AnalysisMethod = 'rpc' | 'explorer' | 'indexer' | 'partial' | 'unavailable';
 
 /**
@@ -103,6 +133,8 @@ export interface ChainAnalysis {
   privilegedFunctions?: PrivilegedFunction[];
   /** EVM: early-block buying, when the scan reached the start of trading. */
   sniping?: LaunchSniping;
+  /** EVM: early buyers grouped by funding source. Needs `ETHERSCAN_API_KEY`. */
+  funding?: LaunchFunding;
   /** Buy/sell tax in percent where detectable. */
   buyTaxPct?: number;
   sellTaxPct?: number;

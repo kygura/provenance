@@ -101,9 +101,41 @@ is the normal case for a launch a few hours old. A scan that starts after the
 launch sees buys with no liquidity add before them and returns nothing rather
 than a wrong number.
 
-It doesn't trace funding. Twenty sniper wallets funded from one address in
-the same block are a cluster, but proving that needs native-ETH transfer
-tracing, which `eth_getLogs` can't provide.
+## Funding clusters
+
+Timing misses a cabal that buys a few minutes in, or a few wallets per
+block. Their wallets still had to be funded with gas from somewhere, and
+fresh wallets are usually funded from one place. `eth_getLogs` can't show
+native transfers, so this read uses the explorer (`packages/chain/src/funding.ts`,
+`lookupFirstFunders` in `packages/chain/src/explorer.ts`):
+
+- **Window**: the first 30 minutes of trading (150 blocks on Ethereum),
+  counted from the same trading-start block as the sniping read. Only runs
+  when the sniping read did.
+- **Traced**: the 20 largest buyers in that window. For each, the first
+  incoming transaction with value on Etherscan V2 `txlist`, else
+  `txlistinternal`. Funding that came through a disperse contract is
+  attributed to the EOA that called it.
+- **Hubs**: a funder shared by two or more buyers is dropped as a hub when it
+  is a labelled exchange or protocol, or has sent 1,000+ transactions.
+  Two strangers withdrawing from Binance share a funder, not an owner.
+- **Clusters**: buyers joined through shared funders, chains included (A funds
+  B, B funds C). A cluster is 2+ buyers; `clusteredPct` is the supply they
+  bought in the window.
+
+Stored as `ChainAnalysis.funding`:
+
+| Where | What |
+|---|---|
+| Flags | `funded-cluster` warns at 10% of supply bought by clustered wallets and is critical at 25%. |
+| Chain gate | Rejects above `LAUNCHES_MAX_CLUSTERED_PCT` (15). Not traced is not a rejection: the read needs a key. |
+| Research prompt | The `funding_clusters` line reaches the organic read as a measured fact. |
+
+It needs `ETHERSCAN_API_KEY`. Etherscan's free tier doesn't cover every
+chain, and a refusal leaves `funding` unset with a note. A cabal that funds
+each wallet through a different exchange withdrawal, a bridge or a mixer
+still gets past it, and older wallets whose first funding predates the
+token add noise rather than false clusters. Solana has neither read yet.
 
 ## What carried over, and what changed
 
@@ -143,7 +175,8 @@ shown safe", and that rejects.
 | `LAUNCHES_DORMANT_AFTER_HOURS` | `168` | `active` → `dormant` |
 | `LAUNCHES_MAX_ANCHOR_SEARCHES` | `3` | Web searches per fast anchor check |
 | `LAUNCHES_RESEARCH_ANCHORED` | `true` | Run the full research on anchored launches, at launch |
-| `ETHERSCAN_API_KEY` | unset | Optional; enables `contractVerified` |
+| `LAUNCHES_MAX_CLUSTERED_PCT` | 15 | Ceiling on supply bought by early wallets sharing a funder |
+| `ETHERSCAN_API_KEY` | unset | Optional; enables `contractVerified` and funding clusters |
 | `ELFA_API_KEY` | unset | Optional; records each entry's lead over crypto-social (`socialLeadHours`, see `docs/social.md`) |
 
 `LAUNCHES_REQUIRE_LP_SECURED=true` means Uniswap V3 launches never pass, because
@@ -165,9 +198,9 @@ up to 21h old, so an offline demo needs `LAUNCHES_LOOKBACK_HOURS=48 ... run
 
 ## Known gaps
 
-- The sniping check measures timing, not funding. A cabal that buys a few
-  minutes in, or across many blocks, gets past it. Funding-source clustering
-  needs native-transfer tracing.
+- Funding clusters need `ETHERSCAN_API_KEY` and stop at exchanges, bridges
+  and mixers. A cabal funded through separate exchange withdrawals gets past
+  both the timing and the funding read.
 - A launch with liquidity but no buys yet is rejected as "not measured" and
   retried on the next run, like a launch below the holder floor.
 

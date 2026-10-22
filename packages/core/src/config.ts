@@ -233,6 +233,13 @@ export interface LaunchConfig {
    * (the scan did not reach trading start) is a rejection like any other.
    */
   maxSnipedPct: number;
+  /**
+   * Ceiling on supply bought by early wallets that share a funder, percent.
+   * Catches cabals that buy over minutes rather than blocks. Unknown (no
+   * `ETHERSCAN_API_KEY`, or the lookup failed) is not a rejection: the trace
+   * is optional data, unlike the sniping read.
+   */
+  maxClusteredPct: number;
   /** Reject when LP burn/lock could not be measured, not only when it is low. */
   requireLpSecured: boolean;
   /** Burned + locked LP share required to count as secured, percent. */
@@ -513,6 +520,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       minHolderCount: num(env.LAUNCHES_MIN_HOLDERS, 50),
       maxTop10Pct: num(env.LAUNCHES_MAX_TOP10_PCT, 40),
       maxSnipedPct: num(env.LAUNCHES_MAX_SNIPED_PCT, 20),
+      maxClusteredPct: num(env.LAUNCHES_MAX_CLUSTERED_PCT, 15),
       requireLpSecured: bool(env.LAUNCHES_REQUIRE_LP_SECURED, true),
       minLpSecuredPct: num(env.LAUNCHES_MIN_LP_SECURED_PCT, 90),
       dormantAfterHours: num(env.LAUNCHES_DORMANT_AFTER_HOURS, 168),
