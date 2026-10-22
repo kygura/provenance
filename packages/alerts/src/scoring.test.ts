@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChainAnalysis, HolderRow } from '@provenance/core';
 import {
+  DEFAULT_GENERATION_BONUS,
   DEFAULT_WEIGHTS,
   EXTREME_CONCENTRATION_PCT,
   FORCED_PENALTY,
@@ -9,7 +10,10 @@ import {
   SINGLE_HOLDER_DOMINANCE_PCT,
   assertWeights,
   assessRisk,
+  generationBucket,
+  resolveScoringOverrides,
   scoreAuthenticity,
+  scoreRecycling,
   scoreToken,
 } from './scoring';
 import { manufacturedCarrierRule, cleanRevivalRule } from './rules';
@@ -232,5 +236,53 @@ describe('organic verdict', () => {
     expect(manufacturedCarrierRule.evaluate({ ...forced, score })).toBeNull();
     expect(manufacturedCarrierRule.evaluate({ ...withOrganic(read(), 0.3), score })).toBeNull();
     expect(manufacturedCarrierRule.evaluate({ ...withOrganic(read({ verdict: 'organic' })), score })).toBeNull();
+  });
+});
+
+describe('opt-in overrides (SCORE_WEIGHTS, GENERATION_BONUS)', () => {
+  const weights = { recycling: 0.2, memetic: 0.2, distribution: 0.2, liquidity: 0.2, momentum: 0.1, authenticity: 0.1 };
+
+  test('nothing set: no options, no warnings, and the score is the default one', () => {
+    const resolved = resolveScoringOverrides({});
+    expect(resolved).toEqual({ options: {}, warnings: [] });
+    expect(scoreToken(strongInput(), { now: NOW, ...resolved.options })).toEqual(scoreToken(strongInput(), { now: NOW }));
+  });
+
+  test('valid weights and bonus table are applied', () => {
+    const resolved = resolveScoringOverrides({ weights: JSON.stringify(weights), generationBonus: '[0, 2, 4, 6, 8]' });
+    expect(resolved.warnings).toEqual([]);
+    expect(resolved.options).toEqual({ weights, generationBonus: [0, 2, 4, 6, 8] });
+    const custom = scoreToken(strongInput(), { now: NOW, ...resolved.options });
+    expect(custom.total).not.toBe(scoreToken(strongInput(), { now: NOW }).total);
+  });
+
+  test('invalid values are refused whole, with a warning, and the defaults score', () => {
+    const cases = [
+      { weights: '{not json' },
+      { weights: JSON.stringify({ ...weights, recycling: 0.9 }) },
+      { weights: JSON.stringify({ ...weights, vibes: 0 }) },
+      { weights: JSON.stringify({ recycling: 1 }) },
+      { generationBonus: '[0, 7, 10, 10]' },
+      { generationBonus: '[0, 7, 10, 10, 20]' },
+      { generationBonus: '{"0": 1}' },
+    ];
+    for (const config of cases) {
+      const resolved = resolveScoringOverrides(config);
+      expect(resolved.options).toEqual({});
+      expect(resolved.warnings).toHaveLength(1);
+      expect(resolved.warnings[0]).toMatch(/ignored, using the defaults/);
+    }
+  });
+
+  test('the default table reproduces the old generation cut points', () => {
+    expect(DEFAULT_GENERATION_BONUS).toEqual([0, 7, 10, 10, 6]);
+    expect([undefined, -1, 0, 0.5, 1, 1.9, 2, 3.5, 4, 9].map(generationBucket)).toEqual([0, 0, 0, 1, 1, 1, 2, 3, 4, 4]);
+  });
+
+  test('a bonus table moves recycling through the generation only', () => {
+    const report = strongInput().provenance!;
+    const flat = scoreRecycling({ ...report, recycleGeneration: 2 }, NOW.getUTCFullYear(), [0, 0, 0, 0, 0]);
+    const base = scoreRecycling({ ...report, recycleGeneration: 2 }, NOW.getUTCFullYear());
+    expect(base - flat).toBeCloseTo(10 * 1, 5); // revival multiplier 1 x the default gen-2 bonus of 10
   });
 });

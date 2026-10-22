@@ -233,6 +233,13 @@ export interface LaunchConfig {
    * (the scan did not reach trading start) is a rejection like any other.
    */
   maxSnipedPct: number;
+  /**
+   * Ceiling on supply bought by early wallets that share a funder, percent.
+   * Catches cabals that buy over minutes rather than blocks. Unknown (no
+   * `ETHERSCAN_API_KEY`, or the lookup failed) is not a rejection: the trace
+   * is optional data, unlike the sniping read.
+   */
+  maxClusteredPct: number;
   /** Reject when LP burn/lock could not be measured, not only when it is low. */
   requireLpSecured: boolean;
   /** Burned + locked LP share required to count as secured, percent. */
@@ -296,6 +303,33 @@ export interface CadenceConfig {
 
 export type CadenceLevel = 'base' | 'elevated' | 'peak';
 
+/**
+ * Outcome labelling and calibration (docs/calibration.md). A scored token is
+ * looked up again `horizonHours` later; `cli.ts calibrate` fits the score's
+ * components against those labels and only ever suggests.
+ */
+export interface OutcomesConfig {
+  /** The labelling step at the end of a full run. Never on in a dry run. */
+  enabled: boolean;
+  horizonHours: number;
+  /** DexScreener lookups per run, at 30 tokens a request. */
+  maxPerRun: number;
+  /** Below this many labels, or 30 in either class, calibration suggests nothing. */
+  calibrationMinRows: number;
+}
+
+/**
+ * Opt-in overrides for the score, as the raw JSON from the environment.
+ * Parsed and validated in packages/alerts/src/scoring.ts (`resolveScoringOverrides`),
+ * where `assertWeights` lives; an invalid value there falls back to the defaults.
+ */
+export interface ScoringConfig {
+  /** SCORE_WEIGHTS: a JSON ScoreWeights object. */
+  weights?: string;
+  /** GENERATION_BONUS: a JSON array of 5 numbers, generation 0, 1, 2, 3, 4+. */
+  generationBonus?: string;
+}
+
 export interface AppConfig {
   databaseUrl: string;
   databaseAuthToken?: string;
@@ -311,6 +345,8 @@ export interface AppConfig {
   rpc: ChainRpcConfig;
   alerts: AlertConfig;
   cadence: CadenceConfig;
+  outcomes: OutcomesConfig;
+  scoring: ScoringConfig;
   /** Root for fixtures, artifacts and the local sqlite file. */
   dataDir: string;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
@@ -513,6 +549,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       minHolderCount: num(env.LAUNCHES_MIN_HOLDERS, 50),
       maxTop10Pct: num(env.LAUNCHES_MAX_TOP10_PCT, 40),
       maxSnipedPct: num(env.LAUNCHES_MAX_SNIPED_PCT, 20),
+      maxClusteredPct: num(env.LAUNCHES_MAX_CLUSTERED_PCT, 15),
       requireLpSecured: bool(env.LAUNCHES_REQUIRE_LP_SECURED, true),
       minLpSecuredPct: num(env.LAUNCHES_MIN_LP_SECURED_PCT, 90),
       dormantAfterHours: num(env.LAUNCHES_DORMANT_AFTER_HOURS, 168),
@@ -556,6 +593,16 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       fileSink: env.ALERT_FILE_SINK,
     },
     cadence: { mode: cadenceMode(env.CADENCE_MODE) },
+    outcomes: {
+      enabled: bool(env.OUTCOMES_ENABLED, true),
+      horizonHours: num(env.OUTCOME_HORIZON_HOURS, 72),
+      maxPerRun: num(env.OUTCOME_MAX_PER_RUN, 90),
+      calibrationMinRows: num(env.CALIBRATION_MIN_ROWS, 200),
+    },
+    scoring: {
+      weights: env.SCORE_WEIGHTS || undefined,
+      generationBonus: env.GENERATION_BONUS || undefined,
+    },
   };
 }
 

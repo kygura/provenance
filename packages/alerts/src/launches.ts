@@ -108,6 +108,15 @@ export function gateLaunchChain(chain: ChainAnalysis | undefined, config: Launch
     );
   }
 
+  // The same cabal spread over minutes: wallets funded from one source.
+  const funding = chain.funding;
+  if (funding !== undefined && funding.clusteredPct > config.maxClusteredPct) {
+    reasons.push(
+      `funding: ${funding.clusteredPct.toFixed(1)}% of supply bought by early wallets sharing a funder ` +
+        `(${funding.clusters.length} cluster(s)) > ${config.maxClusteredPct}%`,
+    );
+  }
+
   return gate(reasons);
 }
 

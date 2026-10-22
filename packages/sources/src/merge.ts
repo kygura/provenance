@@ -8,6 +8,7 @@ import {
   type TrendingEntry,
   TRENDING_SOURCES,
   isEvm,
+  isTokenAddress,
   ratio,
   tokenId,
 } from '@provenance/core';
@@ -77,7 +78,8 @@ function isMeaningfulName(value: string | undefined): value is string {
 export function mergeToSnapshots(entries: TrendingEntry[]): TokenSnapshot[] {
   const groups = new Map<string, TrendingEntry[]>();
   for (const entry of entries) {
-    if (!entry || typeof entry.tokenAddress !== 'string' || entry.tokenAddress.trim() === '') continue;
+    // Drop unknown chains and malformed addresses (scraped links) before they become token ids.
+    if (!entry || typeof entry.tokenAddress !== 'string' || !isTokenAddress(entry.chain, entry.tokenAddress)) continue;
     const key = tokenId(entry.chain, entry.tokenAddress);
     const bucket = groups.get(key);
     if (bucket) bucket.push(entry);

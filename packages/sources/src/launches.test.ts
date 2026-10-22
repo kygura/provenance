@@ -14,6 +14,7 @@ import {
   type PoolCreation,
   collectLaunches,
   estimateCreatedAt,
+  interleaveByChain,
   launchedSide,
   lookbackBlocks,
   parseFactoryLog,
@@ -140,6 +141,59 @@ function pool(overrides: Partial<PoolCreation>): PoolCreation {
     ...overrides,
   };
 }
+
+describe('Base', () => {
+  const BASE = LAUNCH_FACTORIES.find((spec) => spec.chain === 'base')!;
+
+  test('Aerodrome PoolCreated decodes like V2: pool from the first data word', () => {
+    // A live Aerodrome log from Base, Oct 2026: USDC paired with a new token.
+    const log = {
+      address: '0x420DD381b31aEf6683db6B902084cB0FFECe40Da',
+      topics: [
+        '0x2128d88d14c80cb081c1252a5acff7a264671bf199ce226b53788fb26065005e',
+        '0x000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+        '0x0000000000000000000000009044040b049568172a46caaa936daaca7c8cfefc',
+        '0x0000000000000000000000000000000000000000000000000000000000000000',
+      ],
+      data: '0x000000000000000000000000e4c45cb93e9895403a458847bca6bb1d7f8811c30000000000000000000000000000000000000000000000000000000000007486',
+      blockNumber: '0x3280e00',
+    };
+    const pool = parseFactoryLog(log, BASE);
+    expect(pool).toMatchObject({
+      chain: 'base',
+      dexId: 'aerodrome',
+      version: 'v2',
+      pool: '0xe4c45cb93e9895403a458847bca6bb1d7f8811c3',
+    });
+    expect(launchedSide(pool!, BASE)).toEqual({
+      tokenAddress: '0x9044040b049568172a46caaa936daaca7c8cfefc',
+      quoteAddress: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+      quoteSymbol: 'USDC',
+    });
+  });
+});
+
+describe('interleaveByChain', () => {
+  const at = (chain: 'ethereum' | 'base', minute: number) =>
+    ({
+      chain,
+      tokenAddress: `${chain}-${minute}`,
+      createdAt: new Date(Date.UTC(2026, 9, 22, 12, minute)).toISOString(),
+      pool: { blockNumber: minute },
+    }) as unknown as Parameters<typeof interleaveByChain>[0][number][number];
+
+  test('a busy chain cannot take every slot', () => {
+    const base = Array.from({ length: 10 }, (_, i) => at('base', 30 + i));
+    const eth = [at('ethereum', 1), at('ethereum', 2)];
+    const picked = interleaveByChain([eth, base], 4).map((c) => c.tokenAddress);
+    expect(picked).toEqual(['base-39', 'ethereum-2', 'base-38', 'ethereum-1']);
+  });
+
+  test('a quiet chain leaves its slots to the others', () => {
+    const base = Array.from({ length: 5 }, (_, i) => at('base', 30 + i));
+    expect(interleaveByChain([[at('ethereum', 1)], base], 4)).toHaveLength(4);
+  });
+});
 
 describe('launchedSide', () => {
   test('the non-quote side launched, whichever position it sorts into', () => {
@@ -400,7 +454,7 @@ describe('LaunchSource over the network path', () => {
   test('fails over across endpoints, walks, hydrates and never throws', async () => {
     hydrationRequests = [];
     const base = `http://127.0.0.1:${server.port}`;
-    const app = loadConfig({ RPC_ETHEREUM: `${base}/refuses,${base}/ok`, RPC_PUBLIC_FALLBACK: 'false', LAUNCHES_RATE_MS: '0', LAUNCHES_LOOKBACK_HOURS: '24' });
+    const app = loadConfig({ PROVENANCE_CHAINS: 'ethereum', RPC_ETHEREUM: `${base}/refuses,${base}/ok`, RPC_PUBLIC_FALLBACK: 'false', LAUNCHES_RATE_MS: '0', LAUNCHES_LOOKBACK_HOURS: '24' });
     app.pipeline.sources = app.pipeline.sources.map((source) =>
       source.id === 'dexscreener' ? { ...source, rateLimitMs: 0 } : source,
     );
@@ -419,7 +473,7 @@ describe('LaunchSource over the network path', () => {
 
   test('no working endpoint is a recorded error and an empty list', async () => {
     const base = `http://127.0.0.1:${server.port}`;
-    const app = loadConfig({ RPC_ETHEREUM: `${base}/refuses`, RPC_PUBLIC_FALLBACK: 'false', LAUNCHES_RATE_MS: '0', LAUNCHES_LOOKBACK_HOURS: '24' });
+    const app = loadConfig({ PROVENANCE_CHAINS: 'ethereum', RPC_ETHEREUM: `${base}/refuses`, RPC_PUBLIC_FALLBACK: 'false', LAUNCHES_RATE_MS: '0', LAUNCHES_LOOKBACK_HOURS: '24' });
     const source = new LaunchSource(launchConfig(app), { dexscreenerBaseUrl: base });
     const entries = await source.fetchTrending({ config: launchConfig(app), app, logger: silentLogger });
 

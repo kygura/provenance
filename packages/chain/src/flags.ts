@@ -32,6 +32,10 @@ export const RISK_THRESHOLDS = {
   snipedCriticalPct: 30,
   /** `bundled-launch` fires when at least this many wallets bought in the opening block. */
   bundledMinBuyers: 3,
+  /** `funded-cluster` fires at warn when early buyers sharing a funder bought >= this share of supply. */
+  fundedClusterWarnPct: 10,
+  /** ...and escalates to critical at >= this. */
+  fundedClusterCriticalPct: 25,
 } as const;
 
 export type RiskThresholds = typeof RISK_THRESHOLDS;
@@ -52,6 +56,7 @@ export type FlagAnalysis = Pick<
   | 'contractVerified'
   | 'privilegedFunctions'
   | 'sniping'
+  | 'funding'
 >;
 
 /**
@@ -240,6 +245,24 @@ export function evaluateFlags(input: FlagInput): RiskFlag[] {
       code: 'bundled-launch',
       severity: 'warn',
       detail: `${snipe.sameBlockBuyers} wallets bought in the block trading opened (>= ${t.bundledMinBuyers}): a bundle, or bots watching the deploy.`,
+    });
+  }
+
+  // The same cabal, caught by who paid for the wallets rather than when they
+  // bought: fresh wallets funded from one source over the first half hour.
+  const funding = a.funding;
+  if (funding !== undefined && funding.clusteredPct >= t.fundedClusterWarnPct) {
+    const top = funding.clusters[0];
+    const critical = funding.clusteredPct >= t.fundedClusterCriticalPct;
+    const wallets = funding.clusters.reduce((sum, c) => sum + c.wallets, 0);
+    flags.push({
+      code: 'funded-cluster',
+      severity: critical ? 'critical' : 'warn',
+      detail:
+        `${wallets} early buyer(s) in ${funding.clusters.length} funding cluster(s) bought ${pct(funding.clusteredPct)} of supply ` +
+        `(>= ${critical ? t.fundedClusterCriticalPct : t.fundedClusterWarnPct}%)` +
+        (top ? `; largest: ${top.wallets} wallets funded by ${top.funder}` : '') +
+        '.',
     });
   }
 

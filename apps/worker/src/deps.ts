@@ -31,12 +31,15 @@ import type {
   ProvenanceStore,
   AnchorChecker,
   ResearchContext,
+  ScoringConfig,
   ScoringInput,
   SocialFetchResult,
   TokenSnapshot,
   TrendingEntry,
   WatchEntry,
 } from '@provenance/core';
+import { createLogger } from '@provenance/core';
+import { createPairFetcher, type PairFetcher } from './outcomes';
 
 export interface DiscoveryResult {
   entries: TrendingEntry[];
@@ -73,8 +76,15 @@ export interface PipelineDeps {
   createStore(app: AppConfig): ProvenanceStore;
   seedDemoData(store: ProvenanceStore): Promise<void>;
 
+  /**
+   * DexScreener lookups for the outcome step (outcomes.ts). Optional: a
+   * harness that does not provide it never labels, so tests stay offline.
+   */
+  createPairFetcher?(app: AppConfig, logger: Logger): PairFetcher;
+
   // @provenance/alerts
-  scoreToken(input: ScoringInput): ProvenanceScore;
+  /** `scoring` is `app.scoring`: the opt-in SCORE_WEIGHTS / GENERATION_BONUS overrides. */
+  scoreToken(input: ScoringInput, scoring?: ScoringConfig): ProvenanceScore;
   defaultRules: AlertRule[];
   createAlerts(runId: string, input: AlertRuleInput, rules?: AlertRule[]): Alert[];
   gateLaunchMarket(snapshot: TokenSnapshot, config: LaunchConfig): LaunchGateResult;
@@ -119,7 +129,6 @@ type ResearchModule = Pick<PipelineDeps, 'collectEvidence' | 'createResearcher' 
 type StoreModule = Pick<PipelineDeps, 'createStore' | 'seedDemoData'>;
 type AlertsModule = Pick<
   PipelineDeps,
-  | 'scoreToken'
   | 'defaultRules'
   | 'createAlerts'
   | 'createSinks'
@@ -128,7 +137,29 @@ type AlertsModule = Pick<
   | 'gateLaunchChain'
   | 'launchAnchoredAlert'
   | 'launchExpressedAlert'
->;
+> & {
+  scoreToken(input: ScoringInput, options?: object): ProvenanceScore;
+  resolveScoringOverrides(config: ScoringConfig | undefined): { options: object; warnings: string[] };
+};
+
+/**
+ * Overrides are resolved once per config object, not per token: the warning
+ * for an invalid SCORE_WEIGHTS is printed once, and a run scores every token
+ * with the same weights.
+ */
+function configuredScorer(alerts: AlertsModule): PipelineDeps['scoreToken'] {
+  let seen: ScoringConfig | undefined;
+  let options: object = {};
+  return (input, scoring) => {
+    if (scoring !== seen) {
+      seen = scoring;
+      const resolved = alerts.resolveScoringOverrides(scoring);
+      for (const warning of resolved.warnings) createLogger('warn', 'scoring').warn(warning);
+      options = resolved.options;
+    }
+    return alerts.scoreToken(input, options);
+  };
+}
 
 let cached: PipelineDeps | undefined;
 
@@ -158,7 +189,8 @@ export async function loadRuntimeDeps(): Promise<PipelineDeps> {
     promptVersion: research.PROMPT_VERSION ?? 'unknown',
     createStore: store.createStore,
     seedDemoData: store.seedDemoData,
-    scoreToken: alerts.scoreToken,
+    createPairFetcher,
+    scoreToken: configuredScorer(alerts),
     defaultRules: alerts.defaultRules,
     createAlerts: alerts.createAlerts,
     createSinks: alerts.createSinks,

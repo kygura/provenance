@@ -82,3 +82,28 @@ describe('lp-not-burned with measured LP', () => {
     expect(find(flags, 'lp-not-burned')?.severity).toBe('warn');
   });
 });
+
+describe('funded-cluster', () => {
+  const flagsFor = (clusteredPct: number) =>
+    evaluateFlags({
+      analysis: {
+        method: 'rpc',
+        holderCount: 300,
+        funding: {
+          windowBlocks: 150,
+          traced: 20,
+          untraced: 0,
+          clusters: [{ funder: '0xfunder', wallets: 7, boughtPct: clusteredPct }],
+          clusteredPct,
+        },
+      },
+    }).filter((flag) => flag.code === 'funded-cluster');
+
+  test('warn at 10%, critical at 25%, nothing below', () => {
+    expect(flagsFor(9.9)).toEqual([]);
+    expect(flagsFor(10)[0]).toMatchObject({ code: 'funded-cluster', severity: 'warn' });
+    const critical = flagsFor(25)[0];
+    expect(critical).toMatchObject({ code: 'funded-cluster', severity: 'critical' });
+    expect(critical?.detail).toContain('7 wallets funded by 0xfunder');
+  });
+});

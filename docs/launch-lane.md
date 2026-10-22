@@ -10,6 +10,26 @@ The lane came from merging the `dexscanner` project, which scanned new
 deployments, filtered out unsafe ones and checked whether the name meant
 anything.
 
+## Coverage
+
+| Chain | Factories | Quotes |
+|---|---|---|
+| Ethereum | Uniswap V2, Uniswap V3 | WETH, USDC, USDT, DAI |
+| Base | Uniswap V2, Uniswap V3, Aerodrome (V2-style pools) | WETH, USDC, VIRTUAL |
+
+Base factory addresses and the Aerodrome `PoolCreated` topic were checked
+against live Base logs in October 2026. Uniswap V4 pools (Clanker, Zora) emit
+`Initialize` from the PoolManager rather than a factory event and aren't
+covered.
+
+Solana isn't covered: no pump.fun graduations, no Raydium or PumpSwap pools.
+The trending lane still picks up Solana and Base tokens, but only once they
+trend, which is too late for this lane's question. Adding Solana needs three
+things this repo doesn't have yet: a new-pool source (program logs, or
+GeckoTerminal `new_pools`), a sniping read over Solana transactions, and a
+chain gate that doesn't reject every Solana pool for missing the EVM-only
+reads.
+
 ## Flow
 
 ```
@@ -86,7 +106,10 @@ transfer from the pool to a wallet is a buy (`packages/chain/src/sniping.ts`):
 - **Early buying** is what the pool sent to wallets in the first 36 seconds
   of trading: 3 blocks on Ethereum, the trading-start block included. Routers,
   burn addresses and protocol contracts don't count as buyers.
-- **Still held** is what those wallets hold now, from the same replay.
+- **Still held** is what those wallets hold now, from the same replay. It
+  also counts wallets they fed: any wallet that got at least 90% of its
+  inbound tokens from the tracked set joins it, and chains (A to B to C) are
+  followed, so moving tokens to a fresh wallet isn't read as a sale.
 
 The result is stored as `ChainAnalysis.sniping` and drives three things:
 
@@ -101,9 +124,43 @@ is the normal case for a launch a few hours old. A scan that starts after the
 launch sees buys with no liquidity add before them and returns nothing rather
 than a wrong number.
 
-It doesn't trace funding. Twenty sniper wallets funded from one address in
-the same block are a cluster, but proving that needs native-ETH transfer
-tracing, which `eth_getLogs` can't provide.
+## Funding clusters
+
+Timing misses a cabal that buys a few minutes in, or a few wallets per
+block. Their wallets still had to be funded with gas from somewhere, and
+fresh wallets are usually funded from one place. `eth_getLogs` can't show
+native transfers, so this read uses the explorer (`packages/chain/src/funding.ts`,
+`lookupFirstFunders` in `packages/chain/src/explorer.ts`):
+
+- **Window**: the first 30 minutes of trading (150 blocks on Ethereum),
+  counted from the same trading-start block as the sniping read. Only runs
+  when the sniping read did.
+- **Traced**: the 20 largest buyers in that window. For each, the first
+  incoming transaction with value on Etherscan V2 `txlist`, else
+  `txlistinternal`. Funding that came through a disperse contract is
+  attributed to the EOA that called it.
+- **Hubs**: a funder shared by two or more buyers is dropped as a hub when it
+  is a labelled protocol address, a contract, an EOA that has sent 1,000+
+  transactions, or can't be checked. Two strangers withdrawing from Binance
+  share a funder, not an owner. If the budget runs out before the check, the
+  read is dropped rather than guessed.
+- **Clusters**: buyers joined through shared funders, chains included (A funds
+  B, B funds C). A cluster is 2+ buyers; `clusteredPct` is the supply they
+  bought in the window.
+
+Stored as `ChainAnalysis.funding`:
+
+| Where | What |
+|---|---|
+| Flags | `funded-cluster` warns at 10% of supply bought by clustered wallets and is critical at 25%. |
+| Chain gate | Rejects above `LAUNCHES_MAX_CLUSTERED_PCT` (15). Not traced is not a rejection: the read needs a key. |
+| Research prompt | The `funding_clusters` line reaches the organic read as a measured fact. |
+
+It needs `ETHERSCAN_API_KEY`. Etherscan's free tier doesn't cover every
+chain, and a refusal leaves `funding` unset with a note. A cabal that funds
+each wallet through a different exchange withdrawal, a bridge or a mixer
+still gets past it, and older wallets whose first funding predates the
+token add noise rather than false clusters. Solana has neither read yet.
 
 ## What carried over, and what changed
 
@@ -111,7 +168,7 @@ tracing, which `eth_getLogs` can't provide.
 |---|---|---|
 | Transfer-from-zero logs via Etherscan | Factory `PairCreated`/`PoolCreated` via public RPC (`packages/sources/src/launches.ts`) | Any mint looks like a deployment in Transfer logs. A pool creation says a token is tradeable. No key needed. |
 | Liquidity in ETH from DexScreener | `liquidityUsd` from the same DexScreener hydration the trending source uses | One unit across both lanes. |
-| LP lock via Ethplorer top holders of the pair | `lpBurnedPct`/`lpLockedPct` read over RPC: pair `totalSupply` and `balanceOf` for burn addresses, Unicrypt and Team Finance (`packages/chain/src/lp.ts`) | Keyless. It also fixed a bug where token-supply burn was being reported as LP burn. |
+| LP lock via Ethplorer top holders of the pair | `lpBurnedPct`/`lpLockedPct` read over RPC: pair `totalSupply` and `balanceOf` for burn addresses, Unicrypt and Team Finance; Uniswap V3 pools by tracing each position NFT's owner (`packages/chain/src/lp.ts`) | Keyless. It also fixed a bug where token-supply burn was being reported as LP burn. |
 | Substring search of verified source for "mint", "pause", "blacklist" | PUSH4 selector scan of deployed bytecode (`packages/chain/src/bytecode.ts`), weighed against owner renouncement | Works on unverified contracts. A substring match on "pause" also hits comments and OpenZeppelin imports. |
 | Reject unverified contracts | `contractVerified` via Etherscan V2 when `ETHERSCAN_API_KEY` is set; rejects only on an explicit `false` | Verification is the one check that needs a key, so it's optional. |
 | Holder count and top-10 share via Ethplorer | The EVM analyser's Transfer-log reconstruction | Already in Provenance. |
@@ -138,17 +195,31 @@ shown safe", and that rejects.
 | `LAUNCHES_MIN_HOLDERS` | `50` | Lower than dexscanner's 100 so the verdict doesn't wait on distribution |
 | `LAUNCHES_MAX_TOP10_PCT` | `40` | Top-10 share excluding LP and burn |
 | `LAUNCHES_MAX_SNIPED_PCT` | `20` | Supply bought in the first 36 s of trading; unmeasured rejects |
-| `LAUNCHES_REQUIRE_LP_SECURED` | `true` | Reject when LP burn/lock can't be measured (V3 pools) |
+| `LAUNCHES_REQUIRE_LP_SECURED` | `true` | Reject when LP burn/lock can't be measured (V4 pools, V3 forks, busy or untraceable V3 pools) |
 | `LAUNCHES_MIN_LP_SECURED_PCT` | `90` | Burned plus locked LP share |
 | `LAUNCHES_DORMANT_AFTER_HOURS` | `168` | `active` → `dormant` |
 | `LAUNCHES_MAX_ANCHOR_SEARCHES` | `3` | Web searches per fast anchor check |
 | `LAUNCHES_RESEARCH_ANCHORED` | `true` | Run the full research on anchored launches, at launch |
-| `ETHERSCAN_API_KEY` | unset | Optional; enables `contractVerified` |
+| `LAUNCHES_MAX_CLUSTERED_PCT` | 15 | Ceiling on supply bought by early wallets sharing a funder |
+| `ETHERSCAN_API_KEY` | unset | Optional; enables `contractVerified` and funding clusters |
 | `ELFA_API_KEY` | unset | Optional; records each entry's lead over crypto-social (`socialLeadHours`, see `docs/social.md`) |
 
-`LAUNCHES_REQUIRE_LP_SECURED=true` means Uniswap V3 launches never pass, because
-V3 liquidity positions are NFTs and "LP burned" has no single number there.
-Dexscanner had the same limit without saying so.
+**V3 LP.** Uniswap V3 positions are NFTs, so there is no LP supply to divide.
+For a fresh V3 pool on Ethereum or Base, `measureV3Pool` reads every pool
+`Mint` since the scan start, maps each one minted through the
+NonfungiblePositionManager to its token id (the `IncreaseLiquidity` log in the
+same receipt), then reads that position's current liquidity and `ownerOf`. An
+NFT held by a burn address counts as burned, one held by Team Finance as
+locked; a mint straight to any other owner counts as unsecured at its minted
+amount. Liquidity on different tick ranges isn't comparable, so only a
+full-range position can count as burned or locked. The pool's `Initialize`
+must fall inside the scan window, and its `liquidity()` must not exceed the
+traced positions in range. A pool with more than 20 mints, a scan that
+doesn't reach head, a failed cross-check or a missing receipt stays
+unmeasured and, with `LAUNCHES_REQUIRE_LP_SECURED=true`, is rejected. So are
+V3 forks (their managers aren't listed) and positions locked with UNCX, whose
+V3 locker isn't in the table yet. Dexscanner rejected every V3 launch
+without saying so.
 
 ## Commands
 
@@ -165,9 +236,9 @@ up to 21h old, so an offline demo needs `LAUNCHES_LOOKBACK_HOURS=48 ... run
 
 ## Known gaps
 
-- The sniping check measures timing, not funding. A cabal that buys a few
-  minutes in, or across many blocks, gets past it. Funding-source clustering
-  needs native-transfer tracing.
+- Funding clusters need `ETHERSCAN_API_KEY` and stop at exchanges, bridges
+  and mixers. A cabal funded through separate exchange withdrawals gets past
+  both the timing and the funding read.
 - A launch with liquidity but no buys yet is rejected as "not measured" and
   retried on the next run, like a launch below the holder floor.
 
@@ -185,7 +256,8 @@ up to 21h old, so an offline demo needs `LAUNCHES_LOOKBACK_HOURS=48 ... run
 The build sandbox has no route to any RPC or data host, so everything here was
 checked against fixtures only:
 
-- factory topic hashes and log layouts against a real Ethereum node,
+- factory topic hashes and log layouts against a real Ethereum node (Base
+  was checked live: factories, topics and the Aerodrome layout),
 - the locker addresses (taken from dexscanner's constants, not read on-chain),
 - whether public nodes accept a 2,000-block `eth_getLogs` range on the factories,
 - the anchor prompts on real launches, where the interesting failures are

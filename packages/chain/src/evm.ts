@@ -19,6 +19,7 @@ import {
   type ChainAnalyzer,
   type Chain,
   type HolderRow,
+  type LaunchFunding,
   type Logger,
   type TokenSnapshot,
 } from '@provenance/core';
@@ -39,13 +40,14 @@ import {
   TRANSFER_TOPIC0,
 } from './abi';
 import { readPrivilegedFunctions } from './bytecode';
-import { checkContractVerified } from './explorer';
+import { checkContractVerified, lookupFirstFunders } from './explorer';
+import { clusterFunding, fundingWindowBlocks, MAX_TRACED_BUYERS, selectEarlyBuyers } from './funding';
 import { evaluateFlags } from './flags';
-import { measureLp } from './lp';
+import { measureLp, type V3LpScope } from './lp';
 import { concentration } from './metrics';
-import { isEvmBurnAddress, lookupEvmAddress } from './labels';
+import { isEvmBurnAddress, labelIsExcluded, lookupEvmAddress } from './labels';
 import { Budget, RpcClient, type TransportProvider } from './rpc';
-import { measureSniping, snipeWindowBlocks, type PoolTransfer } from './sniping';
+import { forwardCandidates, measureSniping, snipeWindowBlocks, type PoolTransfer } from './sniping';
 
 export interface EvmAnalyzerOptions {
   /** Wall-clock ceiling for one token's analysis. */
@@ -59,6 +61,13 @@ export interface EvmAnalyzerOptions {
   /** Top holders retained on the report. */
   topN?: number;
 }
+
+/**
+ * A funder with at least this many sent transactions serves everyone: an
+ * exchange hot wallet, a bridge, a faucet. Two strangers withdrawing from
+ * Binance share a funder without sharing an owner.
+ */
+export const HUB_MIN_NONCE = 1_000;
 
 const DEFAULTS: Required<EvmAnalyzerOptions> = {
   budgetMs: 45_000,
@@ -161,12 +170,33 @@ export async function analyzeEvm(
 
   const supply = { total: formatUnits(totalRaw, decimals), decimals };
 
+  const seconds = BLOCK_SECONDS[snapshot.chain] ?? 12;
+  const created = snapshot.metrics.poolCreatedAt ? Date.parse(snapshot.metrics.poolCreatedAt) : Number.NaN;
+  // Pool creation times are estimates; the margin keeps the liquidity add
+  // inside the window so the sniping read can see trading start.
+  const ageBlocks = Number.isFinite(created)
+    ? Math.ceil((Date.now() - created) / 1000 / seconds) + 2 * snipeWindowBlocks(seconds) + 10
+    : opts.chunkBlocks * opts.maxChunks;
+
+  // V3 positions are NFTs, traced from the pool's Mint logs, so the V3 LP read
+  // needs a start block at or before pool creation. Only a known creation time
+  // gives one; without it V3 LP stays unmeasured.
+  let v3: V3LpScope | undefined;
+  if (Number.isFinite(created)) {
+    try {
+      const head = quantityToNumber(await client.call<string>('eth_blockNumber', []));
+      v3 = { chain: snapshot.chain, fromBlock: Math.max(0, head - ageBlocks), toBlock: head };
+    } catch {
+      // The holder scan below reads the head again and reports the failure.
+    }
+  }
+
   // --- contract surface: bytecode, LP, explorer ----------------------------
   // Cheap, bounded reads, done before the log scan so a long scan cannot
   // starve them of budget. Each degrades to a note and never throws.
   const [codeScan, lp, contractVerified] = await Promise.all([
     readPrivilegedFunctions(client, address),
-    measureLp(client, snapshot.pairs, budget),
+    measureLp(client, snapshot.pairs, budget, v3),
     checkContractVerified({
       app,
       chain: snapshot.chain,
@@ -207,13 +237,6 @@ export async function analyzeEvm(
     };
   }
 
-  const seconds = BLOCK_SECONDS[snapshot.chain] ?? 12;
-  const created = snapshot.metrics.poolCreatedAt ? Date.parse(snapshot.metrics.poolCreatedAt) : Number.NaN;
-  // Pool creation times are estimates; the margin keeps the liquidity add
-  // inside the window so the sniping read can see trading start.
-  const ageBlocks = Number.isFinite(created)
-    ? Math.ceil((Date.now() - created) / 1000 / seconds) + 2 * snipeWindowBlocks(seconds) + 10
-    : opts.chunkBlocks * opts.maxChunks;
   const span = Math.min(ageBlocks, opts.chunkBlocks * opts.maxChunks);
   const fromBlock = Math.max(0, latestBlock - span);
 
@@ -222,7 +245,10 @@ export async function analyzeEvm(
   const poolAddresses = new Set(
     snapshot.pairs.filter((pair) => isAddress(pair.pairAddress)).map((pair) => normalizeAddress(pair.pairAddress)),
   );
+  /** Most forward-wallet candidates code-checked per token. */
+  const FORWARD_CODE_CHECKS = 50;
   const poolTransfers: PoolTransfer[] = [];
+  const allTransfers: PoolTransfer[] = [];
   const seen = new Set<string>();
   const balances = new Map<string, bigint>();
   let scannedFrom = latestBlock;
@@ -273,8 +299,9 @@ export async function analyzeEvm(
         if (value === undefined) continue;
         if (from) balances.set(from, (balances.get(from) ?? 0n) - value);
         if (to) balances.set(to, (balances.get(to) ?? 0n) + value);
-        if (from && to && block !== undefined && (poolAddresses.has(from) || poolAddresses.has(to))) {
-          poolTransfers.push({ block, from, to, value });
+        if (from && to && block !== undefined) {
+          allTransfers.push({ block, from, to, value });
+          if (poolAddresses.has(from) || poolAddresses.has(to)) poolTransfers.push({ block, from, to, value });
         }
       }
       scannedFrom = start;
@@ -340,18 +367,38 @@ export async function analyzeEvm(
 
   // Only a scan that covered the token's whole life can see trading start
   // and say what the early buyers still hold.
-  const sniping =
-    !truncated && Number.isFinite(created)
-      ? measureSniping({
-          transfers: poolTransfers,
-          pools: poolAddresses,
-          totalRaw,
-          balances,
-          blockSeconds: seconds,
-          isExcluded: (addr) =>
-            isZeroAddress(addr) || isEvmBurnAddress(addr) || lookupEvmAddress(addr)?.label?.startsWith('protocol:') === true,
-        })
-      : undefined;
+  const isExcluded = (addr: string) =>
+    isZeroAddress(addr) || isEvmBurnAddress(addr) || lookupEvmAddress(addr)?.label?.startsWith('protocol:') === true;
+  const snipingInput = {
+    transfers: poolTransfers,
+    pools: poolAddresses,
+    totalRaw,
+    balances,
+    walletTransfers: allTransfers,
+    blockSeconds: seconds,
+    isExcluded,
+  };
+  // Forward wallets must be EOAs: a second pool, deposit or vesting contract
+  // is not a wallet the buyer still holds through. Candidates the code check
+  // cannot cover (cap, budget, RPC failure) count as contracts.
+  let sniping: ReturnType<typeof measureSniping>;
+  if (!truncated && Number.isFinite(created)) {
+    const candidates = forwardCandidates(snipingInput).slice(0, FORWARD_CODE_CHECKS);
+    const wallets = new Set<string>();
+    if (candidates.length > 0 && !budget.expired()) {
+      try {
+        const codes = await client.callMany(
+          candidates.map((addr) => ({ method: 'eth_getCode', params: [addr, 'latest'] })),
+        );
+        candidates.forEach((addr, i) => {
+          if (codes[i]?.result === '0x') wallets.add(addr);
+        });
+      } catch {
+        // none verified: no forward wallet is followed
+      }
+    }
+    sniping = measureSniping({ ...snipingInput, isContract: (addr) => !wallets.has(addr) });
+  }
   if (sniping) {
     notes.push(
       `Early buying: ${sniping.earlyBuyPct.toFixed(1)}% of supply to ${sniping.earlyBuyers} wallet(s) in the first ` +
@@ -360,6 +407,25 @@ export async function analyzeEvm(
   } else {
     notes.push('Early buying not measured: the scan did not reach the start of trading.');
   }
+
+  const funding = sniping
+    ? await traceFunding({
+        client,
+        app,
+        chain: snapshot.chain,
+        tradingStartBlock: sniping.tradingStartBlock,
+        transfers: poolTransfers,
+        pools: poolAddresses,
+        totalRaw,
+        balances,
+        blockSeconds: seconds,
+        isExcluded,
+        notes,
+        timeoutMs: opts.callTimeoutMs,
+        budget,
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
+      })
+    : undefined;
 
   const analysis: ChainAnalysis = {
     ...base,
@@ -375,6 +441,7 @@ export async function analyzeEvm(
     ownerRenounced,
     ...surface,
     ...(sniping ? { sniping } : {}),
+    ...(funding ? { funding } : {}),
     topHolders: rows.slice(0, opts.topN),
     fetchedAt: nowIso(),
     durationMs: Date.now() - started,
@@ -387,6 +454,118 @@ export async function analyzeEvm(
   });
 
   return analysis;
+}
+
+interface TraceFundingInput {
+  client: RpcClient;
+  app: AppConfig;
+  chain: Chain;
+  tradingStartBlock: number;
+  transfers: readonly PoolTransfer[];
+  pools: ReadonlySet<string>;
+  totalRaw: bigint;
+  balances: ReadonlyMap<string, bigint>;
+  blockSeconds: number;
+  isExcluded: (address: string) => boolean;
+  notes: string[];
+  timeoutMs: number;
+  budget: Budget;
+  signal?: AbortSignal;
+}
+
+/**
+ * Who paid for the early buyers' wallets. Looks up the largest buyers of the
+ * first half hour on the explorer, then drops funders that serve everyone
+ * (known exchanges, or any address with a hub-sized nonce) before clustering.
+ * Undefined when nothing could be looked up: no key, or the explorer refused.
+ */
+/**
+ * Funders shared by 2+ buyers that serve everyone, so cannot mark a cabal: a
+ * labelled protocol, any contract (bridges, exchange contract wallets; a
+ * cabal's disperse call is already resolved to its sender), or an EOA with a
+ * hub-sized nonce. A funder that cannot be checked is treated as a hub: one
+ * unchecked exchange wallet would otherwise cluster strangers. Undefined when
+ * the budget runs out first, since then nothing can be told apart.
+ */
+export async function findHubFunders(
+  client: RpcClient,
+  funders: ReadonlyMap<string, string | undefined>,
+  budget: Budget,
+): Promise<Set<string> | undefined> {
+  const counts = new Map<string, number>();
+  for (const funder of funders.values()) if (funder) counts.set(funder, (counts.get(funder) ?? 0) + 1);
+  const hubs = new Set<string>();
+  for (const [funder, count] of counts) {
+    if (count < 2) continue;
+    if (labelIsExcluded(lookupEvmAddress(funder)?.label)) {
+      hubs.add(funder);
+      continue;
+    }
+    if (budget.expired()) return undefined;
+    try {
+      const [nonce, code] = await client.callMany([
+        { method: 'eth_getTransactionCount', params: [funder, 'latest'] },
+        { method: 'eth_getCode', params: [funder, 'latest'] },
+      ]);
+      const sent = typeof nonce?.result === 'string' ? quantityToNumber(nonce.result) : undefined;
+      const bytecode = typeof code?.result === 'string' ? code.result : undefined;
+      if (sent === undefined || bytecode === undefined || bytecode !== '0x' || sent >= HUB_MIN_NONCE) hubs.add(funder);
+    } catch {
+      if (budget.expired()) return undefined;
+      hubs.add(funder);
+    }
+  }
+  return hubs;
+}
+
+async function traceFunding(input: TraceFundingInput): Promise<LaunchFunding | undefined> {
+  const { client, notes } = input;
+  const windowBlocks = fundingWindowBlocks(input.blockSeconds);
+  const buyers = selectEarlyBuyers({
+    transfers: input.transfers,
+    pools: input.pools,
+    tradingStartBlock: input.tradingStartBlock,
+    windowBlocks,
+    isExcluded: input.isExcluded,
+    max: MAX_TRACED_BUYERS,
+  });
+  if (buyers.length === 0) return undefined;
+
+  const funders = await lookupFirstFunders({
+    app: input.app,
+    chain: input.chain,
+    addresses: buyers.map((buyer) => buyer.address),
+    notes,
+    timeoutMs: input.timeoutMs,
+    budget: input.budget,
+    ...(input.signal ? { signal: input.signal } : {}),
+    txSender: async (hash) => {
+      const tx = await client.call<{ from?: string } | null>('eth_getTransactionByHash', [hash]);
+      return tx?.from ? normalizeAddress(tx.from) : undefined;
+    },
+  });
+  if (funders.size === 0) return undefined;
+
+  const hubs = await findHubFunders(client, funders, input.budget);
+  if (hubs === undefined) {
+    notes.push('Funding not traced: analysis budget exhausted before the hub check.');
+    return undefined;
+  }
+
+  const funding = clusterFunding({
+    buyers,
+    funders,
+    isHub: (address) => hubs.has(address),
+    totalRaw: input.totalRaw,
+    balances: input.balances,
+    windowBlocks,
+  });
+  notes.push(
+    `Funding: ${funding.traced} of ${buyers.length} early buyer(s) traced over the first ${windowBlocks} block(s); ` +
+      `${funding.clusters.length} cluster(s) holding ${funding.clusteredPct.toFixed(1)}% of supply bought` +
+      (hubs.size > 0 ? `; ${hubs.size} hub funder(s) ignored.` : '.'),
+  );
+  return funding;
 }
 
 export function createEvmAnalyzer(
