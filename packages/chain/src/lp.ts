@@ -198,13 +198,33 @@ export async function measureLp(
 export const V3_MINT_TOPIC0 = '0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde';
 /** NPM `IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)` */
 export const V3_INCREASE_LIQUIDITY_TOPIC0 = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f';
-/** `positions(uint256)` on the NPM; liquidity is return word 7. */
+/** Pool `Initialize(uint160 sqrtPriceX96, int24 tick)`: emitted once, when the pool is created. */
+export const V3_INITIALIZE_TOPIC0 = '0x98636036cb66a9c19a37435efc1e90142190214e8abeb821bdba3f2990dd4c95';
+/** Pool `liquidity()`: in-range liquidity at the current tick. */
+export const V3_LIQUIDITY_SELECTOR = '0x1a686502';
+/** Pool `slot0()`; the current tick is return word 1. */
+export const V3_SLOT0_SELECTOR = '0x3850c7bd';
+/** `positions(uint256)` on the NPM; tickLower/tickUpper are words 5/6, liquidity word 7. */
 export const V3_POSITIONS_SELECTOR = '0x99fbab88';
 /** ERC-721 `ownerOf(uint256)`; reverts for a burned token id. */
 export const ERC721_OWNER_OF_SELECTOR = '0x6352211e';
 
 /** Positions traced per pool. More than this is not a fresh launch pool. */
 export const MAX_V3_MINTS = 20;
+
+/**
+ * A position is full-range when its ticks reach within the widest standard
+ * tick spacing (200, the 1% tier) of the protocol bounds ±887272.
+ */
+const V3_FULL_RANGE_TICK = 887_272 - 200;
+
+function isFullRange(tickLower: number, tickUpper: number): boolean {
+  return tickLower <= -V3_FULL_RANGE_TICK && tickUpper >= V3_FULL_RANGE_TICK;
+}
+
+function int24At(data: string, index: number): number {
+  return Number(BigInt.asIntN(256, decodeUint256(data, index)));
+}
 
 /** Where to look for a V3 pool's positions. */
 export interface V3LpScope {
@@ -231,6 +251,8 @@ interface RpcLog {
 interface MintRecord {
   owner: string;
   amount: bigint;
+  tickLower: number;
+  tickUpper: number;
   txHash?: string;
   logIndex: number;
 }
@@ -239,6 +261,9 @@ interface MintRecord {
  * Burned/locked share of a fresh Uniswap V3 pool's liquidity.
  *
  * 1. Every pool `Mint` from `fromBlock` to head (all of them, or it gives up).
+ *    The pool's `Initialize` must fall inside the same window: otherwise
+ *    positions may predate it, and a later dust position sent to 0xdead would
+ *    read as 100% burned.
  * 2. Mints owned by the chain's NonfungiblePositionManager are resolved to a
  *    token id through the NPM `IncreaseLiquidity` log in the same receipt.
  * 3. Each token id's current liquidity (`positions`) and holder (`ownerOf`):
@@ -247,11 +272,17 @@ interface MintRecord {
  *    `amount` counts as unsecured. It is the amount at mint, not now: if that
  *    owner already withdrew, the unsecured share is overstated (safe side).
  *
- * Liquidity units are only strictly comparable between positions on the same
- * tick range; a full-range and a narrow position with equal `liquidity` hold
- * different amounts of tokens. Launch pools usually have one or two full-range
- * positions, where this is exact enough; for anything busier the figure is
- * approximate, and past `MAX_V3_MINTS` positions it is not attempted.
+ * 5. Cross-check: the pool's `liquidity()` must not exceed the traced
+ *    positions' liquidity in range at the current tick (0.1% tolerance);
+ *    more means untraced positions exist.
+ *
+ * Liquidity units are only comparable between positions on the same tick
+ * range: a narrow position holds far fewer tokens per unit of `liquidity` than
+ * a full-range one, so a locked dust sliver could otherwise outweigh the real,
+ * unlocked full-range position. Only full-range positions can count as burned
+ * or locked; a burned or locked narrow position counts as unsecured. That
+ * understates security for exotic setups, which is the safe direction. Past
+ * `MAX_V3_MINTS` positions nothing is attempted.
  *
  * Never throws: anything incomplete returns `concentrated` with a note, which
  * the launch gate treats as "LP could not be measured".
@@ -273,6 +304,7 @@ export async function measureV3Pool(client: RpcClient, pool: string, scope: V3Lp
     let chunks = 0;
     const mints: MintRecord[] = [];
     const seen = new Set<string>();
+    let initialized = false;
     for (let start = Math.max(0, scope.fromBlock); start <= head; ) {
       if (budget?.expired()) return give('analysis budget ran out during the Mint log scan');
       if (chunks >= maxChunks) return give(`Mint log scan did not reach head within ${maxChunks} request(s)`);
@@ -281,7 +313,12 @@ export async function measureV3Pool(client: RpcClient, pool: string, scope: V3Lp
       try {
         logs =
           (await client.call<RpcLog[]>('eth_getLogs', [
-            { address: pairAddress, topics: [V3_MINT_TOPIC0], fromBlock: toQuantity(start), toBlock: toQuantity(end) },
+            {
+              address: pairAddress,
+              topics: [[V3_MINT_TOPIC0, V3_INITIALIZE_TOPIC0]],
+              fromBlock: toQuantity(start),
+              toBlock: toQuantity(end),
+            },
           ])) ?? [];
       } catch (error) {
         if (chunk > narrow) {
@@ -292,14 +329,18 @@ export async function measureV3Pool(client: RpcClient, pool: string, scope: V3Lp
       }
       chunks += 1;
       for (const log of logs) {
-        const ownerTopic = log.topics?.[1];
-        if (log.topics?.[0]?.toLowerCase() !== V3_MINT_TOPIC0 || !ownerTopic || !log.data) continue;
+        const topic0 = log.topics?.[0]?.toLowerCase();
+        if (topic0 === V3_INITIALIZE_TOPIC0) initialized = true;
+        const [, ownerTopic, lowerTopic, upperTopic] = log.topics ?? [];
+        if (topic0 !== V3_MINT_TOPIC0 || !ownerTopic || !lowerTopic || !upperTopic || !log.data) continue;
         const key = `${log.transactionHash ?? ''}:${log.logIndex ?? ''}`;
         if (seen.has(key)) continue;
         seen.add(key);
         mints.push({
           owner: topicToAddress(ownerTopic),
           amount: decodeUint256(log.data, 1),
+          tickLower: int24At(lowerTopic, 0),
+          tickUpper: int24At(upperTopic, 0),
           ...(log.transactionHash ? { txHash: log.transactionHash } : {}),
           logIndex: log.logIndex ? quantityToNumber(log.logIndex) : 0,
         });
@@ -307,6 +348,7 @@ export async function measureV3Pool(client: RpcClient, pool: string, scope: V3Lp
       if (mints.length > MAX_V3_MINTS) return give(`more than ${MAX_V3_MINTS} positions minted; not a fresh launch pool`);
       start = end + 1;
     }
+    if (!initialized) return give('pool was initialized before the scan window; earlier positions are untraced');
     if (mints.length === 0) return give('no Mint logs found since the scan start; positions untraceable');
 
     // --- 2. NPM mints → token ids ------------------------------------------
@@ -349,6 +391,7 @@ export async function measureV3Pool(client: RpcClient, pool: string, scope: V3Lp
     let burned = 0n;
     let locked = 0n;
     let total = 0n;
+    const traced: Array<{ liquidity: bigint; tickLower: number; tickUpper: number }> = [];
     const ids = [...tokenIds];
     if (ids.length > 0) {
       if (budget?.expired()) return give('analysis budget ran out before positions were read');
@@ -368,8 +411,12 @@ export async function measureV3Pool(client: RpcClient, pool: string, scope: V3Lp
           return give(`positions/ownerOf unreadable for token id ${id}`);
         }
         const liquidity = decodeUint256(position.result, 7);
+        const tickLower = int24At(position.result, 5);
+        const tickUpper = int24At(position.result, 6);
         const owner = decodeAddress(holder.result);
+        traced.push({ liquidity, tickLower, tickUpper });
         total += liquidity;
+        if (!isFullRange(tickLower, tickUpper)) continue;
         if (burnSinks.has(owner)) burned += liquidity;
         else if (lockers.has(owner)) locked += liquidity;
       }
@@ -377,11 +424,27 @@ export async function measureV3Pool(client: RpcClient, pool: string, scope: V3Lp
 
     // --- 4. Direct mints: unsecured unless minted to a burn address ----------
     for (const mint of direct) {
+      traced.push({ liquidity: mint.amount, tickLower: mint.tickLower, tickUpper: mint.tickUpper });
       total += mint.amount;
-      if (burnSinks.has(mint.owner)) burned += mint.amount;
+      if (burnSinks.has(mint.owner) && isFullRange(mint.tickLower, mint.tickUpper)) burned += mint.amount;
     }
 
     if (total === 0n) return give('every traced position has been withdrawn');
+
+    // --- 5. Pool liquidity must be accounted for by the traced positions -----
+    if (budget?.expired()) return give('analysis budget ran out before the pool cross-check');
+    const poolCall = (data: string) => ({ method: 'eth_call', params: [{ to: pairAddress, data }, 'latest'] });
+    const [slot0, poolLiquidity] = await client.callMany([poolCall(V3_SLOT0_SELECTOR), poolCall(V3_LIQUIDITY_SELECTOR)]);
+    if (typeof slot0?.result !== 'string' || typeof poolLiquidity?.result !== 'string') {
+      return give('pool slot0/liquidity unreadable; traced positions could not be cross-checked');
+    }
+    const tick = int24At(slot0.result, 1);
+    const inRange = traced
+      .filter((position) => position.tickLower <= tick && tick < position.tickUpper)
+      .reduce((sum, position) => sum + position.liquidity, 0n);
+    if (decodeUint256(poolLiquidity.result) > inRange + inRange / 1000n) {
+      return give('pool liquidity exceeds the traced positions in range; untraced positions exist');
+    }
     return {
       status: 'measured',
       pairAddress,

@@ -211,9 +211,11 @@ NonfungiblePositionManager to its token id (the `IncreaseLiquidity` log in the
 same receipt), then reads that position's current liquidity and `ownerOf`. An
 NFT held by a burn address counts as burned, one held by Team Finance as
 locked; a mint straight to any other owner counts as unsecured at its minted
-amount. Liquidity on different tick ranges isn't strictly comparable, so the
-share is approximate beyond one or two full-range positions. A pool with more
-than 20 mints, a scan that doesn't reach head, or a missing receipt stays
+amount. Liquidity on different tick ranges isn't comparable, so only a
+full-range position can count as burned or locked. The pool's `Initialize`
+must fall inside the scan window, and its `liquidity()` must not exceed the
+traced positions in range. A pool with more than 20 mints, a scan that
+doesn't reach head, a failed cross-check or a missing receipt stays
 unmeasured and, with `LAUNCHES_REQUIRE_LP_SECURED=true`, is rejected. So are
 V3 forks (their managers aren't listed) and positions locked with UNCX, whose
 V3 locker isn't in the table yet. Dexscanner rejected every V3 launch

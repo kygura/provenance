@@ -10,8 +10,11 @@ import {
   measurePair,
   measureV3Pool,
   V3_INCREASE_LIQUIDITY_TOPIC0,
+  V3_INITIALIZE_TOPIC0,
+  V3_LIQUIDITY_SELECTOR,
   V3_MINT_TOPIC0,
   V3_POSITIONS_SELECTOR,
+  V3_SLOT0_SELECTOR,
 } from './lp';
 import { EVM_LP_LOCKERS, UNISWAP_V3_POSITION_MANAGERS } from './labels';
 import { MockRpcTransport } from './mock';
@@ -202,13 +205,26 @@ interface V3Mint {
   tx: string;
   /** NPM token id minted in that tx; omitted for direct mints. */
   tokenId?: bigint;
+  /** Defaults to full range. */
+  ticks?: [number, number];
+}
+
+const FULL: [number, number] = [-887_220, 887_220];
+
+/** int24 sign-extended into one ABI word. */
+function tickWord(tick: number): bigint {
+  return BigInt.asUintN(256, BigInt(tick));
 }
 
 interface V3State {
   mints: V3Mint[];
   /** tokenId → current liquidity and holder; absent = burned NFT (both revert). */
-  positions?: Record<string, { liquidity: bigint; owner: string }>;
+  positions?: Record<string, { liquidity: bigint; owner: string; ticks?: [number, number] }>;
   failReceipts?: boolean;
+  /** The pool's Initialize happened before the scan window. */
+  initializedEarlier?: boolean;
+  /** Pool `liquidity()` (default 0, i.e. nothing untraced). */
+  poolLiquidity?: bigint;
 }
 
 const revert = { error: { code: 3, message: 'execution reverted' } };
@@ -218,19 +234,21 @@ function v3Transport(state: V3State): MockRpcTransport {
     handlers: {
       eth_blockNumber: () => ({ result: `0x${HEAD.toString(16)}` }),
       eth_getLogs: ({ call }): JsonRpcResult => {
-        const filter = call.params[0] as { address: string; topics: string[]; fromBlock: string };
-        // Every mint sits in block 0, so only the first chunk sees them.
-        if (filter.address !== PAIR_V3 || filter.topics[0] !== V3_MINT_TOPIC0 || filter.fromBlock !== '0x0') {
-          return { result: [] };
-        }
+        const filter = call.params[0] as { address: string; topics: string[][]; fromBlock: string };
+        // Every log sits in block 0, so only the first chunk sees them.
+        if (filter.address !== PAIR_V3 || filter.fromBlock !== '0x0') return { result: [] };
+        expect(filter.topics[0]).toEqual([V3_MINT_TOPIC0, V3_INITIALIZE_TOPIC0]);
+        const init = state.initializedEarlier
+          ? []
+          : [{ address: PAIR_V3, topics: [V3_INITIALIZE_TOPIC0], data: words(1n, 0n), transactionHash: `0x${'00'.repeat(32)}`, logIndex: '0x0' }];
         return {
-          result: state.mints.map((mint, index) => ({
+          result: [...init, ...state.mints.map((mint, index) => ({
             address: PAIR_V3,
-            topics: [V3_MINT_TOPIC0, topicOf(mint.owner), word(0n), word(0n)],
+            topics: [V3_MINT_TOPIC0, topicOf(mint.owner), word(tickWord((mint.ticks ?? FULL)[0])), word(tickWord((mint.ticks ?? FULL)[1]))],
             data: words(BigInt(`0x${NPM.slice(2)}`), mint.amount, 1n, 1n),
             transactionHash: mint.tx,
-            logIndex: `0x${(index * 2).toString(16)}`,
-          })),
+            logIndex: `0x${(index * 2 + 2).toString(16)}`,
+          }))],
         };
       },
       eth_getTransactionReceipt: ({ call }): JsonRpcResult => {
@@ -243,17 +261,19 @@ function v3Transport(state: V3State): MockRpcTransport {
             address: NPM,
             topics: [V3_INCREASE_LIQUIDITY_TOPIC0, word(mint.tokenId ?? 0n)],
             data: words(mint.amount, 1n, 1n),
-            logIndex: `0x${(index * 2 + 1).toString(16)}`,
+            logIndex: `0x${(index * 2 + 3).toString(16)}`,
           }));
         return { result: { logs } };
       },
       eth_call: ({ call }): JsonRpcResult => {
         const { to, data } = call.params[0] as { to: string; data: string };
+        if (to === PAIR_V3 && data === V3_SLOT0_SELECTOR) return { result: words(1n, 0n, 0n, 0n, 0n, 0n, 1n) };
+        if (to === PAIR_V3 && data === V3_LIQUIDITY_SELECTOR) return { result: word(state.poolLiquidity ?? 0n) };
         if (to !== NPM) return revert; // the pool has no totalSupply
         const id = BigInt(`0x${data.slice(10)}`).toString();
         const position = state.positions?.[id];
         if (!position) return revert;
-        if (data.startsWith(V3_POSITIONS_SELECTOR)) return { result: words(0n, 0n, 0n, 0n, 3000n, 0n, 0n, position.liquidity, 0n, 0n, 0n, 0n) };
+        if (data.startsWith(V3_POSITIONS_SELECTOR)) return { result: words(0n, 0n, 0n, 0n, 3000n, tickWord((position.ticks ?? FULL)[0]), tickWord((position.ticks ?? FULL)[1]), position.liquidity, 0n, 0n, 0n, 0n) };
         if (data.startsWith(ERC721_OWNER_OF_SELECTOR)) return { result: topicOf(position.owner) };
         return revert;
       },
@@ -354,5 +374,46 @@ describe('Uniswap V3 LP', () => {
     expect((await measurePair(client(transport), { pairAddress: PAIR_V3 }, { chain: 'bsc', fromBlock: 0 })).status).toBe('concentrated');
     expect((await measurePair(client(transport), { pairAddress: PAIR_V3 })).status).toBe('concentrated');
     expect(transport.callsTo('eth_getLogs')).toHaveLength(0);
+  });
+
+  test('a pool initialized before the scan window is not measured (older positions are untraced)', async () => {
+    const transport = v3Transport({
+      initializedEarlier: true,
+      mints: [{ owner: NPM, amount: 1n, tx: TX1, tokenId: 7n }],
+      positions: { '7': { liquidity: 1n, owner: DEAD } },
+    });
+    const result = await measureV3Pool(client(transport), PAIR_V3, SCOPE);
+    expect(result.status === 'concentrated' && result.note).toContain('initialized before');
+  });
+
+  test('pool liquidity above the traced in-range total means untraced positions', async () => {
+    const transport = v3Transport({
+      mints: [{ owner: NPM, amount: 100n, tx: TX1, tokenId: 7n }],
+      positions: { '7': { liquidity: 100n, owner: DEAD } },
+      poolLiquidity: 5_000n,
+    });
+    const result = await measureV3Pool(client(transport), PAIR_V3, SCOPE);
+    expect(result.status === 'concentrated' && result.note).toContain('untraced');
+    const exact = v3Transport({
+      mints: [{ owner: NPM, amount: 100n, tx: TX1, tokenId: 7n }],
+      positions: { '7': { liquidity: 100n, owner: DEAD } },
+      poolLiquidity: 100n,
+    });
+    expect((await measureV3Pool(client(exact), PAIR_V3, SCOPE)).status).toBe('measured');
+  });
+
+  test('a narrow locked sliver cannot outweigh an unlocked full-range position', async () => {
+    const transport = v3Transport({
+      mints: [
+        { owner: NPM, amount: 1_000_000n, tx: TX1, tokenId: 7n, ticks: [-60, 60] },
+        { owner: NPM, amount: 10_000n, tx: TX2, tokenId: 8n },
+      ],
+      positions: {
+        '7': { liquidity: 1_000_000n, owner: TEAM, ticks: [-60, 60] },
+        '8': { liquidity: 10_000n, owner: EOA },
+      },
+    });
+    const result = await measureV3Pool(client(transport), PAIR_V3, SCOPE);
+    expect(result.status === 'measured' && [result.burnedPct, result.lockedPct]).toEqual([0, 0]);
   });
 });
