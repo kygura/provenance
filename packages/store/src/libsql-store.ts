@@ -2,10 +2,13 @@ import { createClient, type Client, type InStatement, type Row } from '@libsql/c
 import type {
   Alert,
   AppConfig,
+  CalibrationRow,
   ChainAnalysis,
   DeliveryResult,
   DossierQuery,
   Logger,
+  OutcomeCandidate,
+  OutcomeRecord,
   ProvenanceReport,
   ProvenanceScore,
   ProvenanceStore,
@@ -25,9 +28,12 @@ import {
   alertRowArgs,
   chainRowArgs,
   EMPTY_STATS,
+  outcomeRowArgs,
   provenanceRowArgs,
   rowToAlert,
+  rowToCalibrationRow,
   rowToChainAnalysis,
+  rowToOutcomeCandidate,
   rowToProvenance,
   rowToRun,
   rowToScore,
@@ -773,6 +779,83 @@ export class LibsqlStore implements ProvenanceStore {
         args: setupRowArgs(setup),
       })),
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // outcomes (docs/calibration.md)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Full runs only: a launch-lane score is of a pool minutes old, a different
+   * population (runs from before `lane` was recorded count as full). The day
+   * probe is a range on the ISO strings, not substr(), so the index serves it.
+   */
+  async outcomeCandidates(query: { horizonHours: number; now?: string }): Promise<OutcomeCandidate[]> {
+    const nowMs = query.now ? Date.parse(query.now) : Date.now();
+    const cutoff = new Date(nowMs - query.horizonHours * 3_600_000).toISOString();
+    const rows = await this.all({
+      sql: `SELECT sc.token_id AS token_id, sc.run_id AS run_id, r.started_at AS scored_at,
+                   t.chain AS chain, t.address AS address,
+                   json_extract(sn.metrics_json, '$.liquidityUsd') AS liq_at_score,
+                   json_extract(sn.metrics_json, '$.priceUsd') AS price_at_score
+            FROM scores sc
+            JOIN runs r ON r.id = sc.run_id
+            JOIN snapshots sn ON sn.run_id = sc.run_id AND sn.token_id = sc.token_id
+            JOIN tokens t ON t.id = sc.token_id
+            WHERE r.started_at <= ?
+              AND coalesce(json_extract(r.stats_json, '$.lane'), 'full') = 'full'
+              AND json_extract(sn.metrics_json, '$.liquidityUsd') > 0
+              AND NOT EXISTS (
+                SELECT 1 FROM outcomes o
+                WHERE o.token_id = sc.token_id AND o.horizon_h = ?
+                  AND o.scored_at >= substr(r.started_at, 1, 10)
+                  AND o.scored_at < date(r.started_at, '+1 day'))
+            ORDER BY r.started_at DESC, sc.run_id DESC, sc.token_id ASC`,
+      args: [cutoff, Math.trunc(query.horizonHours)],
+    });
+    return rows.map((row) => rowToOutcomeCandidate(row as SqlRow));
+  }
+
+  async saveOutcomes(records: OutcomeRecord[]): Promise<void> {
+    await this.write(
+      records.map((record) => ({
+        sql: `INSERT INTO outcomes (token_id, run_id, horizon_h, scored_at, measured_at, liq_at_score, liq_now,
+                price_at_score, price_now, pair_found, survived)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(token_id, run_id, horizon_h) DO UPDATE SET
+                measured_at = excluded.measured_at,
+                liq_now = excluded.liq_now,
+                price_now = excluded.price_now,
+                pair_found = excluded.pair_found,
+                survived = excluded.survived`,
+        args: outcomeRowArgs(record),
+      })),
+    );
+  }
+
+  /**
+   * The report a score was computed on is the token's latest one written at or
+   * before the score: the same run's row when it was fresh, an earlier one
+   * when the worker reused it inside the TTL.
+   */
+  async calibrationRows(horizonHours: number): Promise<CalibrationRow[]> {
+    const rows = await this.all({
+      sql: `SELECT o.token_id AS token_id, o.run_id AS run_id, o.scored_at AS scored_at, o.survived AS survived,
+                   sc.total AS total, sc.tier AS tier, sc.components_json AS components_json,
+                   p.recycle_generation AS recycle_generation,
+                   json_extract(p.report_json, '$.organic.verdict') AS organic_verdict,
+                   lower(p.meme_name) AS meme, p.narrative_cluster AS narrative_cluster
+            FROM outcomes o
+            JOIN scores sc ON sc.run_id = o.run_id AND sc.token_id = o.token_id
+            LEFT JOIN provenance p ON p.id = (
+              SELECT p2.id FROM provenance p2
+              WHERE p2.token_id = o.token_id AND p2.created_at <= sc.computed_at
+              ORDER BY p2.created_at DESC LIMIT 1)
+            WHERE o.horizon_h = ?
+            ORDER BY o.scored_at ASC, o.token_id ASC`,
+      args: [Math.trunc(horizonHours)],
+    });
+    return rows.map((row) => rowToCalibrationRow(row as SqlRow, this.logger));
   }
 
   // -------------------------------------------------------------------------

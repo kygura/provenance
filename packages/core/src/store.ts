@@ -1,7 +1,7 @@
 import type { Alert, DeliveryResult } from './alerts';
 import type { TokenSnapshot } from './market';
 import type { ChainAnalysis } from './onchain';
-import type { ProvenanceReport, ProvenanceScore } from './provenance';
+import type { OrganicVerdict, ProvenanceReport, ProvenanceScore, ScoreComponents, ScoreTier } from './provenance';
 import type { SocialFirstSeen, SocialSighting, SocialStats } from './social';
 import type { WatchEntry, WatchQuery } from './watchlist';
 
@@ -31,6 +31,72 @@ export interface RunStats {
   launches?: LaunchStats;
   /** Crypto-social step. Absent on runs from before it existed. */
   social?: SocialStats;
+  /** Outcome labelling step (docs/calibration.md). Absent when it did not run. */
+  outcomes?: OutcomeStats;
+}
+
+export interface OutcomeStats {
+  /** Scored (run, token) pairs past the horizon and not yet labelled, after the one-per-day dedupe. */
+  pending: number;
+  /** Labelled this run. */
+  measured: number;
+  survived: number;
+  /** Labelled with no pair found at all. */
+  notFound: number;
+}
+
+/**
+ * A scored (run, token) old enough to label, with the market as it stood
+ * when it was scored. Only rows whose snapshot had a liquidity reading are
+ * candidates: survival is defined against it.
+ */
+export interface OutcomeCandidate {
+  tokenId: string;
+  chain: string;
+  address: string;
+  runId: string;
+  /** The run's `started_at`. */
+  scoredAt: string;
+  liqAtScore: number;
+  priceAtScore?: number;
+}
+
+/**
+ * The forward look at one scored token: did its deepest pool keep at least
+ * half of the liquidity it had when scored (docs/calibration.md)?
+ */
+export interface OutcomeRecord {
+  tokenId: string;
+  runId: string;
+  /** Nominal horizon. `measuredAt - scoredAt` is the real one, and can be longer on a backlog. */
+  horizonH: number;
+  scoredAt: string;
+  measuredAt: string;
+  liqAtScore: number;
+  liqNow?: number;
+  priceAtScore?: number;
+  priceNow?: number;
+  /** False when DexScreener returned no pair for the token at all. */
+  pairFound: boolean;
+  survived: boolean;
+}
+
+/** One labelled score with the report it was scored on: the calibration input. */
+export interface CalibrationRow {
+  tokenId: string;
+  runId: string;
+  scoredAt: string;
+  total: number;
+  tier: ScoreTier;
+  components: ScoreComponents;
+  /** Absent when the token was scored without a report. */
+  recycleGeneration?: number;
+  /** Absent on pre-v4 reports and report-less scores. */
+  organicVerdict?: OrganicVerdict;
+  /** lower(meme_name). */
+  meme?: string;
+  narrativeCluster?: string;
+  survived: boolean;
 }
 
 export interface LaunchStats {
@@ -117,6 +183,18 @@ export interface ProvenanceStore {
   recordSocialSightings(sightings: SocialSighting[]): Promise<void>;
   /** Earliest sighting per token, across platforms. Unsighted ids are absent. */
   socialFirstSeen(tokenIds: string[]): Promise<SocialFirstSeen[]>;
+
+  /**
+   * Scored (run, token) pairs from full-lane runs that started at least
+   * `horizonHours` before `now` and have no outcome at that horizon on the
+   * same UTC day yet. Every such row, newest first: the caller picks one per
+   * token per day (one day's hourly runs must not count as many outcomes).
+   */
+  outcomeCandidates(query: { horizonHours: number; now?: string }): Promise<OutcomeCandidate[]>;
+  /** Upserts on (token_id, run_id, horizon_h). */
+  saveOutcomes(records: OutcomeRecord[]): Promise<void>;
+  /** Every labelled score at `horizonHours`, joined to the report it was scored on. */
+  calibrationRows(horizonHours: number): Promise<CalibrationRow[]>;
 
   /** Cache for fetched evidence pages, keyed by URL hash. */
   getCachedEvidence(key: string, maxAgeHours: number): Promise<string | null>;

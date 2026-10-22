@@ -18,6 +18,8 @@ export const COMMANDS = [
   'report',
   'brief',
   'cadence',
+  'outcomes',
+  'calibrate',
   'help',
   'version',
 ] as const;
@@ -37,6 +39,7 @@ export const BOOLEAN_FLAGS = [
   'no-llm',
   'verbose',
   'no-color',
+  'json',
   'help',
   'version',
 ] as const;

@@ -37,6 +37,14 @@ import { type SetupStore, briefAlerts, briefSettings, runBrief, usableModels, wr
 import type { SqlExecutor } from './brief/queries';
 import type { FetchLike } from './brief/regime';
 import { runPipeline } from './pipeline';
+import { collectOutcomes, onePerTokenDay } from './outcomes';
+import {
+  DEFAULT_GENERATION_BONUS,
+  DEFAULT_WEIGHTS,
+  calibrate,
+  formatCalibration,
+  resolveScoringOverrides,
+} from '@provenance/alerts';
 import { RUN_HISTORY_LIMIT, decideCadence, inSlot } from './cadence';
 import {
   type ReportFormat,
@@ -74,6 +82,10 @@ commands:
                            writes only the setups table, delivers through the alert channels
   cadence                  is this hour due a full run? reads stored runs, writes nothing;
                            sets due=true|false in $GITHUB_OUTPUT for the hourly workflow
+  outcomes                 label scores older than OUTCOME_HORIZON_HOURS from DexScreener
+                           (the full run's last step, on its own); --dry-run: count only
+  calibrate                fit the score's components to the outcomes; reads only, writes nothing,
+                           suggests SCORE_WEIGHTS / GENERATION_BONUS (docs/calibration.md)
   help, version
 
 options:
@@ -88,6 +100,7 @@ options:
   --verdict anchored|forced|unclear            watchlist: filter by verdict
   --lane launches          run: the launch lane only (the 30-minute cadence)
   --format table|json|markdown
+  --json                   calibrate: print the report as JSON
   --verbose, -v            debug logging
   --no-color               disable ANSI colour (also honoured: NO_COLOR)
 `;
@@ -291,7 +304,7 @@ async function cmdAnalyze(
       provenance = (await store.latestProvenance(snapshot.tokenId)) ?? undefined;
     }
 
-    const score = deps.scoreToken({ snapshot, chain, provenance });
+    const score = deps.scoreToken({ snapshot, chain, provenance }, app.scoring);
     const history = await store.scoreHistory(snapshot.tokenId);
     const alerts = deps.createAlerts(
       newRunId(),
@@ -445,6 +458,67 @@ async function cmdBrief(
   }
 }
 
+async function cmdOutcomes(
+  app: AppConfig,
+  parsed: ParsedArgs,
+  logger: Logger,
+  deps: PipelineDeps,
+  style: Style,
+): Promise<number> {
+  const store = deps.createStore(app);
+  try {
+    await store.migrate();
+    const horizonHours = app.outcomes.horizonHours;
+    if (flagBool(parsed.flags, 'dry-run')) {
+      const pending = onePerTokenDay(await store.outcomeCandidates({ horizonHours }));
+      print(style.dim(`dry run: ${pending.length} score(s) past ${horizonHours} h await a label; nothing fetched`));
+      return EXIT_OK;
+    }
+    if (!deps.createPairFetcher) {
+      console.error(style.red('error: no DexScreener fetcher wired into this build'));
+      return EXIT_FAILED;
+    }
+    const result = await collectOutcomes(app, store, deps.createPairFetcher(app, logger), logger.child('outcomes'));
+    const { stats } = result;
+    print(
+      `${style.bold('outcomes')} ${style.dim(`horizon=${horizonHours}h pending=${stats.pending} measured=${stats.measured} survived=${stats.survived} no-pair=${stats.notFound}`)}`,
+    );
+    for (const failure of result.errors) print(style.yellow(`! ${failure.source}: ${failure.error}`));
+    return result.errors.length > 0 && stats.measured === 0 && stats.pending > 0 ? EXIT_FAILED : EXIT_OK;
+  } finally {
+    await store.close().catch(() => undefined);
+  }
+}
+
+/** Read-only: no migrate, no writes. A suggestion is applied by a person, through the env. */
+async function cmdCalibrate(app: AppConfig, parsed: ParsedArgs, deps: PipelineDeps, style: Style): Promise<number> {
+  const store = deps.createStore(app);
+  try {
+    let rows;
+    try {
+      rows = await store.calibrationRows(app.outcomes.horizonHours);
+    } catch (error) {
+      if (/no such table/i.test(errorMessage(error))) {
+        console.error(style.red('error: no outcomes table yet; run `migrate`, then let full runs label scores (docs/calibration.md)'));
+        return EXIT_FAILED;
+      }
+      throw error;
+    }
+    const overrides = resolveScoringOverrides(app.scoring);
+    for (const warning of overrides.warnings) print(style.yellow(`! ${warning}`));
+    const report = calibrate(rows, {
+      minRows: app.outcomes.calibrationMinRows,
+      currentWeights: overrides.options.weights ?? DEFAULT_WEIGHTS,
+      currentGenerationBonus: overrides.options.generationBonus ?? DEFAULT_GENERATION_BONUS,
+      horizonHours: app.outcomes.horizonHours,
+    });
+    print(flagBool(parsed.flags, 'json') ? JSON.stringify(report, null, 2) : formatCalibration(report));
+    return EXIT_OK;
+  } finally {
+    await store.close().catch(() => undefined);
+  }
+}
+
 /**
  * The hourly workflow's gate. Always exits 0 with an answer: a database that
  * cannot be read falls back to the base slots, which is the old schedule.
@@ -562,6 +636,10 @@ export async function main(
         return await cmdBrief(app, parsed, logger, deps, style, env, overrides.fetch);
       case 'cadence':
         return await cmdCadence(app, logger, deps, style, env, overrides.nowMs);
+      case 'outcomes':
+        return await cmdOutcomes(app, parsed, logger, deps, style);
+      case 'calibrate':
+        return await cmdCalibrate(app, parsed, deps, style);
       default:
         print(HELP);
         return EXIT_CONFIG;

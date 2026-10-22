@@ -284,6 +284,34 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_setups_updated_at ON setups (updated_at DESC)`,
     ],
   },
+  {
+    version: 6,
+    name: 'outcomes',
+    statements: [
+      // ---- outcomes -----------------------------------------------------------
+      // The forward look at a scored token (docs/calibration.md): what its
+      // deepest pool held `horizon_h` hours after the run that scored it. Keyed
+      // by (token, run, horizon) so a second horizon can be added without a
+      // migration. No foreign keys: a label is a measurement of the market,
+      // and must outlive the run being pruned.
+      `CREATE TABLE IF NOT EXISTS outcomes (
+  token_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  horizon_h INTEGER NOT NULL,
+  scored_at TEXT NOT NULL,
+  measured_at TEXT NOT NULL,
+  liq_at_score REAL,
+  liq_now REAL,
+  price_at_score REAL,
+  price_now REAL,
+  pair_found INTEGER NOT NULL,
+  survived INTEGER NOT NULL,
+  PRIMARY KEY (token_id, run_id, horizon_h)
+)`,
+      // The "this token/day is already labelled" probe behind outcomeCandidates().
+      `CREATE INDEX IF NOT EXISTS idx_outcomes_token_scored ON outcomes (token_id, horizon_h, scored_at)`,
+    ],
+  },
 ];
 
 const BOOKKEEPING = `CREATE TABLE IF NOT EXISTS schema_migrations (

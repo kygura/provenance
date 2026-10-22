@@ -303,6 +303,33 @@ export interface CadenceConfig {
 
 export type CadenceLevel = 'base' | 'elevated' | 'peak';
 
+/**
+ * Outcome labelling and calibration (docs/calibration.md). A scored token is
+ * looked up again `horizonHours` later; `cli.ts calibrate` fits the score's
+ * components against those labels and only ever suggests.
+ */
+export interface OutcomesConfig {
+  /** The labelling step at the end of a full run. Never on in a dry run. */
+  enabled: boolean;
+  horizonHours: number;
+  /** DexScreener lookups per run, at 30 tokens a request. */
+  maxPerRun: number;
+  /** Below this many labels, or 30 in either class, calibration suggests nothing. */
+  calibrationMinRows: number;
+}
+
+/**
+ * Opt-in overrides for the score, as the raw JSON from the environment.
+ * Parsed and validated in packages/alerts/src/scoring.ts (`resolveScoringOverrides`),
+ * where `assertWeights` lives; an invalid value there falls back to the defaults.
+ */
+export interface ScoringConfig {
+  /** SCORE_WEIGHTS: a JSON ScoreWeights object. */
+  weights?: string;
+  /** GENERATION_BONUS: a JSON array of 5 numbers, generation 0, 1, 2, 3, 4+. */
+  generationBonus?: string;
+}
+
 export interface AppConfig {
   databaseUrl: string;
   databaseAuthToken?: string;
@@ -318,6 +345,8 @@ export interface AppConfig {
   rpc: ChainRpcConfig;
   alerts: AlertConfig;
   cadence: CadenceConfig;
+  outcomes: OutcomesConfig;
+  scoring: ScoringConfig;
   /** Root for fixtures, artifacts and the local sqlite file. */
   dataDir: string;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
@@ -564,6 +593,16 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       fileSink: env.ALERT_FILE_SINK,
     },
     cadence: { mode: cadenceMode(env.CADENCE_MODE) },
+    outcomes: {
+      enabled: bool(env.OUTCOMES_ENABLED, true),
+      horizonHours: num(env.OUTCOME_HORIZON_HOURS, 72),
+      maxPerRun: num(env.OUTCOME_MAX_PER_RUN, 90),
+      calibrationMinRows: num(env.CALIBRATION_MIN_ROWS, 200),
+    },
+    scoring: {
+      weights: env.SCORE_WEIGHTS || undefined,
+      generationBonus: env.GENERATION_BONUS || undefined,
+    },
   };
 }
 

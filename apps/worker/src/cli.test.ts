@@ -164,3 +164,38 @@ describe('commands', () => {
     expect(out).toContain('DISCORD_WEBHOOK_URL');
   });
 });
+
+describe('outcomes and calibrate', () => {
+  test('calibrate reads labels and prints a report; --json prints the JSON; it writes nothing', async () => {
+    const harness = makeHarness();
+    harness.store.calibration = Array.from({ length: 5 }, (_, i) => ({
+      tokenId: `solana:t${i}`,
+      runId: 'r',
+      scoredAt: '2026-10-01T06:00:00.000Z',
+      total: 60,
+      tier: 'B' as const,
+      components: { recycling: 50, memetic: 50, distribution: 50, liquidity: 50, momentum: 50, authenticity: 50 },
+      survived: i < 2,
+    }));
+    const text = await run(['calibrate'], { deps: harness.deps });
+    expect(text.code).toBe(EXIT_OK);
+    expect(text.out).toContain('calibration · insufficient · 5 labelled at 72 h');
+    const json = await run(['calibrate', '--json'], { deps: harness.deps });
+    expect(JSON.parse(json.out)).toMatchObject({ status: 'insufficient', n: 5, survived: 2 });
+    expect(harness.store.calls.filter((call) => call !== 'calibrationRows' && call !== 'close')).toEqual([]);
+  });
+
+  test('outcomes --dry-run counts pending labels without fetching', async () => {
+    const harness = makeHarness();
+    harness.store.candidates = [
+      { tokenId: 'solana:a', chain: 'solana', address: 'a', runId: 'r1', scoredAt: '2026-10-18T06:00:00.000Z', liqAtScore: 1 },
+      { tokenId: 'solana:a', chain: 'solana', address: 'a', runId: 'r2', scoredAt: '2026-10-18T07:00:00.000Z', liqAtScore: 1 },
+    ];
+    harness.deps.createPairFetcher = () => {
+      throw new Error('must not fetch');
+    };
+    const { code, out } = await run(['outcomes', '--dry-run'], { deps: harness.deps });
+    expect(code).toBe(EXIT_OK);
+    expect(out).toContain('1 score(s) past 72 h await a label');
+  });
+});

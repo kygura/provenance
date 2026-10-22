@@ -8,7 +8,11 @@ export {
   assessRisk,
   capTier,
   createScorer,
+  DEFAULT_GENERATION_BONUS,
   DEFAULT_WEIGHTS,
+  generationBucket,
+  MAX_GENERATION_BONUS,
+  resolveScoringOverrides,
   EXTREME_CONCENTRATION_PCT,
   FORCED_PENALTY,
   MANUFACTURED_PENALTY,
@@ -38,7 +42,31 @@ export {
   type RiskAssessment,
   type ScoreOptions,
   type ScoreWeights,
+  type ScoringOverrides,
 } from './scoring';
+
+// Calibration (docs/calibration.md)
+export {
+  auc,
+  calibrate,
+  COMPONENT_KEYS,
+  DEFAULT_MIN_PER_CLASS,
+  DEFAULT_MIN_ROWS,
+  fitLogistic,
+  formatCalibration,
+  GENERATION_LABELS,
+  generationTable,
+  memeCurves,
+  MIN_GENERATION_BUCKET,
+  suggestGenerationBonus,
+  suggestWeights,
+  type CalibrationOptions,
+  type CalibrationReport,
+  type ComponentFit,
+  type GenerationCell,
+  type MemeCurve,
+  type RateCell,
+} from './calibrate';
 
 // Alert bodies
 export {

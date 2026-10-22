@@ -9,10 +9,13 @@ import {
   type AlertRule,
   type AlertRuleInput,
   type AppConfig,
+  type CalibrationRow,
   type ChainAnalysis,
   type DeliveryResult,
   type DossierQuery,
   type EvidenceItem,
+  type OutcomeCandidate,
+  type OutcomeRecord,
   type ProvenanceReport,
   type ProvenanceScore,
   type ProvenanceStore,
@@ -153,6 +156,10 @@ export class FakeStore implements ProvenanceStore {
   readonly evidenceCache = new Map<string, string>();
   readonly watch = new Map<string, WatchEntry>();
   readonly sightings: SocialSighting[] = [];
+  /** What `outcomeCandidates` returns, minus anything already in `outcomes`. */
+  candidates: OutcomeCandidate[] = [];
+  readonly outcomes: OutcomeRecord[] = [];
+  calibration: CalibrationRow[] = [];
   closed = false;
   /** Set to make a specific method reject, for failure-isolation tests. */
   failOn?: { method: string; times?: number };
@@ -335,6 +342,22 @@ export class FakeStore implements ProvenanceStore {
       });
     }
     return out;
+  }
+
+  async outcomeCandidates(): Promise<OutcomeCandidate[]> {
+    this.guard('outcomeCandidates');
+    const done = new Set(this.outcomes.map((o) => `${o.tokenId}|${o.scoredAt.slice(0, 10)}`));
+    return this.candidates.filter((c) => !done.has(`${c.tokenId}|${c.scoredAt.slice(0, 10)}`));
+  }
+
+  async saveOutcomes(records: OutcomeRecord[]): Promise<void> {
+    this.guard('saveOutcomes');
+    this.outcomes.push(...records);
+  }
+
+  async calibrationRows(): Promise<CalibrationRow[]> {
+    this.guard('calibrationRows');
+    return this.calibration;
   }
 
   async close(): Promise<void> {

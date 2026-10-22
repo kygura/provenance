@@ -26,6 +26,7 @@ import {
   type ScoreComponents,
   type ScoreTier,
   type Scorer,
+  type ScoringConfig,
   type ScoringInput,
   type TokenSnapshot,
   type TxnCounts,
@@ -153,13 +154,26 @@ export const VERDICT_EVIDENCE_MULTIPLIER: Record<RecycleVerdict, number> = {
   unclear: 0.3,
 };
 
-/** Generation bonus. Gen 2-3 is the sweet spot; past that the meme is fatigued. */
-function generationBonus(generation: number | undefined): number {
+/**
+ * Generation bonus for generation 0, 1, 2, 3 and 4+. Gen 2-3 is the sweet
+ * spot; past that the meme is fatigued. A belief, not a measurement:
+ * `cli.ts calibrate` derives a table from outcomes, and GENERATION_BONUS
+ * applies one (docs/calibration.md).
+ */
+export const DEFAULT_GENERATION_BONUS: readonly number[] = [0, 7, 10, 10, 6];
+
+/** Upper bound on any one generation's bonus, so an override cannot outweigh the verdict base. */
+export const MAX_GENERATION_BONUS = 15;
+
+/** Index into the bonus table: 0, 1, 2, 3, 4+. Fractional generations round down, as the old cut points did. */
+export function generationBucket(generation: number | undefined): number {
   const gen = finite(generation);
   if (gen === undefined || gen <= 0) return 0;
-  if (gen < 2) return 7;
-  if (gen < 4) return 10;
-  return 6;
+  return Math.min(4, Math.max(1, Math.floor(gen)));
+}
+
+function generationBonus(generation: number | undefined, table: readonly number[] = DEFAULT_GENERATION_BONUS): number {
+  return table[generationBucket(generation)] ?? 0;
 }
 
 /**
@@ -171,6 +185,7 @@ function generationBonus(generation: number | undefined): number {
 export function scoreRecycling(
   report?: ProvenanceReport,
   nowYear: number = new Date().getUTCFullYear(),
+  generationTable: readonly number[] = DEFAULT_GENERATION_BONUS,
 ): number {
   if (!report) return NEUTRAL.recycling;
 
@@ -218,7 +233,7 @@ export function scoreRecycling(
     else recencyBonus = -8;
   }
 
-  const evidence = countBonus + outcomeBonus + recencyBonus + generationBonus(report.recycleGeneration);
+  const evidence = countBonus + outcomeBonus + recencyBonus + generationBonus(report.recycleGeneration, generationTable);
   return pct(base + multiplier * evidence, NEUTRAL.recycling);
 }
 
@@ -593,10 +608,14 @@ export const LOW_CONFIDENCE_THRESHOLD = 0.45;
 // ---------------------------------------------------------------------------
 
 /** All six components for an input, before weighting. Pure. */
-export function scoreComponents(input: ScoringInput, nowYear?: number): ScoreComponents {
+export function scoreComponents(
+  input: ScoringInput,
+  nowYear?: number,
+  generationTable?: readonly number[],
+): ScoreComponents {
   const metrics = input.snapshot?.metrics;
   return {
-    recycling: scoreRecycling(input.provenance, nowYear),
+    recycling: scoreRecycling(input.provenance, nowYear, generationTable),
     memetic: scoreMemetic(input.provenance),
     distribution: scoreDistribution(input.chain),
     liquidity: scoreLiquidity(metrics),
@@ -607,6 +626,8 @@ export function scoreComponents(input: ScoringInput, nowYear?: number): ScoreCom
 
 export interface ScoreOptions {
   weights?: ScoreWeights;
+  /** Bonus for generation 0, 1, 2, 3, 4+; see `DEFAULT_GENERATION_BONUS`. */
+  generationBonus?: readonly number[];
   /** Injectable for deterministic tests. */
   now?: Date;
 }
@@ -624,7 +645,7 @@ export function scoreToken(input: ScoringInput, options: ScoreOptions = {}): Pro
   assertWeights(weights);
 
   const now = options.now ?? new Date();
-  const components = scoreComponents(input, now.getUTCFullYear());
+  const components = scoreComponents(input, now.getUTCFullYear(), options.generationBonus);
 
   const weighted =
     components.recycling * weights.recycling +
@@ -759,4 +780,54 @@ export function createScorer(weights?: Partial<ScoreWeights>): Scorer {
   return {
     score: (input: ScoringInput): ProvenanceScore => scoreToken(input, { weights: merged }),
   };
+}
+
+/** The opt-in overrides, validated, plus why any were refused. */
+export interface ScoringOverrides {
+  options: Pick<ScoreOptions, 'weights' | 'generationBonus'>;
+  warnings: string[];
+}
+
+/**
+ * SCORE_WEIGHTS and GENERATION_BONUS, as `loadConfig` read them. Applying a
+ * calibration is a person's decision, so an override that does not parse or
+ * validate is refused whole, with a warning, and the defaults score instead:
+ * half a weight vector is worse than the hand-set one.
+ */
+export function resolveScoringOverrides(config: ScoringConfig | undefined): ScoringOverrides {
+  const options: ScoringOverrides['options'] = {};
+  const warnings: string[] = [];
+
+  if (config?.weights) {
+    try {
+      const parsed = JSON.parse(config.weights) as ScoreWeights;
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('not an object');
+      const extra = Object.keys(parsed).filter((key) => !(key in DEFAULT_WEIGHTS));
+      if (extra.length > 0) throw new Error(`unknown component(s): ${extra.join(', ')}`);
+      assertWeights(parsed);
+      options.weights = { ...parsed };
+    } catch (error) {
+      warnings.push(`SCORE_WEIGHTS ignored, using the defaults: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (config?.generationBonus) {
+    try {
+      const parsed: unknown = JSON.parse(config.generationBonus);
+      if (
+        !Array.isArray(parsed) ||
+        parsed.length !== DEFAULT_GENERATION_BONUS.length ||
+        !parsed.every((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= MAX_GENERATION_BONUS)
+      ) {
+        throw new Error(`expected ${DEFAULT_GENERATION_BONUS.length} numbers in 0..${MAX_GENERATION_BONUS}`);
+      }
+      options.generationBonus = parsed as number[];
+    } catch (error) {
+      warnings.push(
+        `GENERATION_BONUS ignored, using the defaults: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return { options, warnings };
 }

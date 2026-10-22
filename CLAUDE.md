@@ -336,6 +336,42 @@ Meme names come from the model, so near-misses ("Neiro" vs "Neiro the
 dog") won't group. Also check each notable token's `rivals` from B: a rival
 named there but absent from H is one the pipeline never saw trend.
 
+**I. Calibration readiness.** `outcomes` labels old scores by whether the
+pool kept half its liquidity (`docs/calibration.md`).
+
+```sql
+SELECT horizon_h, count(*) AS n, sum(survived) AS survived,
+       sum(pair_found = 0) AS no_pair, max(measured_at) AS last_measured
+FROM outcomes GROUP BY horizon_h ORDER BY horizon_h;
+```
+
+The gate is n ≥ 200 with ≥ 30 in each class. Only when the 72 h row passes
+it, run these two:
+
+```sql
+SELECT coalesce(json_extract(p.report_json,'$.organic.verdict'),'unread') AS organic,
+       count(*) AS n, sum(o.survived) AS survived
+FROM outcomes o
+JOIN scores sc ON sc.run_id = o.run_id AND sc.token_id = o.token_id
+LEFT JOIN provenance p ON p.id = (
+  SELECT id FROM provenance WHERE token_id = o.token_id AND created_at <= sc.computed_at
+  ORDER BY created_at DESC LIMIT 1)
+WHERE o.horizon_h = 72 GROUP BY 1 ORDER BY n DESC;
+```
+
+```sql
+WITH l AS (
+  SELECT o.survived AS y, c.key AS component, c.value AS v
+  FROM outcomes o
+  JOIN scores sc ON sc.run_id = o.run_id AND sc.token_id = o.token_id,
+       json_each(sc.components_json) c
+  WHERE o.horizon_h = 72)
+SELECT p.component,
+       round(avg(CASE WHEN p.v > n.v THEN 1.0 WHEN p.v = n.v THEN 0.5 ELSE 0 END), 3) AS auc
+FROM l p JOIN l n ON n.component = p.component AND n.y = 0
+WHERE p.y = 1 GROUP BY p.component ORDER BY auc DESC;
+```
+
 ---
 
 ## 3. Analyse
@@ -419,6 +455,13 @@ impostor, manufactured at B+), then by size of change.
   carries the most outside traction, and whether the market (score, rank,
   liquidity) agrees. The Neiro pattern is the organic twin with less
   liquidity than the staged one; flag it when you see it.
+- **Calibration (I).** Below the gate, one line with the counts ("outcomes:
+  140 labelled, 52 survived; gate is 200"). Past it, report the top-AUC
+  component and whether `manufactured` survives less than `organic`, with
+  counts ("distribution leads, AUC 0.68; manufactured 9/61 survived vs
+  organic 40/88"). If manufactured does not survive less, say the penalty is
+  not yet supported by outcomes. Weights change only when someone sets
+  `SCORE_WEIGHTS`; don't suggest values here.
 
 ---
 

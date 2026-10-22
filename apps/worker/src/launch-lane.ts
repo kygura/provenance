@@ -317,7 +317,7 @@ export async function runLaunchLane(launches: TokenSnapshot[], ctx: LaunchLaneCo
       await store.saveSnapshot(ctx.runId, snapshot);
       if (chain) await store.saveChainAnalysis(ctx.runId, chain);
       if (report) await store.saveProvenance(ctx.runId, report);
-      await store.saveScore(ctx.runId, deps.scoreToken({ snapshot, chain, provenance: report }));
+      await store.saveScore(ctx.runId, deps.scoreToken({ snapshot, chain, provenance: report }, ctx.app.scoring));
       await store.saveWatch(entry);
       stats.catalogued += 1;
       return deps.launchAnchoredAlert(ctx.runId, entry, snapshot, chain, report);

@@ -1,5 +1,9 @@
 import type {
   Alert,
+  CalibrationRow,
+  OrganicVerdict,
+  OutcomeCandidate,
+  OutcomeRecord,
   AnalysisMethod,
   Chain,
   ChainAnalysis,
@@ -615,4 +619,62 @@ export function setupRowArgs(setup: Setup): (string | number | null)[] {
     setup.updatedAt,
     setup.expiresAt,
   ];
+}
+
+// ---------------------------------------------------------------------------
+// outcomes and calibration
+// ---------------------------------------------------------------------------
+
+const ORGANIC_VERDICTS: readonly OrganicVerdict[] = ['organic', 'manufactured', 'mixed', 'unclear'];
+
+export function rowToOutcomeCandidate(row: SqlRow): OutcomeCandidate {
+  const price = asNumber(row.price_at_score);
+  return {
+    tokenId: text(row.token_id),
+    chain: text(row.chain),
+    address: text(row.address),
+    runId: text(row.run_id),
+    scoredAt: text(row.scored_at),
+    liqAtScore: num(row.liq_at_score),
+    ...(price !== undefined ? { priceAtScore: price } : {}),
+  };
+}
+
+export function outcomeRowArgs(record: OutcomeRecord): (string | number | null)[] {
+  return [
+    record.tokenId,
+    record.runId,
+    record.horizonH,
+    record.scoredAt,
+    record.measuredAt,
+    record.liqAtScore,
+    record.liqNow ?? null,
+    record.priceAtScore ?? null,
+    record.priceNow ?? null,
+    record.pairFound ? 1 : 0,
+    record.survived ? 1 : 0,
+  ];
+}
+
+export function rowToCalibrationRow(row: SqlRow, logger: Logger = silentLogger): CalibrationRow {
+  const components = parseObject<Partial<ScoreComponents>>(row.components_json, 'scores.components_json', {}, logger);
+  const generation = asNumber(row.recycle_generation);
+  const organic = asText(row.organic_verdict);
+  const meme = asText(row.meme);
+  const cluster = asText(row.narrative_cluster);
+  return {
+    tokenId: text(row.token_id),
+    runId: text(row.run_id),
+    scoredAt: text(row.scored_at),
+    total: num(row.total),
+    tier: asTier(row.tier),
+    components: { ...ZERO_COMPONENTS, ...components },
+    ...(generation !== undefined ? { recycleGeneration: generation } : {}),
+    ...(organic && (ORGANIC_VERDICTS as readonly string[]).includes(organic)
+      ? { organicVerdict: organic as OrganicVerdict }
+      : {}),
+    ...(meme ? { meme } : {}),
+    ...(cluster ? { narrativeCluster: cluster } : {}),
+    survived: num(row.survived) === 1,
+  };
 }

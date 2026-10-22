@@ -44,6 +44,7 @@ import {
   spend,
   sweepDormant,
 } from './launch-lane';
+import { OUTCOMES_SOURCE, collectOutcomes } from './outcomes';
 import { collectSocial, emptySocialStats, isSocialSource, reconcileSocial } from './social';
 
 export interface RunOptions {
@@ -296,7 +297,7 @@ export async function runPipeline(
           }
         }
 
-        const score = resolved.scoreToken({ snapshot, chain, provenance });
+        const score = resolved.scoreToken({ snapshot, chain, provenance }, app.scoring);
         // Fetched before the new score lands so `history` is strictly prior runs.
         const history = await store.scoreHistory(snapshot.tokenId).catch(() => [] as ProvenanceScore[]);
         await store.saveScore(id, score);
@@ -360,6 +361,21 @@ export async function runPipeline(
         } catch (error) {
           log.error('failed to persist alert', { alert: alert.id, error: errorMessage(error) });
         }
+      }
+    }
+
+    // ---- Outcomes: label scores old enough to have one (docs/calibration.md) --
+    // Last, so it never delays an alert. Full lane only, and never in a dry
+    // run: it is the one step that writes labels from a network read.
+    const fetcherFor = resolved.createPairFetcher;
+    if (stats.lane === 'full' && app.outcomes.enabled && !app.pipeline.dryRun && fetcherFor) {
+      try {
+        const result = await collectOutcomes(app, store, fetcherFor(app, log), log.child('outcomes'));
+        stats.outcomes = result.stats;
+        stats.sourceErrors.push(...result.errors);
+      } catch (error) {
+        stats.sourceErrors.push({ source: OUTCOMES_SOURCE, error: errorMessage(error) });
+        log.error('outcome labelling failed', { error: errorMessage(error) });
       }
     }
 
@@ -428,8 +444,11 @@ export function resolveStatus(selectedCount: number, stats: RunStats): RunStatus
   // A catalogued launch is usable output too: a run whose trending sources all
   // failed but whose launch lane worked is degraded, not dead.
   const usable = stats.analysed + stats.reused + (stats.launches?.catalogued ?? 0);
-  // A failed social feed degrades a run but cannot fail a quiet one.
-  const fatal = stats.sourceErrors.filter((failure) => !isSocialSource(failure.source));
+  // A failed social feed or outcome lookup degrades a run but cannot fail a
+  // quiet one: both measure the pipeline, neither is its output.
+  const fatal = stats.sourceErrors.filter(
+    (failure) => !isSocialSource(failure.source) && failure.source !== OUTCOMES_SOURCE,
+  );
   if (selectedCount > 0 && usable === 0) return 'failed';
   if (selectedCount === 0 && usable === 0 && fatal.length > 0) return 'failed';
   if (stats.sourceErrors.length > 0) return 'partial';
