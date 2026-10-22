@@ -14,6 +14,7 @@ import {
   type PoolCreation,
   collectLaunches,
   estimateCreatedAt,
+  interleaveByChain,
   launchedSide,
   lookbackBlocks,
   parseFactoryLog,
@@ -169,6 +170,28 @@ describe('Base', () => {
       quoteAddress: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
       quoteSymbol: 'USDC',
     });
+  });
+});
+
+describe('interleaveByChain', () => {
+  const at = (chain: 'ethereum' | 'base', minute: number) =>
+    ({
+      chain,
+      tokenAddress: `${chain}-${minute}`,
+      createdAt: new Date(Date.UTC(2026, 9, 22, 12, minute)).toISOString(),
+      pool: { blockNumber: minute },
+    }) as unknown as Parameters<typeof interleaveByChain>[0][number][number];
+
+  test('a busy chain cannot take every slot', () => {
+    const base = Array.from({ length: 10 }, (_, i) => at('base', 30 + i));
+    const eth = [at('ethereum', 1), at('ethereum', 2)];
+    const picked = interleaveByChain([eth, base], 4).map((c) => c.tokenAddress);
+    expect(picked).toEqual(['base-39', 'ethereum-2', 'base-38', 'ethereum-1']);
+  });
+
+  test('a quiet chain leaves its slots to the others', () => {
+    const base = Array.from({ length: 5 }, (_, i) => at('base', 30 + i));
+    expect(interleaveByChain([[at('ethereum', 1)], base], 4)).toHaveLength(4);
   });
 });
 

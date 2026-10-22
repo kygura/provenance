@@ -286,6 +286,21 @@ export function collectLaunches(
   return [...byToken.values()].sort(newestFirst);
 }
 
+/**
+ * Takes the newest launch from each chain in turn until `limit`. A plain
+ * newest-first cut across chains hands every slot to the busiest chain: Base
+ * opens pools by the thousand a day and would starve Ethereum entirely.
+ */
+export function interleaveByChain(perChain: readonly LaunchCandidate[][], limit: number): LaunchCandidate[] {
+  const queues = perChain.map((list) => [...list].sort(newestFirst));
+  const out: LaunchCandidate[] = [];
+  for (let i = 0; out.length < limit && queues.some((queue) => i < queue.length); i += 1) {
+    const round = queues.flatMap((queue) => (i < queue.length ? [queue[i]!] : [])).sort(newestFirst);
+    out.push(...round.slice(0, limit - out.length));
+  }
+  return out;
+}
+
 function isEarlier(a: PoolCreation, b: PoolCreation): boolean {
   if (a.blockNumber !== b.blockNumber) return a.blockNumber < b.blockNumber;
   return (a.logIndex ?? Number.MAX_SAFE_INTEGER) < (b.logIndex ?? Number.MAX_SAFE_INTEGER);
@@ -520,10 +535,10 @@ export class LaunchSource implements TrendingSource {
         ? await this.scanFixtures(specs, ctx.app, capturedAt)
         : await this.scanNetwork(specs, ctx, config);
 
-      const launches = scans
-        .flatMap((scan) => collectLaunches(parseFactoryLogs(scan.logs, scan.spec), scan.spec, scan.head, scan.anchor))
-        .sort(newestFirst)
-        .slice(0, Math.max(0, config.limit));
+      const launches = interleaveByChain(
+        scans.map((scan) => collectLaunches(parseFactoryLogs(scan.logs, scan.spec), scan.spec, scan.head, scan.anchor)),
+        Math.max(0, config.limit),
+      );
 
       const pairRows = fixtures
         ? await this.hydrateFromFixtures(capturedAt)
