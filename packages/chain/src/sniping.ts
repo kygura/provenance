@@ -27,6 +27,9 @@ export const SNIPE_WINDOW_SECONDS = 36;
  */
 export const FORWARD_INBOUND_SHARE = 0.9;
 
+/** Hops from an early buyer that tokens are followed. */
+export const MAX_FORWARD_HOPS = 3;
+
 export interface PoolTransfer {
   block: number;
   from: string;
@@ -51,6 +54,11 @@ export interface SnipingInput {
   blockSeconds: number;
   /** Recipients that are not buyers: burn, routers, protocol contracts. */
   isExcluded?: (address: string) => boolean;
+  /**
+   * Contracts are never followed into: a second pool, a deposit or vesting
+   * contract is not a wallet the buyer still holds through. Unset means no check.
+   */
+  isContract?: (address: string) => boolean;
 }
 
 export function snipeWindowBlocks(blockSeconds: number): number {
@@ -66,6 +74,21 @@ function pctOf(raw: bigint, total: bigint): number {
  * a buy before any liquidity went in, which means the scan began mid-life.
  */
 export function measureSniping(input: SnipingInput): LaunchSniping | undefined {
+  return analyse(input, input.isContract ?? (() => false))?.sniping;
+}
+
+/**
+ * Wallets `measureSniping` could follow into, ignoring `isContract`: a superset
+ * of what it will follow, so callers can code-check just these.
+ */
+export function forwardCandidates(input: SnipingInput): string[] {
+  return analyse(input, () => false)?.forwarded ?? [];
+}
+
+function analyse(
+  input: SnipingInput,
+  isContract: (address: string) => boolean,
+): { sniping: LaunchSniping; forwarded: string[] } | undefined {
   const { pools, totalRaw } = input;
   if (totalRaw <= 0n || pools.size === 0) return undefined;
   const excluded = input.isExcluded ?? (() => false);
@@ -97,17 +120,19 @@ export function measureSniping(input: SnipingInput): LaunchSniping | undefined {
     sameBlockBuyers: sameBlock.size,
     earlyBuyPct: pctOf(boughtRaw, totalRaw),
   };
+  let forwarded: ReadonlySet<string> = new Set();
   if (input.balances) {
     const tracked = new Set(bought.keys());
+    forwarded = tracked;
     if (input.walletTransfers) {
       const inbound = new Map<string, bigint>();
       for (const t of input.walletTransfers) inbound.set(t.to, (inbound.get(t.to) ?? 0n) + t.value);
       const share = BigInt(Math.round(FORWARD_INBOUND_SHARE * 100));
-      for (let grew = true; grew; ) {
+      for (let hop = 0, grew = true; grew && hop < MAX_FORWARD_HOPS; hop++) {
         grew = false;
         const fed = new Map<string, bigint>();
         for (const t of input.walletTransfers) {
-          if (!tracked.has(t.from) || tracked.has(t.to) || pools.has(t.to) || excluded(t.to)) continue;
+          if (!tracked.has(t.from) || tracked.has(t.to) || pools.has(t.to) || excluded(t.to) || isContract(t.to)) continue;
           fed.set(t.to, (fed.get(t.to) ?? 0n) + t.value);
         }
         for (const [wallet, fromTracked] of fed) {
@@ -127,5 +152,5 @@ export function measureSniping(input: SnipingInput): LaunchSniping | undefined {
     }
     sniping.stillHeldPct = pctOf(held, totalRaw);
   }
-  return sniping;
+  return { sniping, forwarded: [...forwarded].filter((w) => !bought.has(w)) };
 }

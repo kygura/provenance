@@ -107,6 +107,24 @@ describe('measureSniping', () => {
       expect(s).toMatchObject({ stillHeldPct: 0, forwardedWallets: 0 });
     });
 
+    test('a forward contract is not followed into', () => {
+      const transfers = [...base, t(101, '0xa', '0xc0de', 100_000n)];
+      const s = measureSniping({
+        transfers: base, pools: new Set([POOL]), totalRaw: SUPPLY, blockSeconds: 12,
+        balances: new Map([['0xa', 0n], ['0xc0de', 100_000n]]), walletTransfers: transfers,
+        isContract: (a) => a === '0xc0de',
+      });
+      expect(s).toMatchObject({ stillHeldPct: 0, forwardedWallets: 0 });
+    });
+
+    test('hops are capped at three', () => {
+      const s = run(
+        [t(101, '0xa', '0xb', 1n), t(102, '0xb', '0xc', 1n), t(103, '0xc', '0xd', 1n), t(104, '0xd', '0xe', 1n)],
+        [['0xe', 100_000n]],
+      );
+      expect(s).toMatchObject({ forwardedWallets: 3, stillHeldPct: 0 });
+    });
+
     test('tokens sold back after forwarding still drop out', () => {
       const s = run(
         [t(101, '0xa', '0xf', 100_000n), t(102, '0xf', POOL, 100_000n)],

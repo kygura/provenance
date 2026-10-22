@@ -47,7 +47,7 @@ import { measureLp, type V3LpScope } from './lp';
 import { concentration } from './metrics';
 import { isEvmBurnAddress, labelIsExcluded, lookupEvmAddress } from './labels';
 import { Budget, RpcClient, type TransportProvider } from './rpc';
-import { measureSniping, snipeWindowBlocks, type PoolTransfer } from './sniping';
+import { forwardCandidates, measureSniping, snipeWindowBlocks, type PoolTransfer } from './sniping';
 
 export interface EvmAnalyzerOptions {
   /** Wall-clock ceiling for one token's analysis. */
@@ -245,6 +245,8 @@ export async function analyzeEvm(
   const poolAddresses = new Set(
     snapshot.pairs.filter((pair) => isAddress(pair.pairAddress)).map((pair) => normalizeAddress(pair.pairAddress)),
   );
+  /** Most forward-wallet candidates code-checked per token. */
+  const FORWARD_CODE_CHECKS = 50;
   const poolTransfers: PoolTransfer[] = [];
   const allTransfers: PoolTransfer[] = [];
   const seen = new Set<string>();
@@ -367,18 +369,36 @@ export async function analyzeEvm(
   // and say what the early buyers still hold.
   const isExcluded = (addr: string) =>
     isZeroAddress(addr) || isEvmBurnAddress(addr) || lookupEvmAddress(addr)?.label?.startsWith('protocol:') === true;
-  const sniping =
-    !truncated && Number.isFinite(created)
-      ? measureSniping({
-          transfers: poolTransfers,
-          pools: poolAddresses,
-          totalRaw,
-          balances,
-          walletTransfers: allTransfers,
-          blockSeconds: seconds,
-          isExcluded,
-        })
-      : undefined;
+  const snipingInput = {
+    transfers: poolTransfers,
+    pools: poolAddresses,
+    totalRaw,
+    balances,
+    walletTransfers: allTransfers,
+    blockSeconds: seconds,
+    isExcluded,
+  };
+  // Forward wallets must be EOAs: a second pool, deposit or vesting contract
+  // is not a wallet the buyer still holds through. Candidates the code check
+  // cannot cover (cap, budget, RPC failure) count as contracts.
+  let sniping: ReturnType<typeof measureSniping>;
+  if (!truncated && Number.isFinite(created)) {
+    const candidates = forwardCandidates(snipingInput).slice(0, FORWARD_CODE_CHECKS);
+    const wallets = new Set<string>();
+    if (candidates.length > 0 && !budget.expired()) {
+      try {
+        const codes = await client.callMany(
+          candidates.map((addr) => ({ method: 'eth_getCode', params: [addr, 'latest'] })),
+        );
+        candidates.forEach((addr, i) => {
+          if (codes[i]?.result === '0x') wallets.add(addr);
+        });
+      } catch {
+        // none verified: no forward wallet is followed
+      }
+    }
+    sniping = measureSniping({ ...snipingInput, isContract: (addr) => !wallets.has(addr) });
+  }
   if (sniping) {
     notes.push(
       `Early buying: ${sniping.earlyBuyPct.toFixed(1)}% of supply to ${sniping.earlyBuyers} wallet(s) in the first ` +
