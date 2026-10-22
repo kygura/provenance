@@ -20,6 +20,13 @@ import type { LaunchSniping } from '@provenance/core';
 /** Seconds of trading counted as "early": three Ethereum blocks. */
 export const SNIPE_WINDOW_SECONDS = 36;
 
+/**
+ * A wallet fed this share of its total inbound tokens by the tracked set joins
+ * it. Not 100%: a forward wallet that also bought a crumb from the pool to look
+ * organic still counts.
+ */
+export const FORWARD_INBOUND_SHARE = 0.9;
+
 export interface PoolTransfer {
   block: number;
   from: string;
@@ -35,6 +42,12 @@ export interface SnipingInput {
   totalRaw: bigint;
   /** Reconstructed balances, when the scan covered the token's whole life. */
   balances?: ReadonlyMap<string, bigint>;
+  /**
+   * Every Transfer of this token in the scan. With `balances`, early buyers'
+   * tokens are followed into wallets they fed, so moving them to a fresh wallet
+   * does not look like a sale.
+   */
+  walletTransfers?: readonly PoolTransfer[];
   blockSeconds: number;
   /** Recipients that are not buyers: burn, routers, protocol contracts. */
   isExcluded?: (address: string) => boolean;
@@ -85,9 +98,31 @@ export function measureSniping(input: SnipingInput): LaunchSniping | undefined {
     earlyBuyPct: pctOf(boughtRaw, totalRaw),
   };
   if (input.balances) {
+    const tracked = new Set(bought.keys());
+    if (input.walletTransfers) {
+      const inbound = new Map<string, bigint>();
+      for (const t of input.walletTransfers) inbound.set(t.to, (inbound.get(t.to) ?? 0n) + t.value);
+      const share = BigInt(Math.round(FORWARD_INBOUND_SHARE * 100));
+      for (let grew = true; grew; ) {
+        grew = false;
+        const fed = new Map<string, bigint>();
+        for (const t of input.walletTransfers) {
+          if (!tracked.has(t.from) || tracked.has(t.to) || pools.has(t.to) || excluded(t.to)) continue;
+          fed.set(t.to, (fed.get(t.to) ?? 0n) + t.value);
+        }
+        for (const [wallet, fromTracked] of fed) {
+          const total = inbound.get(wallet) ?? 0n;
+          if (fromTracked > 0n && fromTracked * 100n >= total * share) {
+            tracked.add(wallet);
+            grew = true;
+          }
+        }
+      }
+      sniping.forwardedWallets = tracked.size - bought.size;
+    }
     let held = 0n;
-    for (const buyer of bought.keys()) {
-      const balance = input.balances.get(buyer) ?? 0n;
+    for (const w of tracked) {
+      const balance = input.balances.get(w) ?? 0n;
       if (balance > 0n) held += balance;
     }
     sniping.stillHeldPct = pctOf(held, totalRaw);

@@ -49,8 +49,10 @@ export interface LaunchSniping {
   sameBlockBuyers: number;
   /** Share of total supply bought in the window, percent. */
   earlyBuyPct: number;
-  /** Share of total supply the early buyers still hold, percent. */
+  /** Share of total supply the early buyers, and wallets they fed, still hold, percent. */
   stillHeldPct?: number;
+  /** Extra wallets counted in `stillHeldPct`: fed by the early buyers. Set when forwards were followed. */
+  forwardedWallets?: number;
 }
 
 /**

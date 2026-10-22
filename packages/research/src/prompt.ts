@@ -280,7 +280,9 @@ function chainBlock(chain: ChainAnalysis | undefined): string {
     line('contract_verified', chain.contractVerified?.toString()),
     chain.sniping !== undefined
       ? `- early_buying: ${chain.sniping.earlyBuyPct.toFixed(2)}% of supply bought by ${chain.sniping.earlyBuyers} wallet(s) in the first ${chain.sniping.windowBlocks} block(s) of trading, ${chain.sniping.sameBlockBuyers} in the opening block${
-          chain.sniping.stillHeldPct !== undefined ? `; they still hold ${chain.sniping.stillHeldPct.toFixed(2)}%` : ''
+          chain.sniping.stillHeldPct !== undefined ? `; they still hold ${chain.sniping.stillHeldPct.toFixed(2)}%${
+            chain.sniping.forwardedWallets ? `, including ${chain.sniping.forwardedWallets} wallet(s) they forwarded tokens to` : ''
+          }` : ''
         }`
       : null,
     chain.funding !== undefined

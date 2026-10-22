@@ -11,7 +11,7 @@ function t(block: number, from: string, to: string, value: bigint): PoolTransfer
   return { block, from, to, value };
 }
 
-function measure(transfers: PoolTransfer[], balances?: Map<string, bigint>) {
+function measure(transfers: PoolTransfer[], balances?: Map<string, bigint>, walletTransfers?: PoolTransfer[]) {
   return measureSniping({
     transfers,
     pools: new Set([POOL]),
@@ -19,6 +19,7 @@ function measure(transfers: PoolTransfer[], balances?: Map<string, bigint>) {
     blockSeconds: 12,
     isExcluded: (address) => address === ROUTER,
     ...(balances ? { balances } : {}),
+    ...(walletTransfers ? { walletTransfers } : {}),
   });
 }
 
@@ -62,6 +63,57 @@ describe('measureSniping', () => {
     const sniping = measure([t(100, DEPLOYER, POOL, SUPPLY), t(100, POOL, '0xa', 10_000n)]);
     expect(sniping?.stillHeldPct).toBeUndefined();
     expect(sniping?.earlyBuyPct).toBe(1);
+  });
+
+  describe('following forwards', () => {
+    const base = [t(100, DEPLOYER, POOL, SUPPLY), t(100, POOL, '0xa', 100_000n)];
+    const run = (extra: PoolTransfer[], balances: [string, bigint][]) =>
+      measure(base, new Map(balances), [...base, ...extra]);
+
+    test('a fresh wallet fed by a buyer counts as held', () => {
+      const s = run([t(101, '0xa', '0xf', 100_000n)], [['0xa', 0n], ['0xf', 100_000n]]);
+      expect(s).toMatchObject({ stillHeldPct: 10, forwardedWallets: 1 });
+    });
+
+    test('chains A to B to C are followed', () => {
+      const s = run(
+        [t(101, '0xa', '0xb', 100_000n), t(102, '0xb', '0xc', 100_000n)],
+        [['0xa', 0n], ['0xb', 0n], ['0xc', 100_000n]],
+      );
+      expect(s).toMatchObject({ stillHeldPct: 10, forwardedWallets: 2 });
+    });
+
+    test('a wallet mostly fed by the pool is not included', () => {
+      const s = run(
+        [t(105, POOL, '0xg', 900_000n), t(106, '0xa', '0xg', 10_000n)],
+        [['0xa', 90_000n], ['0xg', 910_000n]],
+      );
+      expect(s).toMatchObject({ stillHeldPct: 9, forwardedWallets: 0 });
+    });
+
+    test('a crumb bought from the pool does not stop a forward wallet counting', () => {
+      const s = run(
+        [t(105, POOL, '0xf', 5_000n), t(106, '0xa', '0xf', 95_000n)],
+        [['0xa', 5_000n], ['0xf', 100_000n]],
+      );
+      expect(s).toMatchObject({ forwardedWallets: 1, stillHeldPct: 10.5 });
+    });
+
+    test('transfers to the pool or a router are not followed', () => {
+      const s = run(
+        [t(101, '0xa', POOL, 50_000n), t(101, '0xa', ROUTER, 50_000n)],
+        [['0xa', 0n], [ROUTER, 50_000n]],
+      );
+      expect(s).toMatchObject({ stillHeldPct: 0, forwardedWallets: 0 });
+    });
+
+    test('tokens sold back after forwarding still drop out', () => {
+      const s = run(
+        [t(101, '0xa', '0xf', 100_000n), t(102, '0xf', POOL, 100_000n)],
+        [['0xa', 0n], ['0xf', 0n]],
+      );
+      expect(s).toMatchObject({ stillHeldPct: 0, forwardedWallets: 1 });
+    });
   });
 });
 
