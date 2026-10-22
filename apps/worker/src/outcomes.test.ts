@@ -84,7 +84,7 @@ describe('collectOutcomes', () => {
     };
     const app = makeConfig();
     const result = await collectOutcomes({ ...app, outcomes: { ...app.outcomes, maxPerRun: 2 } }, store, fetch, silentLogger, NOW);
-    expect(result.stats).toEqual({ pending: 3, measured: 2, survived: 2, notFound: 0 });
+    expect(result.stats).toEqual({ pending: 3, measured: 2, survived: 2, notFound: 0, skipped: 0 });
     expect(calls).toEqual([[A]]);
     expect(store.outcomes.map((o) => o.scoredAt)).toEqual(['2026-10-19T06:00:00.000Z', '2026-10-18T06:00:00.000Z']);
   });
@@ -100,6 +100,22 @@ describe('collectOutcomes', () => {
     const result = await collectOutcomes(makeConfig(), store, fetch, silentLogger, NOW);
     expect(calls).toEqual([[B, A], [A]]);
     expect(result.stats).toMatchObject({ measured: 2, survived: 1, notFound: 1 });
+  });
+
+  test('addresses are URL-encoded, not filtered by pattern; only unusable ones are skipped and counted', async () => {
+    const store = new FakeStore();
+    const ton = 'EQD-abc_123:x';
+    store.candidates = [
+      candidate(ton, '2026-10-18T06:00:00.000Z', { chain: 'ton' }),
+      candidate('bad address', '2026-10-18T06:00:00.000Z'),
+    ];
+    const calls: string[][] = [];
+    const result = await collectOutcomes(makeConfig(), store, async (addresses) => {
+      calls.push(addresses);
+      return { pairs: [pair(ton, 10, 1, 'ton')] };
+    }, silentLogger, NOW);
+    expect(calls).toEqual([[ton]]);
+    expect(result.stats).toMatchObject({ pending: 1, skipped: 1, measured: 1 });
   });
 
   test('a failed lookup leaves the scores pending: a network error is not a dead token', async () => {
@@ -127,7 +143,7 @@ describe('outcome step in the pipeline', () => {
     const h = harness(async () => ({ pairs: [pair(A, 60_000)] }));
     const record = await runPipeline(makeConfig(), silentLogger, h.deps, { runId: 'r', skipLlm: true });
     expect(record.status).toBe('ok');
-    expect(record.stats.outcomes).toEqual({ pending: 1, measured: 1, survived: 1, notFound: 0 });
+    expect(record.stats.outcomes).toEqual({ pending: 1, measured: 1, survived: 1, notFound: 0, skipped: 0 });
     expect(h.store.calls.indexOf('saveOutcomes')).toBeLessThan(h.store.calls.indexOf('finishRun'));
   });
 

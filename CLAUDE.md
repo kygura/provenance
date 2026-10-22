@@ -337,39 +337,53 @@ dog") won't group. Also check each notable token's `rivals` from B: a rival
 named there but absent from H is one the pipeline never saw trend.
 
 **I. Calibration readiness.** `outcomes` labels old scores by whether the
-pool kept half its liquidity (`docs/calibration.md`).
+pool kept half its liquidity (`docs/calibration.md`). Count tokens, not rows:
+a token labelled on ten days is one outcome, taken from its earliest label.
+Labels measured more than 132 h (1.5 × 72 + 24) after the score don't count.
 
 ```sql
-SELECT horizon_h, count(*) AS n, sum(survived) AS survived,
-       sum(pair_found = 0) AS no_pair, max(measured_at) AS last_measured
-FROM outcomes GROUP BY horizon_h ORDER BY horizon_h;
+WITH t AS (
+  SELECT token_id, survived, pair_found,
+         row_number() OVER (PARTITION BY token_id ORDER BY scored_at) AS k
+  FROM outcomes
+  WHERE horizon_h = 72 AND (julianday(measured_at) - julianday(scored_at)) * 24 <= 132)
+SELECT count(*) AS tokens, sum(survived) AS survived, sum(pair_found = 0) AS no_pair,
+       (SELECT count(*) FROM outcomes WHERE horizon_h = 72) AS rows
+FROM t WHERE k = 1;
 ```
 
-The gate is n ≥ 200 with ≥ 30 in each class. Only when the 72 h row passes
-it, run these two:
+The gate is ≥ 200 tokens with ≥ 30 in each class. Only when it passes, run
+these two:
 
 ```sql
+WITH t AS (
+  SELECT o.survived, sc.computed_at, o.token_id, sc.components_json,
+         row_number() OVER (PARTITION BY o.token_id ORDER BY o.scored_at) AS k
+  FROM outcomes o JOIN scores sc ON sc.run_id = o.run_id AND sc.token_id = o.token_id
+  WHERE o.horizon_h = 72 AND (julianday(o.measured_at) - julianday(o.scored_at)) * 24 <= 132)
 SELECT coalesce(json_extract(p.report_json,'$.organic.verdict'),'unread') AS organic,
-       count(*) AS n, sum(o.survived) AS survived
-FROM outcomes o
-JOIN scores sc ON sc.run_id = o.run_id AND sc.token_id = o.token_id
-LEFT JOIN provenance p ON p.id = (
-  SELECT id FROM provenance WHERE token_id = o.token_id AND created_at <= sc.computed_at
+       count(*) AS tokens, sum(t.survived) AS survived
+FROM t LEFT JOIN provenance p ON p.id = (
+  SELECT id FROM provenance WHERE token_id = t.token_id AND created_at <= t.computed_at
   ORDER BY created_at DESC LIMIT 1)
-WHERE o.horizon_h = 72 GROUP BY 1 ORDER BY n DESC;
+WHERE t.k = 1 GROUP BY 1 ORDER BY tokens DESC;
 ```
 
 ```sql
-WITH l AS (
-  SELECT o.survived AS y, c.key AS component, c.value AS v
-  FROM outcomes o
-  JOIN scores sc ON sc.run_id = o.run_id AND sc.token_id = o.token_id,
-       json_each(sc.components_json) c
-  WHERE o.horizon_h = 72)
-SELECT p.component,
-       round(avg(CASE WHEN p.v > n.v THEN 1.0 WHEN p.v = n.v THEN 0.5 ELSE 0 END), 3) AS auc
-FROM l p JOIN l n ON n.component = p.component AND n.y = 0
-WHERE p.y = 1 GROUP BY p.component ORDER BY auc DESC;
+WITH t AS (
+  SELECT o.survived AS y, sc.components_json,
+         row_number() OVER (PARTITION BY o.token_id ORDER BY o.scored_at) AS k
+  FROM outcomes o JOIN scores sc ON sc.run_id = o.run_id AND sc.token_id = o.token_id
+  WHERE o.horizon_h = 72 AND (julianday(o.measured_at) - julianday(o.scored_at)) * 24 <= 132),
+l AS (SELECT t.y, c.key AS component, c.value AS v FROM t, json_each(t.components_json) c WHERE t.k = 1),
+r AS (
+  SELECT component, y,
+         rank() OVER (PARTITION BY component ORDER BY v)
+           + (count(*) OVER (PARTITION BY component, v) - 1) / 2.0 AS rk
+  FROM l)
+SELECT component, count(*) AS tokens,
+       round((sum(rk * y) - sum(y) * (sum(y) + 1) / 2.0) / (sum(y) * (count(*) - sum(y))), 3) AS auc
+FROM r GROUP BY component ORDER BY auc DESC;
 ```
 
 ---
@@ -456,7 +470,7 @@ impostor, manufactured at B+), then by size of change.
   liquidity) agrees. The Neiro pattern is the organic twin with less
   liquidity than the staged one; flag it when you see it.
 - **Calibration (I).** Below the gate, one line with the counts ("outcomes:
-  140 labelled, 52 survived; gate is 200"). Past it, report the top-AUC
+  140 tokens, 52 survived; gate is 200"). Past it, report the top-AUC
   component and whether `manufactured` survives less than `organic`, with
   counts ("distribution leads, AUC 0.68; manufactured 9/61 survived vs
   organic 40/88"). If manufactured does not survive less, say the penalty is

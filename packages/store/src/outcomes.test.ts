@@ -4,7 +4,12 @@ import { LibsqlStore } from './libsql-store';
 
 const NOW = '2026-10-22T12:00:00.000Z';
 
-function snapshot(tokenId: string, liquidityUsd: number | undefined, capturedAt: string): TokenSnapshot {
+function snapshot(
+  tokenId: string,
+  liquidityUsd: number | undefined,
+  capturedAt: string,
+  pairLiquidity: number[] = [],
+): TokenSnapshot {
   const [chain, address] = tokenId.split(':') as [TokenSnapshot['chain'], string];
   return {
     tokenId,
@@ -14,7 +19,7 @@ function snapshot(tokenId: string, liquidityUsd: number | undefined, capturedAt:
     name: address,
     socials: {},
     metrics: { ...(liquidityUsd !== undefined ? { liquidityUsd } : {}), priceUsd: 0.01 },
-    pairs: [],
+    pairs: pairLiquidity.map((liq, i) => ({ pairAddress: `p${i}`, liquidityUsd: liq })),
     appearances: [],
     bestRank: 1,
     sourceCount: 1,
@@ -62,7 +67,7 @@ async function scoredRun(
   store: LibsqlStore,
   id: string,
   startedAt: string,
-  tokens: { tokenId: string; liq?: number; withReport?: boolean }[],
+  tokens: { tokenId: string; liq?: number; pairs?: number[]; withReport?: boolean }[],
   lane: 'full' | 'launches' = 'full',
 ): Promise<void> {
   await store.startRun(id);
@@ -73,7 +78,7 @@ async function scoredRun(
   const at = new Date(Date.parse(startedAt) + 60_000).toISOString();
   for (const token of tokens) {
     await store.saveTokenBundle(id, {
-      snapshot: snapshot(token.tokenId, token.liq ?? 50_000, at),
+      snapshot: snapshot(token.tokenId, token.liq ?? 50_000, at, token.pairs),
       ...(token.withReport ? { provenance: report(token.tokenId, at) } : {}),
       score: score(token.tokenId, new Date(Date.parse(at) + 1000).toISOString()),
     });
@@ -143,8 +148,38 @@ describe('outcomes table', () => {
 
     // The day is labelled, so the earlier run that day is no longer pending.
     expect(await store.outcomeCandidates({ horizonHours: 72, now: NOW })).toEqual([]);
-    // A different horizon is a different label.
-    expect(await store.outcomeCandidates({ horizonHours: 24, now: NOW })).toHaveLength(3);
+    // A different horizon is a different label: at 24 h the 10-18 rows are
+    // past the lag bound and the 10-21 day has not ended a horizon ago.
+    expect(await store.outcomeCandidates({ horizonHours: 24, now: NOW })).toEqual([]);
+    expect(await store.outcomeCandidates({ horizonHours: 24, now: '2026-10-23T02:00:00.000Z' })).toHaveLength(1);
+    await store.close();
+  });
+
+  test('a day becomes a candidate only once all of it is past the horizon, so its latest run is there to pick', async () => {
+    const store = await freshStore();
+    await scoredRun(store, 'r-06', '2026-10-18T06:00:00.000Z', [{ tokenId: A }]);
+    await scoredRun(store, 'r-18', '2026-10-18T18:00:00.000Z', [{ tokenId: A }]);
+    // 06:00 is past 72 h here, but the day is not: nothing yet.
+    expect(await store.outcomeCandidates({ horizonHours: 72, now: '2026-10-21T20:00:00.000Z' })).toEqual([]);
+    const pending = await store.outcomeCandidates({ horizonHours: 72, now: '2026-10-22T01:00:00.000Z' });
+    expect(pending.map((c) => c.runId)).toEqual(['r-18', 'r-06']);
+    await store.close();
+  });
+
+  test('scores older than 1.5 x horizon + 24 h are never candidates: turning the step on does not label history', async () => {
+    const store = await freshStore();
+    await scoredRun(store, 'r-history', '2026-10-10T06:00:00.000Z', [{ tokenId: A }]);
+    await scoredRun(store, 'r-edge', '2026-10-17T00:00:00.000Z', [{ tokenId: B }]); // exactly NOW - 132 h
+    const pending = await store.outcomeCandidates({ horizonHours: 72, now: NOW });
+    expect(pending.map((c) => c.runId)).toEqual(['r-edge']);
+    await store.close();
+  });
+
+  test('liquidity at score is the deepest pair in the snapshot, matching the deepest pair now', async () => {
+    const store = await freshStore();
+    await scoredRun(store, 'r1', '2026-10-18T06:00:00.000Z', [{ tokenId: A, liq: 50_000, pairs: [20_000, 80_000] }]);
+    const [pending] = await store.outcomeCandidates({ horizonHours: 72, now: NOW });
+    expect(pending?.liqAtScore).toBe(80_000);
     await store.close();
   });
 
@@ -175,6 +210,10 @@ describe('outcomes table', () => {
     expect(b?.recycleGeneration).toBeUndefined();
     expect(b?.organicVerdict).toBeUndefined();
     expect(await store.calibrationRows(24)).toEqual([]);
+
+    // A label measured long after its score is not a 72 h label.
+    await store.saveOutcomes([{ ...base, tokenId: A, runId: 'r1', survived: true, measuredAt: '2026-10-30T00:00:00.000Z' }]);
+    expect((await store.calibrationRows(72)).map((row) => row.tokenId)).toEqual([B]);
     await store.close();
   });
 });

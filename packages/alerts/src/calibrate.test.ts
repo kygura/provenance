@@ -8,6 +8,7 @@ import {
   memeCurves,
   suggestGenerationBonus,
   suggestWeights,
+  wilson,
 } from './calibrate';
 import { assertWeights, DEFAULT_WEIGHTS } from './scoring';
 
@@ -20,9 +21,12 @@ function lcg(seed: number): () => number {
   };
 }
 
+let serial = 0;
+/** A labelled row for a fresh token each call, unless `tokenId` is given. */
 function row(over: Partial<CalibrationRow> = {}): CalibrationRow {
+  serial += 1;
   return {
-    tokenId: 'solana:x',
+    tokenId: `solana:x${serial}`,
     runId: 'r',
     scoredAt: '2026-10-01T06:00:00.000Z',
     total: 60,
@@ -96,11 +100,11 @@ describe('calibrate', () => {
   test('below the gate it reports counts and suggests nothing', () => {
     const few = calibrate(separable(120));
     expect(few.status).toBe('insufficient');
-    expect(few.n).toBe(120);
+    expect(few.tokens).toBe(120);
     expect(few.components).toEqual([]);
     expect(few.weights.suggested).toBeUndefined();
-    expect(few.generation.suggested).toBeUndefined();
-    expect(few.notes[0]).toMatch(/insufficient: 120 labelled \(need 200\)/);
+    expect(few.generation.suggestion.status).toBe('no-signal');
+    expect(few.notes[0]).toMatch(/insufficient: 120 tokens \(need 200\)/);
 
     // Enough rows, but one class too thin.
     const lopsided = separable(300).map((r, i) => ({ ...r, survived: i < 20 }));
@@ -109,6 +113,29 @@ describe('calibrate', () => {
     expect(thin.survived).toBe(20);
     expect(thin.weights.suggested).toBeUndefined();
     expect(formatCalibration(thin)).toContain('insufficient');
+  });
+
+  test('a token labelled on many days counts once, from its earliest label; the gate counts tokens', () => {
+    const base = separable(195);
+    const repeated = Array.from({ length: 10 }, (_, day) =>
+      row({ tokenId: 'solana:long', scoredAt: `2026-10-${String(10 + day).padStart(2, '0')}T06:00:00.000Z`, survived: day > 0 }),
+    );
+    const report = calibrate([...base, ...repeated]);
+    expect(report.rows).toBe(205);
+    expect(report.tokens).toBe(196);
+    expect(report.status).toBe('insufficient');
+    // The earliest label (day 0, did not survive) is the one kept.
+    expect(report.failed).toBe(base.filter((r) => !r.survived).length + 1);
+  });
+
+  test('a component with no variance is reported as not measured and gets no weight', () => {
+    const rows = separable(300).map((r) => ({ ...r, components: { ...r.components, momentum: 45 } }));
+    const report = calibrate(rows);
+    const momentum = report.components.find((fit) => fit.component === 'momentum')!;
+    expect(momentum.note).toBe('not measured (no variance)');
+    expect(report.weights.suggested?.momentum).toBe(0);
+    expect(report.notes.some((note) => note.startsWith('momentum: not measured'))).toBe(true);
+    expect(formatCalibration(report)).toContain('momentum      not measured (no variance)');
   });
 
   test('survival by organic verdict and tier, with counts', () => {
@@ -146,12 +173,27 @@ describe('generation decay', () => {
     ]);
   });
 
-  test('bonus table: rescaled 0..10 over buckets with 20+ labels; thinner buckets keep the current constant', () => {
-    const table = generationTable([...gens(0, 40, 10), ...gens(1, 40, 30), ...gens(2, 40, 20), ...gens(3, 10, 9), ...gens(4, 30, 0)]);
-    expect(suggestGenerationBonus(table)).toEqual([3, 10, 7, 10, 0]);
-    // One qualifying bucket, or a flat curve, says nothing.
-    expect(suggestGenerationBonus(generationTable(gens(1, 40, 20)))).toBeUndefined();
-    expect(suggestGenerationBonus(generationTable([...gens(0, 30, 15), ...gens(1, 30, 15)]))).toBeUndefined();
+  test('wilson interval', () => {
+    const [lo, hi] = wilson(40, 100);
+    expect(lo).toBeCloseTo(0.3094, 3);
+    expect(hi).toBeCloseTo(0.4980, 3);
+  });
+
+  test('same-rate buckets suggest nothing, thin or thick', () => {
+    const thin = generationTable([...gens(0, 20, 8), ...gens(1, 20, 8), ...gens(2, 20, 8), ...gens(3, 20, 8), ...gens(4, 20, 8)]);
+    expect(suggestGenerationBonus(thin)).toMatchObject({ status: 'no-signal', reason: expect.stringMatching(/100\+ tokens/) });
+    const thick = generationTable([...gens(0, 100, 40), ...gens(1, 100, 40), ...gens(2, 100, 44)]);
+    expect(suggestGenerationBonus(thick)).toMatchObject({ status: 'no-signal', reason: expect.stringMatching(/overlap at 95%/) });
+  });
+
+  test('a real gap moves fitted buckets by the absolute effect; thin buckets are kept and marked', () => {
+    // overall 225/450 = 0.5; gen 0 at 0.3 -> 0 + 25 x -0.2 = -5 -> 0; gen 1 at 0.7 -> 7 + 5 = 12.
+    const table = generationTable([...gens(0, 200, 60), ...gens(1, 200, 140), ...gens(2, 50, 25)]);
+    expect(suggestGenerationBonus(table)).toEqual({
+      status: 'ok',
+      table: [0, 12, 10, 10, 6],
+      kept: [false, false, true, true, true],
+    });
   });
 
   test('split by organic verdict, and per-meme curves only where three generations have 5+ labels', () => {

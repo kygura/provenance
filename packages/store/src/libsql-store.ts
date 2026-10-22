@@ -23,7 +23,7 @@ import type {
   WatchEntry,
   WatchQuery,
 } from '@provenance/core';
-import { createLogger, OPEN_SETUP_STATUSES, silentLogger } from '@provenance/core';
+import { createLogger, OPEN_SETUP_STATUSES, outcomeMaxLagHours, silentLogger } from '@provenance/core';
 import {
   alertRowArgs,
   chainRowArgs,
@@ -787,31 +787,39 @@ export class LibsqlStore implements ProvenanceStore {
 
   /**
    * Full runs only: a launch-lane score is of a pool minutes old, a different
-   * population (runs from before `lane` was recorded count as full). The day
-   * probe is a range on the ISO strings, not substr(), so the index serves it.
+   * population (runs from before `lane` was recorded count as full). A day is
+   * a candidate only once all of it is past the horizon, so the caller can
+   * pick the day's latest run rather than its first to cross. The lower bound
+   * keeps the history before the step existed unlabelled. The day probe is a
+   * range on the ISO strings, not substr(), so the index serves it.
    */
   async outcomeCandidates(query: { horizonHours: number; now?: string }): Promise<OutcomeCandidate[]> {
     const nowMs = query.now ? Date.parse(query.now) : Date.now();
     const cutoff = new Date(nowMs - query.horizonHours * 3_600_000).toISOString();
+    const oldest = new Date(nowMs - outcomeMaxLagHours(query.horizonHours) * 3_600_000).toISOString();
     const rows = await this.all({
-      sql: `SELECT sc.token_id AS token_id, sc.run_id AS run_id, r.started_at AS scored_at,
-                   t.chain AS chain, t.address AS address,
-                   json_extract(sn.metrics_json, '$.liquidityUsd') AS liq_at_score,
-                   json_extract(sn.metrics_json, '$.priceUsd') AS price_at_score
-            FROM scores sc
-            JOIN runs r ON r.id = sc.run_id
-            JOIN snapshots sn ON sn.run_id = sc.run_id AND sn.token_id = sc.token_id
-            JOIN tokens t ON t.id = sc.token_id
-            WHERE r.started_at <= ?
-              AND coalesce(json_extract(r.stats_json, '$.lane'), 'full') = 'full'
-              AND json_extract(sn.metrics_json, '$.liquidityUsd') > 0
-              AND NOT EXISTS (
-                SELECT 1 FROM outcomes o
-                WHERE o.token_id = sc.token_id AND o.horizon_h = ?
-                  AND o.scored_at >= substr(r.started_at, 1, 10)
-                  AND o.scored_at < date(r.started_at, '+1 day'))
-            ORDER BY r.started_at DESC, sc.run_id DESC, sc.token_id ASC`,
-      args: [cutoff, Math.trunc(query.horizonHours)],
+      sql: `SELECT * FROM (
+              SELECT sc.token_id AS token_id, sc.run_id AS run_id, r.started_at AS scored_at,
+                     t.chain AS chain, t.address AS address,
+                     coalesce(
+                       (SELECT max(json_extract(p.value, '$.liquidityUsd')) FROM json_each(sn.pairs_json) p),
+                       json_extract(sn.metrics_json, '$.liquidityUsd')) AS liq_at_score,
+                     json_extract(sn.metrics_json, '$.priceUsd') AS price_at_score
+              FROM scores sc
+              JOIN runs r ON r.id = sc.run_id
+              JOIN snapshots sn ON sn.run_id = sc.run_id AND sn.token_id = sc.token_id
+              JOIN tokens t ON t.id = sc.token_id
+              WHERE r.started_at >= ?
+                AND date(r.started_at, '+1 day') <= ?
+                AND coalesce(json_extract(r.stats_json, '$.lane'), 'full') = 'full'
+                AND NOT EXISTS (
+                  SELECT 1 FROM outcomes o
+                  WHERE o.token_id = sc.token_id AND o.horizon_h = ?
+                    AND o.scored_at >= substr(r.started_at, 1, 10)
+                    AND o.scored_at < date(r.started_at, '+1 day')))
+            WHERE liq_at_score > 0
+            ORDER BY scored_at DESC, run_id DESC, token_id ASC`,
+      args: [oldest, cutoff, Math.trunc(query.horizonHours)],
     });
     return rows.map((row) => rowToOutcomeCandidate(row as SqlRow));
   }
@@ -852,8 +860,9 @@ export class LibsqlStore implements ProvenanceStore {
               WHERE p2.token_id = o.token_id AND p2.created_at <= sc.computed_at
               ORDER BY p2.created_at DESC LIMIT 1)
             WHERE o.horizon_h = ?
+              AND (julianday(o.measured_at) - julianday(o.scored_at)) * 24 <= ?
             ORDER BY o.scored_at ASC, o.token_id ASC`,
-      args: [Math.trunc(horizonHours)],
+      args: [Math.trunc(horizonHours), outcomeMaxLagHours(horizonHours)],
     });
     return rows.map((row) => rowToCalibrationRow(row as SqlRow, this.logger));
   }

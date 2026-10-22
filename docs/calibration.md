@@ -11,21 +11,31 @@ A trending token drops off the trending lists whether it thrives or dies, so
 "absent from later snapshots" says nothing. The label is a forward look
 instead (`apps/worker/src/outcomes.ts`):
 
-- A scored `(run, token)` becomes a candidate once its run started at least
-  `OUTCOME_HORIZON_HOURS` (default 72) ago. Full-lane runs only: a
-  launch-lane score is of a pool minutes old, a different population.
 - One label per token per UTC day, from that day's latest scored run. At an
-  hourly cadence a token trending all day would otherwise be 24 outcomes,
-  and the fit would mostly learn about tokens that trend for a long time.
+  hourly cadence a token trending all day would otherwise be 24 outcomes.
+  A token-day becomes a candidate only once the whole UTC day ended at least
+  `OUTCOME_HORIZON_HOURS` (default 72) ago, so the day's last run is there
+  to pick rather than its first to cross the horizon.
+- Nothing older than 1.5 × horizon + 24 h (132 h at 72) is a candidate. The
+  day rule needs the extra day; the half horizon covers missed runs. Every
+  day stays reachable for 36 h at the default, which spans at least three
+  full runs at the base cadence.
+- Full-lane runs only: a launch-lane score is of a pool minutes old, a
+  different population.
 - DexScreener's `/latest/dex/tokens/` is asked for the token's pairs, 30
   addresses a request. A token missing from a batch is asked again alone
   before it is called dead, because the batch response is capped in pairs.
-- **Survived** = the deepest pair's liquidity now is at least half of
-  `liquidityUsd` in that run's snapshot. No pair at all is not survived, and
+- **Survived** = the deepest pair's liquidity now is at least half of the
+  deepest pair's liquidity in that run's snapshot (`pairs_json`, falling
+  back to the snapshot's `liquidityUsd`), so both sides measure the same
+  thing. No pair at all is not survived, and
   is stored with `pair_found = 0` so a delisted token and a drained one stay
   apart. Snapshots with no liquidity reading are never candidates.
 - A failed request leaves the tokens pending for the next run. A network
   error is not a dead token.
+- Addresses are URL-encoded rather than pattern-checked, so TON and Sui
+  addresses go through. Only an empty one, or one with whitespace, is
+  skipped, and counted as `skipped` in the run's stats.
 
 Stored in `outcomes` (migration 6), one row per `(token_id, run_id,
 horizon_h)`, with `liq_at_score`, `liq_now`, `price_at_score`, `price_now`,
@@ -39,11 +49,11 @@ horizon_h)`, with `liq_at_score`, `liq_now`, `price_at_score`, `price_now`,
 - **Only tokens we scored.** The population is tokens that reached a
   trending list and cleared the filters. It says nothing about the score's
   value on tokens that never trended.
-- **Backlog labels are late.** Candidates are labelled newest first, up to
-  `OUTCOME_MAX_PER_RUN` (default 90) a run, so steady-state labels land close
-  to the horizon. When the step is first switched on, older scores are
-  labelled days or weeks after scoring. `measured_at - scored_at` is the real
-  horizon; filter on it if that matters.
+- **No backlog.** Scores from before the step was switched on are never
+  labelled: a label taken weeks late is a different horizon. Labels start
+  accruing from deploy, so the gate takes a few weeks to pass. A labelled
+  row's real horizon is `measured_at - scored_at`, between the horizon and
+  1.5 × horizon + 24 h; `calibrate` drops anything later.
 - **Liquidity can be pulled and re-added**, and a migrated token (new pool
   under a new address) reads as dead.
 
@@ -64,12 +74,16 @@ pending).
 as JSON. It reads only: no migrate, no writes. The maths is
 `packages/alerts/src/calibrate.ts`, pure and deterministic.
 
-- **Gate.** At least `CALIBRATION_MIN_ROWS` (default 200) labels and 30 in
-  each class. Below it the report is `insufficient`: counts and survival
+- **One row per token.** A token labelled on ten days is one outcome
+  observed ten times. Every table, the gate and the fits use each token's
+  earliest label; the report shows both rows and tokens.
+- **Gate.** At least `CALIBRATION_MIN_ROWS` (default 200) distinct tokens
+  and 30 in each class. Below it the report is `insufficient`: counts and survival
   tables only, no fit, nothing suggested.
 - **Per component:** a univariate logistic fit (coefficient per SD) and the
   AUC, sorted by AUC. 0.5 is no signal; below 0.5 the component points the
-  wrong way.
+  wrong way. A component with no variance is reported as "not measured" and
+  gets no weight.
 - **Weights:** an L2 logistic regression on the six standardised
   components, by plain gradient descent from a fixed start. Coefficients are
   converted back to per-point (β / SD), because the weights multiply raw
@@ -95,10 +109,14 @@ is fatigued"). The report tests that curve:
   all rows and split into `organic` and `manufactured` carriers. A meme that
   decays only on its staged carriers is a different finding from one that
   decays on both.
-- **Suggested table:** over buckets with 20+ labels,
-  `bonus = round(10 × (rate − min) / (max − min))`; thinner buckets keep the
-  current value. No suggestion when fewer than two buckets qualify or the
-  curve is flat.
+- **Suggested table**, only from buckets with 100+ tokens, and only when the
+  best and worst of them are distinguishable: their Wilson 95% intervals
+  must not overlap. Otherwise the status is `no-signal` with the reason. A
+  fitted bucket moves by the absolute effect,
+  `bonus = clamp(round(current + 25 × (rate − overall rate)), 0, 15)`, so a
+  10-point survival edge is worth 2.5 points and noise stays small. A
+  min–max rescale would stretch any difference, noise included, to the full
+  0–10. Thinner buckets keep their current value and are marked `kept`.
 - **Per meme** (`lower(meme_name)`), for memes with 3+ generations of 5+
   labels each: the meme's rate over all memes' rate at the same generation.
   Above 1, the meme decays slower than memes in general. Reported only; the

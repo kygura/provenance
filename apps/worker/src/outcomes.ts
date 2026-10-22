@@ -2,13 +2,14 @@
  * The outcome step: label old scores by what happened next (docs/calibration.md).
  *
  * A trending token drops off the trending lists whether it thrives or dies, so
- * "absent from later snapshots" is not a label. Instead, a score whose run
- * started at least `OUTCOME_HORIZON_HOURS` ago is looked up again on
- * DexScreener: it survived when its deepest pool still holds at least half the
- * liquidity it had when scored. No pair at all is not surviving, recorded as
+ * "absent from later snapshots" is not a label. Instead, a score at least
+ * `OUTCOME_HORIZON_HOURS` old is looked up again on DexScreener: it survived
+ * when its deepest pool still holds at least half the liquidity its deepest
+ * pool had when scored. No pair at all is not surviving, recorded as
  * `pair_found = 0` so the two failure modes stay apart.
  *
- * One label per token per UTC day, from that day's latest scored run: at an
+ * One label per token per UTC day, from that day's latest scored run, taken
+ * only once the whole day is past the horizon: at an
  * hourly cadence a token trending all day would otherwise count as 24
  * outcomes, and the fit would learn mostly about the tokens that trend longest.
  *
@@ -36,11 +37,15 @@ export const SURVIVAL_LIQUIDITY_RATIO = 0.5;
 /** Raw `/latest/dex/tokens/<a,b,…>` payload for up to 30 addresses. */
 export type PairFetcher = (addresses: string[]) => Promise<unknown>;
 
-/** Same guard as the brief's ledger: an address goes into a URL path. */
-const ADDRESS = /^[A-Za-z0-9]{20,64}$/;
+/**
+ * An address goes into a URL path, encoded. Only an empty one, or one with
+ * whitespace (a broken row), is skipped: TON and Sui addresses carry `-`, `_`
+ * and `:`, and a stricter pattern would drop those chains without a word.
+ */
+const USABLE_ADDRESS = /^\S+$/;
 
 export function emptyOutcomeStats(): OutcomeStats {
-  return { pending: 0, measured: 0, survived: 0, notFound: 0 };
+  return { pending: 0, measured: 0, survived: 0, notFound: 0, skipped: 0 };
 }
 
 /**
@@ -112,7 +117,7 @@ export function createPairFetcher(app: AppConfig, logger: Logger): PairFetcher {
     rateLimitMs: source?.rateLimitMs ?? 1200,
     logger,
   });
-  return (addresses) => client.getJson(`/latest/dex/tokens/${addresses.join(',')}`);
+  return (addresses) => client.getJson(`/latest/dex/tokens/${addresses.map(encodeURIComponent).join(',')}`);
 }
 
 export interface OutcomeResult {
@@ -125,9 +130,9 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Labels up to `maxPerRun` pending scores, newest first so steady-state
- * labels are taken close to the nominal horizon; a backlog drains behind
- * them. A batch that fails leaves its tokens pending for the next run: a
+ * Labels up to `maxPerRun` pending scores, newest first so labels are taken
+ * close to the nominal horizon. Nothing older than `outcomeMaxLagHours` is a
+ * candidate, so there is no history backlog to drain. A batch that fails leaves its tokens pending for the next run: a
  * network error is not a dead token.
  */
 export async function collectOutcomes(
@@ -141,9 +146,9 @@ export async function collectOutcomes(
   const stats = emptyOutcomeStats();
   const errors: OutcomeResult['errors'] = [];
 
-  const pending = onePerTokenDay(await store.outcomeCandidates({ horizonHours, now: now.toISOString() })).filter(
-    (candidate) => ADDRESS.test(candidate.address),
-  );
+  const all = onePerTokenDay(await store.outcomeCandidates({ horizonHours, now: now.toISOString() }));
+  const pending = all.filter((candidate) => USABLE_ADDRESS.test(candidate.address));
+  stats.skipped = all.length - pending.length;
   stats.pending = pending.length;
   const picked = pending.slice(0, Math.max(0, Math.trunc(maxPerRun)));
   if (picked.length === 0) return { stats, errors };

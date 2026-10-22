@@ -481,7 +481,7 @@ async function cmdOutcomes(
     const result = await collectOutcomes(app, store, deps.createPairFetcher(app, logger), logger.child('outcomes'));
     const { stats } = result;
     print(
-      `${style.bold('outcomes')} ${style.dim(`horizon=${horizonHours}h pending=${stats.pending} measured=${stats.measured} survived=${stats.survived} no-pair=${stats.notFound}`)}`,
+      `${style.bold('outcomes')} ${style.dim(`horizon=${horizonHours}h pending=${stats.pending} measured=${stats.measured} survived=${stats.survived} no-pair=${stats.notFound} skipped=${stats.skipped}`)}`,
     );
     for (const failure of result.errors) print(style.yellow(`! ${failure.source}: ${failure.error}`));
     return result.errors.length > 0 && stats.measured === 0 && stats.pending > 0 ? EXIT_FAILED : EXIT_OK;

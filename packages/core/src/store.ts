@@ -43,12 +43,15 @@ export interface OutcomeStats {
   survived: number;
   /** Labelled with no pair found at all. */
   notFound: number;
+  /** Candidates whose address could not be put in a request (empty or with whitespace). */
+  skipped: number;
 }
 
 /**
  * A scored (run, token) old enough to label, with the market as it stood
- * when it was scored. Only rows whose snapshot had a liquidity reading are
- * candidates: survival is defined against it.
+ * when it was scored. `liqAtScore` is the deepest pair's liquidity in the
+ * snapshot (the labels compare it with the deepest pair now); only rows with
+ * a reading are candidates, since survival is defined against it.
  */
 export interface OutcomeCandidate {
   tokenId: string;
@@ -59,6 +62,18 @@ export interface OutcomeCandidate {
   scoredAt: string;
   liqAtScore: number;
   priceAtScore?: number;
+}
+
+/**
+ * Oldest a score may be and still be labelled at a horizon, in hours: half a
+ * horizon of slack for missed runs, plus a day because a token-day is only
+ * labelled once the whole UTC day is past the horizon (so the day's latest
+ * run is the one labelled). Older scores are never labelled, so turning the
+ * step on does not label the whole history late; calibration also drops any
+ * label measured later than this after its score.
+ */
+export function outcomeMaxLagHours(horizonHours: number): number {
+  return 1.5 * horizonHours + 24;
 }
 
 /**
@@ -185,15 +200,19 @@ export interface ProvenanceStore {
   socialFirstSeen(tokenIds: string[]): Promise<SocialFirstSeen[]>;
 
   /**
-   * Scored (run, token) pairs from full-lane runs that started at least
-   * `horizonHours` before `now` and have no outcome at that horizon on the
-   * same UTC day yet. Every such row, newest first: the caller picks one per
+   * Scored (run, token) pairs from full-lane runs on UTC days that ended at
+   * least `horizonHours` before `now`, started no more than
+   * `outcomeMaxLagHours` ago, and have no outcome at that horizon on that
+   * day yet. Every such row, newest first: the caller picks the latest per
    * token per day (one day's hourly runs must not count as many outcomes).
    */
   outcomeCandidates(query: { horizonHours: number; now?: string }): Promise<OutcomeCandidate[]>;
   /** Upserts on (token_id, run_id, horizon_h). */
   saveOutcomes(records: OutcomeRecord[]): Promise<void>;
-  /** Every labelled score at `horizonHours`, joined to the report it was scored on. */
+  /**
+   * Every labelled score at `horizonHours` measured within
+   * `outcomeMaxLagHours` of its score, joined to the report it was scored on.
+   */
   calibrationRows(horizonHours: number): Promise<CalibrationRow[]>;
 
   /** Cache for fetched evidence pages, keyed by URL hash. */

@@ -179,9 +179,9 @@ describe('outcomes and calibrate', () => {
     }));
     const text = await run(['calibrate'], { deps: harness.deps });
     expect(text.code).toBe(EXIT_OK);
-    expect(text.out).toContain('calibration · insufficient · 5 labelled at 72 h');
+    expect(text.out).toContain('calibration · insufficient · 5 tokens (5 labelled rows) at 72 h');
     const json = await run(['calibrate', '--json'], { deps: harness.deps });
-    expect(JSON.parse(json.out)).toMatchObject({ status: 'insufficient', n: 5, survived: 2 });
+    expect(JSON.parse(json.out)).toMatchObject({ status: 'insufficient', tokens: 5, rows: 5, survived: 2 });
     expect(harness.store.calls.filter((call) => call !== 'calibrationRows' && call !== 'close')).toEqual([]);
   });
 
