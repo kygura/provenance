@@ -125,6 +125,29 @@ export const EVM_LP_LOCKERS: readonly KnownAddress[] = [
   { address: '0xe2fe530c047f2d85298b07d9333c05737f1435fb', label: 'locker:team-finance', note: 'Team Finance token/LP lock' },
 ];
 
+/**
+ * Uniswap V3 NonfungiblePositionManager per chain. V3 positions minted through
+ * it are ERC-721s, so "LP burned/locked" is a question about who owns each NFT.
+ * Both verified on-chain: code present and `name()` = "Uniswap V3 Positions NFT-V1".
+ * Positions minted through a fork's manager (Sushi, Pancake V3) are counted as
+ * unverifiable, i.e. unsecured.
+ */
+export const UNISWAP_V3_POSITION_MANAGERS: Partial<Record<Chain, string>> = {
+  ethereum: '0xc36442b4a4522e871399cd717abdd847ab11fe88',
+  base: '0x03a520b32c04bf3beef7beb72e919cf822ed34f1',
+};
+
+/**
+ * Contracts that hold V3 position NFTs under lock. Team Finance's lock contract
+ * (Ethereum; code present, upgradeable proxy) locks NFTs as well as ERC-20 LP.
+ * UNCX's V3 locker is left out: the candidate deployments expose no `name()`,
+ * so their identity could not be confirmed. A position locked there reads as
+ * unsecured, which understates `lpLockedPct` — the safe direction.
+ */
+export const EVM_V3_LP_LOCKERS: readonly KnownAddress[] = [
+  { address: '0xe2fe530c047f2d85298b07d9333c05737f1435fb', label: 'locker:team-finance', note: 'Team Finance lock (holds V3 position NFTs)' },
+];
+
 const EVM_INDEX = new Map(EVM_KNOWN_ADDRESSES.map((entry) => [entry.address, entry]));
 
 export function lookupEvmAddress(address: string): KnownAddress | undefined {

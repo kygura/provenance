@@ -43,7 +43,7 @@ import { readPrivilegedFunctions } from './bytecode';
 import { checkContractVerified, lookupFirstFunders } from './explorer';
 import { clusterFunding, fundingWindowBlocks, MAX_TRACED_BUYERS, selectEarlyBuyers } from './funding';
 import { evaluateFlags } from './flags';
-import { measureLp } from './lp';
+import { measureLp, type V3LpScope } from './lp';
 import { concentration } from './metrics';
 import { isEvmBurnAddress, labelIsExcluded, lookupEvmAddress } from './labels';
 import { Budget, RpcClient, type TransportProvider } from './rpc';
@@ -170,12 +170,33 @@ export async function analyzeEvm(
 
   const supply = { total: formatUnits(totalRaw, decimals), decimals };
 
+  const seconds = BLOCK_SECONDS[snapshot.chain] ?? 12;
+  const created = snapshot.metrics.poolCreatedAt ? Date.parse(snapshot.metrics.poolCreatedAt) : Number.NaN;
+  // Pool creation times are estimates; the margin keeps the liquidity add
+  // inside the window so the sniping read can see trading start.
+  const ageBlocks = Number.isFinite(created)
+    ? Math.ceil((Date.now() - created) / 1000 / seconds) + 2 * snipeWindowBlocks(seconds) + 10
+    : opts.chunkBlocks * opts.maxChunks;
+
+  // V3 positions are NFTs, traced from the pool's Mint logs, so the V3 LP read
+  // needs a start block at or before pool creation. Only a known creation time
+  // gives one; without it V3 LP stays unmeasured.
+  let v3: V3LpScope | undefined;
+  if (Number.isFinite(created)) {
+    try {
+      const head = quantityToNumber(await client.call<string>('eth_blockNumber', []));
+      v3 = { chain: snapshot.chain, fromBlock: Math.max(0, head - ageBlocks), toBlock: head };
+    } catch {
+      // The holder scan below reads the head again and reports the failure.
+    }
+  }
+
   // --- contract surface: bytecode, LP, explorer ----------------------------
   // Cheap, bounded reads, done before the log scan so a long scan cannot
   // starve them of budget. Each degrades to a note and never throws.
   const [codeScan, lp, contractVerified] = await Promise.all([
     readPrivilegedFunctions(client, address),
-    measureLp(client, snapshot.pairs, budget),
+    measureLp(client, snapshot.pairs, budget, v3),
     checkContractVerified({
       app,
       chain: snapshot.chain,
@@ -216,13 +237,6 @@ export async function analyzeEvm(
     };
   }
 
-  const seconds = BLOCK_SECONDS[snapshot.chain] ?? 12;
-  const created = snapshot.metrics.poolCreatedAt ? Date.parse(snapshot.metrics.poolCreatedAt) : Number.NaN;
-  // Pool creation times are estimates; the margin keeps the liquidity add
-  // inside the window so the sniping read can see trading start.
-  const ageBlocks = Number.isFinite(created)
-    ? Math.ceil((Date.now() - created) / 1000 / seconds) + 2 * snipeWindowBlocks(seconds) + 10
-    : opts.chunkBlocks * opts.maxChunks;
   const span = Math.min(ageBlocks, opts.chunkBlocks * opts.maxChunks);
   const fromBlock = Math.max(0, latestBlock - span);
 

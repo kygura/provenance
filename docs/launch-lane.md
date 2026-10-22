@@ -10,6 +10,26 @@ The lane came from merging the `dexscanner` project, which scanned new
 deployments, filtered out unsafe ones and checked whether the name meant
 anything.
 
+## Coverage
+
+| Chain | Factories | Quotes |
+|---|---|---|
+| Ethereum | Uniswap V2, Uniswap V3 | WETH, USDC, USDT, DAI |
+| Base | Uniswap V2, Uniswap V3, Aerodrome (V2-style pools) | WETH, USDC, VIRTUAL |
+
+Base factory addresses and the Aerodrome `PoolCreated` topic were checked
+against live Base logs in October 2026. Uniswap V4 pools (Clanker, Zora) emit
+`Initialize` from the PoolManager rather than a factory event and aren't
+covered.
+
+Solana isn't covered: no pump.fun graduations, no Raydium or PumpSwap pools.
+The trending lane still picks up Solana and Base tokens, but only once they
+trend, which is too late for this lane's question. Adding Solana needs three
+things this repo doesn't have yet: a new-pool source (program logs, or
+GeckoTerminal `new_pools`), a sniping read over Solana transactions, and a
+chain gate that doesn't reject every Solana pool for missing the EVM-only
+reads.
+
 ## Flow
 
 ```
@@ -148,7 +168,7 @@ token add noise rather than false clusters. Solana has neither read yet.
 |---|---|---|
 | Transfer-from-zero logs via Etherscan | Factory `PairCreated`/`PoolCreated` via public RPC (`packages/sources/src/launches.ts`) | Any mint looks like a deployment in Transfer logs. A pool creation says a token is tradeable. No key needed. |
 | Liquidity in ETH from DexScreener | `liquidityUsd` from the same DexScreener hydration the trending source uses | One unit across both lanes. |
-| LP lock via Ethplorer top holders of the pair | `lpBurnedPct`/`lpLockedPct` read over RPC: pair `totalSupply` and `balanceOf` for burn addresses, Unicrypt and Team Finance (`packages/chain/src/lp.ts`) | Keyless. It also fixed a bug where token-supply burn was being reported as LP burn. |
+| LP lock via Ethplorer top holders of the pair | `lpBurnedPct`/`lpLockedPct` read over RPC: pair `totalSupply` and `balanceOf` for burn addresses, Unicrypt and Team Finance; Uniswap V3 pools by tracing each position NFT's owner (`packages/chain/src/lp.ts`) | Keyless. It also fixed a bug where token-supply burn was being reported as LP burn. |
 | Substring search of verified source for "mint", "pause", "blacklist" | PUSH4 selector scan of deployed bytecode (`packages/chain/src/bytecode.ts`), weighed against owner renouncement | Works on unverified contracts. A substring match on "pause" also hits comments and OpenZeppelin imports. |
 | Reject unverified contracts | `contractVerified` via Etherscan V2 when `ETHERSCAN_API_KEY` is set; rejects only on an explicit `false` | Verification is the one check that needs a key, so it's optional. |
 | Holder count and top-10 share via Ethplorer | The EVM analyser's Transfer-log reconstruction | Already in Provenance. |
@@ -175,7 +195,7 @@ shown safe", and that rejects.
 | `LAUNCHES_MIN_HOLDERS` | `50` | Lower than dexscanner's 100 so the verdict doesn't wait on distribution |
 | `LAUNCHES_MAX_TOP10_PCT` | `40` | Top-10 share excluding LP and burn |
 | `LAUNCHES_MAX_SNIPED_PCT` | `20` | Supply bought in the first 36 s of trading; unmeasured rejects |
-| `LAUNCHES_REQUIRE_LP_SECURED` | `true` | Reject when LP burn/lock can't be measured (V3 pools) |
+| `LAUNCHES_REQUIRE_LP_SECURED` | `true` | Reject when LP burn/lock can't be measured (V4 pools, V3 forks, busy or untraceable V3 pools) |
 | `LAUNCHES_MIN_LP_SECURED_PCT` | `90` | Burned plus locked LP share |
 | `LAUNCHES_DORMANT_AFTER_HOURS` | `168` | `active` → `dormant` |
 | `LAUNCHES_MAX_ANCHOR_SEARCHES` | `3` | Web searches per fast anchor check |
@@ -184,9 +204,20 @@ shown safe", and that rejects.
 | `ETHERSCAN_API_KEY` | unset | Optional; enables `contractVerified` and funding clusters |
 | `ELFA_API_KEY` | unset | Optional; records each entry's lead over crypto-social (`socialLeadHours`, see `docs/social.md`) |
 
-`LAUNCHES_REQUIRE_LP_SECURED=true` means Uniswap V3 launches never pass, because
-V3 liquidity positions are NFTs and "LP burned" has no single number there.
-Dexscanner had the same limit without saying so.
+**V3 LP.** Uniswap V3 positions are NFTs, so there is no LP supply to divide.
+For a fresh V3 pool on Ethereum or Base, `measureV3Pool` reads every pool
+`Mint` since the scan start, maps each one minted through the
+NonfungiblePositionManager to its token id (the `IncreaseLiquidity` log in the
+same receipt), then reads that position's current liquidity and `ownerOf`. An
+NFT held by a burn address counts as burned, one held by Team Finance as
+locked; a mint straight to any other owner counts as unsecured at its minted
+amount. Liquidity on different tick ranges isn't strictly comparable, so the
+share is approximate beyond one or two full-range positions. A pool with more
+than 20 mints, a scan that doesn't reach head, or a missing receipt stays
+unmeasured and, with `LAUNCHES_REQUIRE_LP_SECURED=true`, is rejected. So are
+V3 forks (their managers aren't listed) and positions locked with UNCX, whose
+V3 locker isn't in the table yet. Dexscanner rejected every V3 launch
+without saying so.
 
 ## Commands
 
@@ -223,7 +254,8 @@ up to 21h old, so an offline demo needs `LAUNCHES_LOOKBACK_HOURS=48 ... run
 The build sandbox has no route to any RPC or data host, so everything here was
 checked against fixtures only:
 
-- factory topic hashes and log layouts against a real Ethereum node,
+- factory topic hashes and log layouts against a real Ethereum node (Base
+  was checked live: factories, topics and the Aerodrome layout),
 - the locker addresses (taken from dexscanner's constants, not read on-chain),
 - whether public nodes accept a 2,000-block `eth_getLogs` range on the factories,
 - the anchor prompts on real launches, where the interesting failures are

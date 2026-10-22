@@ -1,8 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import { silentLogger, type PairInfo } from '@provenance/core';
 import { encodeBalanceOf, SELECTORS } from './abi';
-import { aggregateLp, measureLp, measurePair, MAX_LP_PAIRS } from './lp';
-import { EVM_LP_LOCKERS } from './labels';
+import {
+  aggregateLp,
+  ERC721_OWNER_OF_SELECTOR,
+  MAX_LP_PAIRS,
+  MAX_V3_MINTS,
+  measureLp,
+  measurePair,
+  measureV3Pool,
+  V3_INCREASE_LIQUIDITY_TOPIC0,
+  V3_MINT_TOPIC0,
+  V3_POSITIONS_SELECTOR,
+} from './lp';
+import { EVM_LP_LOCKERS, UNISWAP_V3_POSITION_MANAGERS } from './labels';
 import { MockRpcTransport } from './mock';
 import { Budget, RpcClient, type JsonRpcResult } from './rpc';
 
@@ -168,5 +179,180 @@ describe('measureLp', () => {
     const result = await measureLp(client(transport), [{ pairAddress: PAIR_A }]);
     expect(result.lpBurnedPct).toBeUndefined();
     expect(result.notes.join(' ')).toContain('LP read failed');
+  });
+});
+
+// ---------------------------------------------------------------- Uniswap V3
+
+const NPM = UNISWAP_V3_POSITION_MANAGERS.ethereum ?? '';
+const EOA = '0x1111111111111111111111111111111111111111';
+const HEAD = 1_000;
+
+function topicOf(address: string): string {
+  return `0x${address.slice(2).padStart(64, '0')}`;
+}
+
+function words(...values: bigint[]): string {
+  return `0x${values.map((value) => value.toString(16).padStart(64, '0')).join('')}`;
+}
+
+interface V3Mint {
+  owner: string;
+  amount: bigint;
+  tx: string;
+  /** NPM token id minted in that tx; omitted for direct mints. */
+  tokenId?: bigint;
+}
+
+interface V3State {
+  mints: V3Mint[];
+  /** tokenId → current liquidity and holder; absent = burned NFT (both revert). */
+  positions?: Record<string, { liquidity: bigint; owner: string }>;
+  failReceipts?: boolean;
+}
+
+const revert = { error: { code: 3, message: 'execution reverted' } };
+
+function v3Transport(state: V3State): MockRpcTransport {
+  return new MockRpcTransport({
+    handlers: {
+      eth_blockNumber: () => ({ result: `0x${HEAD.toString(16)}` }),
+      eth_getLogs: ({ call }): JsonRpcResult => {
+        const filter = call.params[0] as { address: string; topics: string[]; fromBlock: string };
+        // Every mint sits in block 0, so only the first chunk sees them.
+        if (filter.address !== PAIR_V3 || filter.topics[0] !== V3_MINT_TOPIC0 || filter.fromBlock !== '0x0') {
+          return { result: [] };
+        }
+        return {
+          result: state.mints.map((mint, index) => ({
+            address: PAIR_V3,
+            topics: [V3_MINT_TOPIC0, topicOf(mint.owner), word(0n), word(0n)],
+            data: words(BigInt(`0x${NPM.slice(2)}`), mint.amount, 1n, 1n),
+            transactionHash: mint.tx,
+            logIndex: `0x${(index * 2).toString(16)}`,
+          })),
+        };
+      },
+      eth_getTransactionReceipt: ({ call }): JsonRpcResult => {
+        if (state.failReceipts) return { result: null };
+        const tx = call.params[0] as string;
+        const logs = state.mints
+          .map((mint, index) => ({ mint, index }))
+          .filter(({ mint }) => mint.tx === tx && mint.tokenId !== undefined)
+          .map(({ mint, index }) => ({
+            address: NPM,
+            topics: [V3_INCREASE_LIQUIDITY_TOPIC0, word(mint.tokenId ?? 0n)],
+            data: words(mint.amount, 1n, 1n),
+            logIndex: `0x${(index * 2 + 1).toString(16)}`,
+          }));
+        return { result: { logs } };
+      },
+      eth_call: ({ call }): JsonRpcResult => {
+        const { to, data } = call.params[0] as { to: string; data: string };
+        if (to !== NPM) return revert; // the pool has no totalSupply
+        const id = BigInt(`0x${data.slice(10)}`).toString();
+        const position = state.positions?.[id];
+        if (!position) return revert;
+        if (data.startsWith(V3_POSITIONS_SELECTOR)) return { result: words(0n, 0n, 0n, 0n, 3000n, 0n, 0n, position.liquidity, 0n, 0n, 0n, 0n) };
+        if (data.startsWith(ERC721_OWNER_OF_SELECTOR)) return { result: topicOf(position.owner) };
+        return revert;
+      },
+    },
+  });
+}
+
+const SCOPE = { chain: 'ethereum' as const, fromBlock: 0 };
+const TX1 = `0x${'01'.repeat(32)}`;
+const TX2 = `0x${'02'.repeat(32)}`;
+
+describe('Uniswap V3 LP', () => {
+  test('an NFT position held by the dead address is 100% burned', async () => {
+    const transport = v3Transport({
+      mints: [{ owner: NPM, amount: 500n, tx: TX1, tokenId: 7n }],
+      positions: { '7': { liquidity: 500n, owner: DEAD } },
+    });
+    const result = await measurePair(client(transport), { pairAddress: PAIR_V3, liquidityUsd: 9 }, SCOPE);
+    expect(result).toEqual({ status: 'measured', pairAddress: PAIR_V3, liquidityUsd: 9, burnedPct: 100, lockedPct: 0 });
+  });
+
+  test('an NFT held by Team Finance counts as locked', async () => {
+    const transport = v3Transport({
+      mints: [{ owner: NPM, amount: 500n, tx: TX1, tokenId: 7n }],
+      positions: { '7': { liquidity: 800n, owner: TEAM } },
+    });
+    const result = await measureV3Pool(client(transport), PAIR_V3, SCOPE);
+    expect(result.status === 'measured' && [result.burnedPct, result.lockedPct]).toEqual([0, 100]);
+  });
+
+  test('an NFT held by an EOA is measured as 0% secured, and the gate can reject it', async () => {
+    const transport = v3Transport({
+      mints: [{ owner: NPM, amount: 500n, tx: TX1, tokenId: 7n }],
+      positions: { '7': { liquidity: 500n, owner: EOA } },
+    });
+    const result = await measureLp(client(transport), [{ pairAddress: PAIR_V3 }], undefined, SCOPE);
+    expect(result.lpBurnedPct).toBe(0);
+    expect(result.lpLockedPct).toBe(0);
+  });
+
+  test('a direct mint is unsecured liquidity; a withdrawn (burned) NFT drops out', async () => {
+    const transport = v3Transport({
+      mints: [
+        { owner: NPM, amount: 100n, tx: TX1, tokenId: 7n },
+        { owner: NPM, amount: 50n, tx: TX1, tokenId: 8n },
+        { owner: EOA, amount: 300n, tx: TX2 },
+      ],
+      positions: { '7': { liquidity: 100n, owner: DEAD } }, // token 8 burned: both calls revert
+    });
+    const result = await measureV3Pool(client(transport), PAIR_V3, SCOPE);
+    expect(result.status === 'measured' && result.burnedPct).toBeCloseTo(25, 6);
+    // One receipt per distinct NPM tx, one positions+ownerOf pair per token id.
+    expect(transport.callsTo('eth_getTransactionReceipt')).toHaveLength(1);
+    expect(transport.callsTo('eth_call').filter((call) => (call.params[0] as { to: string }).to === NPM)).toHaveLength(4);
+  });
+
+  test('no Mint logs: concentrated, and the note reaches the measurement', async () => {
+    const transport = v3Transport({ mints: [] });
+    const result = await measureLp(client(transport), [{ pairAddress: PAIR_V3 }], undefined, SCOPE);
+    expect(result.lpBurnedPct).toBeUndefined();
+    expect(result.notes.join(' ')).toContain('no Mint logs');
+  });
+
+  test('an unavailable receipt degrades to concentrated with a note', async () => {
+    const transport = v3Transport({ mints: [{ owner: NPM, amount: 1n, tx: TX1, tokenId: 1n }], failReceipts: true });
+    const result = await measureV3Pool(client(transport), PAIR_V3, SCOPE);
+    expect(result.status).toBe('concentrated');
+    expect(result.status === 'concentrated' && result.note).toContain('receipt');
+  });
+
+  test('a pool busier than the cap is not traced', async () => {
+    const mints = Array.from({ length: MAX_V3_MINTS + 1 }, () => ({ owner: EOA, amount: 1n, tx: TX2 }));
+    const transport = v3Transport({ mints });
+    const result = await measureV3Pool(client(transport), PAIR_V3, SCOPE);
+    expect(result.status).toBe('concentrated');
+    expect(transport.callsTo('eth_getTransactionReceipt')).toHaveLength(0);
+  });
+
+  test('scans in chunks to head and gives up rather than measure a partial range', async () => {
+    const mints = [{ owner: EOA, amount: 1n, tx: TX2 }];
+    const ok = v3Transport({ mints });
+    expect((await measureV3Pool(client(ok), PAIR_V3, { ...SCOPE, chunkBlocks: 400 })).status).toBe('measured');
+    expect(ok.callsTo('eth_getLogs')).toHaveLength(3); // 0-399, 400-799, 800-1000
+    const short = v3Transport({ mints });
+    const result = await measureV3Pool(client(short), PAIR_V3, { ...SCOPE, chunkBlocks: 400, maxChunks: 2 });
+    expect(result.status === 'concentrated' && result.note).toContain('did not reach head');
+  });
+
+  test('an expired budget degrades before any log request', async () => {
+    const transport = v3Transport({ mints: [{ owner: EOA, amount: 1n, tx: TX2 }] });
+    const result = await measureV3Pool(client(transport), PAIR_V3, { ...SCOPE, toBlock: HEAD, budget: new Budget(0) });
+    expect(result.status === 'concentrated' && result.note).toContain('budget');
+    expect(transport.callsTo('eth_getLogs')).toHaveLength(0);
+  });
+
+  test('a chain with no known position manager, or no scope at all, stays concentrated', async () => {
+    const transport = v3Transport({ mints: [{ owner: EOA, amount: 1n, tx: TX2 }] });
+    expect((await measurePair(client(transport), { pairAddress: PAIR_V3 }, { chain: 'bsc', fromBlock: 0 })).status).toBe('concentrated');
+    expect((await measurePair(client(transport), { pairAddress: PAIR_V3 })).status).toBe('concentrated');
+    expect(transport.callsTo('eth_getLogs')).toHaveLength(0);
   });
 });
