@@ -343,6 +343,7 @@ export interface AppConfig {
   social: SocialConfig;
   llm: LlmConfig;
   rpc: ChainRpcConfig;
+  rpcCache: RpcCacheConfig;
   alerts: AlertConfig;
   cadence: CadenceConfig;
   outcomes: OutcomesConfig;
@@ -350,6 +351,16 @@ export interface AppConfig {
   /** Root for fixtures, artifacts and the local sqlite file. */
   dataDir: string;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
+}
+
+/**
+ * Cross-run cache of immutable chain reads (finalized log chunks), restored
+ * between GitHub Actions runs. See `@provenance/core/cache`.
+ */
+export interface RpcCacheConfig {
+  enabled: boolean;
+  dir: string;
+  maxAgeHours: number;
 }
 
 function num(value: string | undefined, fallback: number): number {
@@ -565,25 +576,42 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       rateLimitMs: num(env.ELFA_RATE_MS, 1100),
     },
     rpc: {
-      // Public, keyless, tried in order after any configured endpoint.
-      // publicnode.com is Allnodes' open tier. api.mainnet-beta 429s under any
-      // load and Ankr now requires a key, so neither can lead.
-      solana: rpcOr('RPC_SOLANA', [
-        'https://solana-rpc.publicnode.com',
-        'https://solana.drpc.org',
-        'https://api.mainnet-beta.solana.com',
-      ]),
+      // Public, keyless, tried in order after any configured endpoint. Ordered
+      // by what serves eth_getLogs over a 9k-block range (probed 2026-10-23):
+      // publicnode, MEV Blocker, Flashbots and Tenderly do; 1rpc, drpc's free
+      // tier, Blast and Nodies cap it at 10-10k blocks or refuse, so they sit
+      // last, where the per-method cooldown in the clients skips them for
+      // logs but keeps them for eth_call. Alchemy's free tier caps logs at 10
+      // blocks, so a keyed RPC_ETHEREUM on it still fails over here.
+      // Solana has no keyless node that serves getProgramAccounts or
+      // getTokenLargestAccounts reliably; a free-tier key in RPC_SOLANA is
+      // the fix. drpc's free plan does not serve Solana at all.
+      solana: rpcOr('RPC_SOLANA', ['https://solana-rpc.publicnode.com', 'https://api.mainnet-beta.solana.com']),
       ethereum: rpcOr('RPC_ETHEREUM', [
         'https://ethereum-rpc.publicnode.com',
+        'https://rpc.mevblocker.io',
+        'https://rpc.flashbots.net',
+        'https://gateway.tenderly.co/public/mainnet',
         'https://eth.drpc.org',
         'https://1rpc.io/eth',
-        'https://eth.llamarpc.com',
       ]),
-      base: rpcOr('RPC_BASE', ['https://mainnet.base.org', 'https://base-rpc.publicnode.com']),
+      // Tenderly's public Base gateway caps logs at 1k blocks; the launch walk
+      // halves its chunk on a refusal, so it still gets there.
+      base: rpcOr('RPC_BASE', [
+        'https://base-rpc.publicnode.com',
+        'https://mainnet.base.org',
+        'https://gateway.tenderly.co/public/base',
+      ]),
       bsc: rpcOr('RPC_BSC', ['https://bsc-dataseed.binance.org', 'https://bsc-rpc.publicnode.com']),
       arbitrum: rpcOr('RPC_ARBITRUM', ['https://arb1.arbitrum.io/rpc']),
       polygon: rpcOr('RPC_POLYGON', ['https://polygon-rpc.com']),
       avalanche: rpcOr('RPC_AVALANCHE', ['https://api.avax.network/ext/bc/C/rpc']),
+    },
+    rpcCache: {
+      // Ignored in fixture mode (see the analysers), which replays recordings.
+      enabled: bool(env.RPC_CACHE, true),
+      dir: env.RPC_CACHE_DIR || `${env.PROVENANCE_DATA_DIR ?? './data'}/rpc-cache`,
+      maxAgeHours: num(env.RPC_CACHE_MAX_AGE_HOURS, 168),
     },
     alerts: {
       telegramBotToken: env.TELEGRAM_BOT_TOKEN,

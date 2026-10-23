@@ -449,8 +449,12 @@ export function resolveStatus(selectedCount: number, stats: RunStats): RunStatus
   const fatal = stats.sourceErrors.filter(
     (failure) => !isSocialSource(failure.source) && failure.source !== OUTCOMES_SOURCE,
   );
+  // Candidates read and then all rejected on merit (filters, the launch gates)
+  // mean the sources that answered did their job: one chain's node refusing
+  // a range degrades that run, it does not make an empty one a failure.
+  const judged = stats.discovered + (stats.launches?.discovered ?? 0) > 0;
   if (selectedCount > 0 && usable === 0) return 'failed';
-  if (selectedCount === 0 && usable === 0 && fatal.length > 0) return 'failed';
+  if (selectedCount === 0 && usable === 0 && fatal.length > 0 && !judged) return 'failed';
   if (stats.sourceErrors.length > 0) return 'partial';
   return 'ok';
 }

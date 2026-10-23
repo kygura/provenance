@@ -42,7 +42,10 @@ export interface JsonRpcClientOptions {
 export class JsonRpcClient {
   private readonly clients: { endpoint: string; client: JsonClient }[];
   private nextId = 1;
-  /** `method endpoint` pairs that answered with an HTTP 4xx; tried last from then on. */
+  /**
+   * `method endpoint` pairs that answered with an HTTP 4xx or a JSON-RPC error
+   * (a range cap, an unsupported method); tried last from then on.
+   */
   private readonly refused = new Set<string>();
 
   constructor(private readonly options: JsonRpcClientOptions) {
@@ -84,7 +87,7 @@ export class JsonRpcClient {
         return reply.result;
       } catch (error) {
         lastError = error;
-        if (error instanceof HttpError && error.status >= 400 && error.status < 500) {
+        if ((error instanceof HttpError && error.status >= 400 && error.status < 500) || error instanceof JsonRpcError) {
           this.refused.add(`${method} ${endpoint}`);
         }
         this.options.logger.debug('rpc endpoint failed, trying next', {

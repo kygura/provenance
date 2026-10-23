@@ -54,7 +54,8 @@ secrets under **Settings → Secrets and variables → Actions**:
 | `ETHERSCAN_API_KEY` | no | contract verification and funding-cluster lookups |
 | `EXA_API_KEY` | recommended | the search tool for every non-Anthropic model (anchor check and research), and how DexTools pair pages are found; without it the DexTools source is skipped |
 | `ELFA_API_KEY` | no | crypto-social sightings for the watchlist's social lead (`docs/social.md`); free tier is enough |
-| `RPC_ETHEREUM` / `RPC_SOLANA` | no | your own RPC endpoints, comma-separated and tried in order. A set list is tried first and the public defaults (Allnodes' publicnode.com, drpc, …) follow as fallbacks; set `RPC_PUBLIC_FALLBACK=false` to use only your list. A keyed URL (Alchemy, Helius) must be a secret so the logs mask it. Blank keeps the public defaults |
+| `RPC_ETHEREUM` / `RPC_SOLANA` / `RPC_BASE` | no | your own RPC endpoints, comma-separated and tried in order. A set list is tried first and the public defaults follow as fallbacks; set `RPC_PUBLIC_FALLBACK=false` to use only your list. The Ethereum defaults (publicnode, MEV Blocker, Flashbots, Tenderly) serve 9k-block `eth_getLogs` keyless; Solana's keyless nodes refuse holder reads, so a free-tier keyed URL helps most there. Alchemy's free tier caps `eth_getLogs` at 10 blocks. A keyed URL must be a secret so the logs mask it. Blank keeps the public defaults |
+| `RPC_CACHE` / `RPC_CACHE_MAX_AGE_HOURS` | no | cross-run cache of finalized log chunks under `data/rpc-cache`, restored between Actions runs so a re-scan only fetches new blocks. On by default, 168 h max age, 256 MB cap. `RPC_CACHE=false` turns it off |
 
 Tuning knobs (`MAX_TOKENS_PER_RUN`, `MIN_LIQUIDITY_USD`,
 `ALERT_SCORE_THRESHOLD`, …) belong in **Variables**
