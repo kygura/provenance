@@ -23,6 +23,7 @@ import {
   type Logger,
   type TokenSnapshot,
 } from '@provenance/core';
+import { alignedChunkStart, CACHE_CONFIRMATIONS, isFinalChunk, type KvCache } from '@provenance/core/cache';
 import {
   decodeAddress,
   decodeUint256,
@@ -60,6 +61,12 @@ export interface EvmAnalyzerOptions {
   rateLimitMs?: number;
   /** Top holders retained on the report. */
   topN?: number;
+  /**
+   * Finalized Transfer-log chunks are read from and written to this, so a
+   * token re-analysed next run only fetches the blocks since. `createAnalyzers`
+   * passes the run's chain-read cache; unset means no caching.
+   */
+  cache?: KvCache;
 }
 
 /**
@@ -69,7 +76,7 @@ export interface EvmAnalyzerOptions {
  */
 export const HUB_MIN_NONCE = 1_000;
 
-const DEFAULTS: Required<EvmAnalyzerOptions> = {
+const DEFAULTS: Required<Omit<EvmAnalyzerOptions, 'cache'>> = {
   budgetMs: 45_000,
   callTimeoutMs: 12_000,
   chunkBlocks: 9_000,
@@ -253,31 +260,45 @@ export async function analyzeEvm(
   const balances = new Map<string, bigint>();
   let scannedFrom = latestBlock;
   let chunks = 0;
+  let cachedChunks = 0;
   let truncated = false;
 
   // Walk backwards from the head: the most recent activity is the most
   // informative if the budget runs out before the full span is covered.
   // Nodes that refuse a wide range (403, "range too large") usually accept a
   // narrow one, so a refusal shrinks the window once before giving up.
+  // Chunks sit on a fixed grid so the ones below the head have the same
+  // bounds next run, and come from the cache once final. Cached chunks do not
+  // count against `maxChunks`, which bounds requests to the node.
   let chunkBlocks = opts.chunkBlocks;
   const narrowBlocks = Math.max(1, Math.floor(opts.chunkBlocks / 8));
+  const confirmations = CACHE_CONFIRMATIONS[snapshot.chain] ?? 600;
+  // A partial head chunk would otherwise cost the span's last chunk.
+  const headPartial = (latestBlock + 1) % opts.chunkBlocks !== 0;
+  const maxRequests = opts.maxChunks + (headPartial ? 1 : 0);
   for (let end = latestBlock; end > fromBlock; ) {
-    if (chunks >= opts.maxChunks || budget.expired()) {
+    if (chunks >= maxRequests || budget.expired()) {
       truncated = true;
       break;
     }
-    const start = Math.max(fromBlock, end - chunkBlocks + 1);
+    const start = alignedChunkStart(end, fromBlock, chunkBlocks);
+    const final = options.cache !== undefined && isFinalChunk(start, end, chunkBlocks, latestBlock, confirmations);
+    const key = `transfers:${snapshot.chain}:${address}:${start}-${end}`;
     try {
-      const logs = await client.call<
-        Array<{ topics: string[]; data: string; blockNumber?: string; transactionHash?: string; logIndex?: string }>
-      >('eth_getLogs', [
-        {
-          address,
-          topics: [TRANSFER_TOPIC0],
-          fromBlock: toQuantity(start),
-          toBlock: toQuantity(end),
-        },
-      ]);
+      let logs = final ? await options.cache?.get<TransferLog[]>(key) : undefined;
+      const hit = Array.isArray(logs);
+      if (!hit) {
+        logs = await client.call<TransferLog[]>('eth_getLogs', [
+          {
+            address,
+            topics: [TRANSFER_TOPIC0],
+            fromBlock: toQuantity(start),
+            toBlock: toQuantity(end),
+          },
+        ]);
+        if (final && Array.isArray(logs)) await options.cache?.set(key, logs.map(compactLog));
+      }
+      if (hit) cachedChunks += 1;
       for (const entry of logs ?? []) {
         // ERC-721 shares this topic0 but indexes tokenId as a fourth topic, so
         // its logs would otherwise be replayed as if tokenIds were balances.
@@ -305,7 +326,7 @@ export async function analyzeEvm(
         }
       }
       scannedFrom = start;
-      chunks += 1;
+      if (!hit) chunks += 1;
       end = start - 1;
     } catch (error) {
       if (chunkBlocks > narrowBlocks) {
@@ -354,9 +375,10 @@ export async function analyzeEvm(
   const conc = concentration({ rows, totalSupply: supply.total, sampled: truncated });
   const burnedRaw = rows.filter((r) => r.label === 'burn').reduce((sum, r) => sum + r.pct, 0);
 
+  if (cachedChunks > 0) notes.push(`${cachedChunks} finalized log chunk(s) read from the cross-run cache.`);
   if (truncated) {
     notes.push(
-      `Partial scan: blocks ${scannedFrom}-${latestBlock} of a ${span}-block window (${chunks} chunk(s)). ` +
+      `Partial scan: blocks ${scannedFrom}-${latestBlock} of a ${span}-block window (${chunks + cachedChunks} chunk(s)). ` +
         'Holder counts and concentration describe this window only.',
     );
   }
@@ -566,6 +588,23 @@ async function traceFunding(input: TraceFundingInput): Promise<LaunchFunding | u
       (hubs.size > 0 ? `; ${hubs.size} hub funder(s) ignored.` : '.'),
   );
   return funding;
+}
+
+interface TransferLog {
+  topics: string[];
+  data: string;
+  blockNumber?: string;
+  transactionHash?: string;
+  logIndex?: string;
+}
+
+/** The fields the scan reads; a raw log carries address, block hash and more. */
+function compactLog(entry: TransferLog): TransferLog {
+  const out: TransferLog = { topics: entry.topics, data: entry.data };
+  if (entry.blockNumber !== undefined) out.blockNumber = entry.blockNumber;
+  if (entry.transactionHash !== undefined) out.transactionHash = entry.transactionHash;
+  if (entry.logIndex !== undefined) out.logIndex = entry.logIndex;
+  return out;
 }
 
 export function createEvmAnalyzer(

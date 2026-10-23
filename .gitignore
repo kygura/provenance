@@ -9,6 +9,7 @@ out/
 bun.lockb
 data/*.db
 data/*.db-*
+data/rpc-cache/
 .vercel
 .turbo
 coverage/

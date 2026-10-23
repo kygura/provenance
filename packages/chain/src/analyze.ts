@@ -14,6 +14,7 @@ import {
   type Logger,
   type TokenSnapshot,
 } from '@provenance/core';
+import { openRpcCache } from '@provenance/core/cache';
 import { createEvmAnalyzer } from './evm';
 import { createSolanaAnalyzer } from './solana';
 import { createFixtureTransport } from './fixtures';
@@ -47,7 +48,13 @@ function defaultTransport(app: AppConfig, logger: Logger): TransportProvider {
 
 export function createAnalyzers(app: AppConfig, logger: Logger): ChainAnalyzer[] {
   const transport = defaultTransport(app, logger);
-  return [createSolanaAnalyzer(app, logger, transport), createEvmAnalyzer(app, logger, transport)];
+  // The cache sits beside the network transport only: fixture runs and tests
+  // that build their own analysers never read or write it.
+  const cache = app.pipeline.useFixtures ? undefined : openRpcCache(app);
+  return [
+    createSolanaAnalyzer(app, logger, transport),
+    createEvmAnalyzer(app, logger, transport, cache ? { cache } : {}),
+  ];
 }
 
 let cached: { app: AppConfig; analyzers: ChainAnalyzer[] } | null = null;

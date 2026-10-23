@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { loadConfig, silentLogger, type AppConfig, type TokenSnapshot } from '@provenance/core';
 import { analyzeEvm } from './evm';
 import { createFixtureTransport } from './fixtures';
+import { MemoryCache } from '@provenance/core/cache';
 import { MockRpcTransport } from './mock';
 
 const NYAN = '0x9f2c4b1ea7d0ab3e6c5f81d2a94b7e03cd15a8fe';
@@ -116,7 +117,8 @@ describe('analyzeEvm contract surface, against the NYAN fixture', () => {
           return { error: { code: 3, message: 'execution reverted' } };
         },
         eth_getCode: () => ({ result: '0x' }),
-        eth_blockNumber: () => ({ result: '0x1000000' }),
+        // One block below a multiple of 9000, so the head chunk is a full cell.
+        eth_blockNumber: () => ({ result: `0x${(9_000 * 1_866 - 1).toString(16)}` }),
         eth_getLogs: ({ call }) => {
           const { fromBlock, toBlock } = call.params[0] as { fromBlock: string; toBlock: string };
           const span = Number(BigInt(toBlock) - BigInt(fromBlock)) + 1;
@@ -132,5 +134,56 @@ describe('analyzeEvm contract surface, against the NYAN fixture', () => {
     expect(ranges.slice(1).every((span) => span <= 2_000)).toBe(true);
     expect(ranges.length).toBe(4);
     expect(analysis.notes.join(' ')).not.toContain('Log scan stopped');
+  });
+
+  test('finalized Transfer-log chunks come from the cache on the next analysis', async () => {
+    const word = (value: bigint) => `0x${value.toString(16).padStart(64, '0')}`;
+    let head = 9_000 * 1_866 + 4_000;
+    const ranges: Array<[number, number]> = [];
+    const transport = new MockRpcTransport({
+      handlers: {
+        eth_call: ({ call }) => {
+          const { data } = call.params[0] as { data: string };
+          if (data === '0x313ce567') return { result: word(18n) };
+          if (data === '0x18160ddd') return { result: word(10n ** 24n) };
+          return { error: { code: 3, message: 'execution reverted' } };
+        },
+        eth_getCode: () => ({ result: '0x' }),
+        eth_blockNumber: () => ({ result: `0x${head.toString(16)}` }),
+        eth_getLogs: ({ call }) => {
+          const { fromBlock, toBlock } = call.params[0] as { fromBlock: string; toBlock: string };
+          ranges.push([Number(BigInt(fromBlock)), Number(BigInt(toBlock))]);
+          const holder = `0x${'0'.repeat(24)}${'ab'.repeat(20)}`;
+          // One mint per chunk, so the scan has balances and reaches its notes.
+          return {
+            result: [
+              {
+                topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', `0x${'0'.repeat(64)}`, holder],
+                data: word(10n ** 18n),
+                blockNumber: toBlock,
+                transactionHash: `0x${'1'.repeat(64)}`,
+                logIndex: '0x0',
+              },
+            ],
+          };
+        },
+      },
+    });
+    const config = { ...app(), pipeline: { ...app().pipeline, useFixtures: false } };
+    const cache = new MemoryCache();
+    const run = () =>
+      analyzeEvm(nyan(), { app: config, logger: silentLogger }, async () => transport, { maxChunks: 3, cache }, config, silentLogger);
+
+    await run();
+    const first = ranges.splice(0);
+    // Head chunk plus three full cells; the oldest is clipped by the span, so two are cached.
+    expect(first.length).toBe(4);
+    expect(cache.entries.size).toBe(2);
+
+    head += 100;
+    const analysis = await run();
+    expect(ranges[0]).toEqual([9_000 * 1_866, head]);
+    expect(ranges.length).toBe(2);
+    expect(analysis.notes.join(' ')).toContain('2 finalized log chunk(s) read from the cross-run cache');
   });
 });

@@ -393,6 +393,22 @@ describe('RunStats and status', () => {
     expect(resolveStatus(2, stats)).toBe('failed');
   });
 
+  test('resolveStatus: one chain refusing logs degrades a lane run whose other chains were judged', () => {
+    const stats = {
+      discovered: 0,
+      afterFilter: 0,
+      analysed: 0,
+      reused: 0,
+      alertsFired: 0,
+      llmCostUsd: 0,
+      sourceErrors: [{ source: 'launches:base', error: 'eth_getLogs refused blocks 1-2000: HTTP 429' }],
+      lane: 'launches' as const,
+      launches: { discovered: 40, rejected: 40, dismissed: 0, catalogued: 0, researched: 0, expressed: 0, dormant: 0 },
+    };
+    expect(resolveStatus(0, stats)).toBe('partial');
+    expect(resolveStatus(0, { ...stats, launches: { ...stats.launches, discovered: 0, rejected: 0 } })).toBe('failed');
+  });
+
   test('resolveStatus: social feed errors alone degrade a quiet run, never fail it', () => {
     const stats = {
       discovered: 0,

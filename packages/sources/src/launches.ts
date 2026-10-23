@@ -19,6 +19,7 @@ import {
   chunk,
   parseDexScreenerPairs,
 } from './dexscreener';
+import { alignedChunkStart, CACHE_CONFIRMATIONS, isFinalChunk, openRpcCache, type KvCache } from '@provenance/core/cache';
 import { compactEnrichment, type EnrichedTrendingEntry } from './enrichment';
 import { readJsonFixtures } from './fixtures';
 import { JsonClient } from './http';
@@ -324,6 +325,8 @@ export interface WalkOptions {
   signal?: AbortSignal;
   /** Injected clock for the wall-clock budget. */
   now?: () => number;
+  /** Finalized chunks are read from and written to this; the head chunk never is. */
+  cache?: KvCache;
 }
 
 export interface WalkResult {
@@ -332,6 +335,8 @@ export interface WalkResult {
   scannedFrom?: number;
   windowFrom?: number;
   chunks: number;
+  /** Chunks answered from the cache, not the node. Included in `chunks`. */
+  cachedChunks: number;
   logs: unknown[];
   /** Why the walk stopped short of the window, if it did. */
   errors: string[];
@@ -342,11 +347,19 @@ export function lookbackBlocks(lookbackHours: number, blockSeconds: number): num
   return Math.max(1, Math.ceil((Math.max(0, lookbackHours) * 3600) / blockSeconds));
 }
 
+/** Smallest chunk the walk halves down to before a refusal ends it. */
+export const LAUNCH_MIN_CHUNK_BLOCKS = 250;
+
 /**
- * Walks factory logs from head backwards in fixed chunks. Newest first, so a
- * walk cut short by a refusal or the budget still has the freshest launches,
- * which are the ones nobody else has seen yet. Never throws: a refused range
- * ends the walk and becomes an entry in `errors`.
+ * Walks factory logs from head backwards. Newest first, so a walk cut short by
+ * a refusal or the budget still has the freshest launches, which are the ones
+ * nobody else has seen yet. Chunks sit on a fixed grid of `chunkBlocks`, so
+ * every chunk below the head chunk has the same bounds on the next run and,
+ * once final, comes from the cache: a 30-minute lane re-reading a 6-hour
+ * window asks the node for one chunk, not six. A refused range is halved
+ * (down to `LAUNCH_MIN_CHUNK_BLOCKS`) before it ends the walk, since free
+ * nodes cap ranges anywhere from 1k to 10k blocks. Never throws: a refusal
+ * that halving cannot get past becomes an entry in `errors`.
  */
 export async function walkFactoryLogs(call: RpcCaller, spec: LaunchChainSpec, options: WalkOptions): Promise<WalkResult> {
   const now = options.now ?? Date.now;
@@ -354,7 +367,7 @@ export async function walkFactoryLogs(call: RpcCaller, spec: LaunchChainSpec, op
   const chunkBlocks = Math.max(1, options.chunkBlocks ?? LAUNCH_CHUNK_BLOCKS);
   const maxChunks = Math.max(1, options.maxChunks ?? LAUNCH_MAX_CHUNKS);
   const budgetMs = options.budgetMs ?? LAUNCH_WALK_BUDGET_MS;
-  const result: WalkResult = { chunks: 0, logs: [], errors: [] };
+  const result: WalkResult = { chunks: 0, cachedChunks: 0, logs: [], errors: [] };
 
   let head: number | undefined;
   try {
@@ -378,6 +391,12 @@ export async function walkFactoryLogs(call: RpcCaller, spec: LaunchChainSpec, op
     topics: [[...new Set(spec.factories.map((factory) => factory.topic0))]],
   };
 
+  // LAUNCH_CHUNK_BLOCKS (2000) halves to 1000, 500, 250.
+  let size = chunkBlocks;
+  const minChunk = Math.min(chunkBlocks, LAUNCH_MIN_CHUNK_BLOCKS);
+  const confirmations = CACHE_CONFIRMATIONS[spec.chain] ?? 600;
+  const filterKey = `${filter.address.join(',')}|${filter.topics[0]?.join(',')}`.toLowerCase();
+
   const lagBlocks = Math.ceil(Math.max(0, options.headLagSeconds ?? LAUNCH_HEAD_LAG_SECONDS) / spec.blockSeconds);
   let to = Math.max(windowFrom, head - lagBlocks);
   while (to >= windowFrom) {
@@ -394,20 +413,33 @@ export async function walkFactoryLogs(call: RpcCaller, spec: LaunchChainSpec, op
       break;
     }
 
-    const from = Math.max(windowFrom, to - chunkBlocks + 1);
-    try {
-      const logs = await call(
-        'eth_getLogs',
-        [{ ...filter, fromBlock: numberToHex(from), toBlock: numberToHex(to) }],
-        options.signal,
-      );
-      if (!Array.isArray(logs)) throw new Error('eth_getLogs result is not an array');
-      result.logs.push(...logs);
-    } catch (error) {
-      result.errors.push(`eth_getLogs refused blocks ${from}-${to}: ${message(error)}`);
-      break;
+    const from = alignedChunkStart(to, windowFrom, size);
+    const final = options.cache !== undefined && isFinalChunk(from, to, size, head, confirmations);
+    const key = `launches:${spec.chain}:${filterKey}:${from}-${to}`;
+    let logs: unknown = final ? await options.cache?.get<unknown[]>(key) : undefined;
+    const hit = Array.isArray(logs);
+    if (!hit) {
+      try {
+        logs = await call(
+          'eth_getLogs',
+          [{ ...filter, fromBlock: numberToHex(from), toBlock: numberToHex(to) }],
+          options.signal,
+        );
+        if (!Array.isArray(logs)) throw new Error('eth_getLogs result is not an array');
+      } catch (error) {
+        if (size > minChunk) {
+          // Retry the same top block on a finer grid.
+          size = Math.max(minChunk, Math.floor(size / 2));
+          continue;
+        }
+        result.errors.push(`eth_getLogs refused blocks ${from}-${to}: ${message(error)}`);
+        break;
+      }
+      if (final) await options.cache?.set(key, logs);
     }
+    result.logs.push(...(logs as unknown[]));
     result.chunks += 1;
+    if (hit) result.cachedChunks += 1;
     result.scannedFrom = from;
     to = from - 1;
   }
@@ -489,6 +521,11 @@ export interface LaunchSourceOptions {
   chunkBlocks?: number;
   maxChunks?: number;
   budgetMs?: number;
+  /**
+   * Cache for finalized chunks. Defaults to the run's chain-read cache, or none
+   * when `rpc` is injected: a scripted node has nothing worth keeping.
+   */
+  cache?: KvCache;
 }
 
 interface ChainScan {
@@ -561,6 +598,7 @@ export class LaunchSource implements TrendingSource {
 
   private async scanNetwork(specs: LaunchChainSpec[], ctx: SourceContext, config: SourceConfig): Promise<ChainScan[]> {
     const scans: ChainScan[] = [];
+    const cache = this.options.cache ?? (this.options.rpc ? undefined : openRpcCache(ctx.app));
     for (const spec of specs) {
       const endpoints = ctx.app.rpc[spec.chain as keyof AppConfig['rpc']] ?? [];
       const call =
@@ -573,7 +611,9 @@ export class LaunchSource implements TrendingSource {
         maxChunks: this.options.maxChunks,
         budgetMs: this.options.budgetMs,
         signal: ctx.signal,
+        ...(cache ? { cache } : {}),
       });
+      ctx.logger.debug('launch walk finished', { chain: spec.chain, chunks: walk.chunks, cached: walk.cachedChunks });
       for (const error of walk.errors) {
         this.errors.push({ source: `${this.id}:${spec.chain}`, error });
         ctx.logger.warn('launch walk stopped early', { chain: spec.chain, error });

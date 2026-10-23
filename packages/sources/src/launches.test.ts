@@ -22,6 +22,7 @@ import {
   walkFactoryLogs,
 } from './launches';
 import { JsonRpcClient, type RpcCaller, hexToNumber } from './rpc';
+import { MemoryCache } from '@provenance/core/cache';
 
 const ETH = LAUNCH_FACTORIES.find((spec) => spec.chain === 'ethereum')!;
 
@@ -249,41 +250,49 @@ describe('walkFactoryLogs', () => {
     params: unknown[];
   }
 
-  function scripted(head: number, refuseFrom?: number): { call: RpcCaller; calls: Call[] } {
+  function scripted(
+    head: number,
+    refuseFrom?: number,
+    maxRange = Number.POSITIVE_INFINITY,
+  ): { call: RpcCaller; calls: Call[] } {
     const calls: Call[] = [];
     const call: RpcCaller = async (method, params) => {
       calls.push({ method, params });
       if (method === 'eth_blockNumber') return `0x${head.toString(16)}`;
-      const filter = params[0] as { fromBlock: string };
-      if (refuseFrom !== undefined && hexToNumber(filter.fromBlock)! <= refuseFrom) {
-        throw new Error('block range too large');
-      }
+      const filter = params[0] as { fromBlock: string; toBlock: string };
+      const from = hexToNumber(filter.fromBlock)!;
+      if (refuseFrom !== undefined && from <= refuseFrom) throw new Error('block range too large');
+      if (hexToNumber(filter.toBlock)! - from + 1 > maxRange) throw new Error('range exceeds 500 blocks');
       return [{ fromBlock: filter.fromBlock }];
     };
     return { call, calls };
   }
 
-  test('walks back from head in contiguous chunks covering the lookback', async () => {
-    const { call, calls } = scripted(1_000_000);
+  const rangesOf = (calls: Call[]) =>
+    calls
+      .filter((entry) => entry.method === 'eth_getLogs')
+      .map((entry) => {
+        const filter = entry.params[0] as { fromBlock: string; toBlock: string };
+        return [hexToNumber(filter.fromBlock), hexToNumber(filter.toBlock)];
+      });
+
+  test('walks back from head in contiguous chunks on a fixed grid covering the lookback', async () => {
+    const { call, calls } = scripted(1_001_500);
     const walk = await walkFactoryLogs(call, ETH, { lookbackHours: 24, chunkBlocks: 2000, headLagSeconds: 0 });
 
     expect(lookbackBlocks(24, 12)).toBe(7200);
     expect(walk.errors).toEqual([]);
-    expect(walk.head).toBe(1_000_000);
-    expect(walk.windowFrom).toBe(1_000_000 - 7200 + 1);
+    expect(walk.head).toBe(1_001_500);
+    expect(walk.windowFrom).toBe(1_001_500 - 7200 + 1);
     expect(walk.scannedFrom).toBe(walk.windowFrom);
     expect(walk.chunks).toBe(4);
-    const ranges = calls
-      .filter((entry) => entry.method === 'eth_getLogs')
-      .map((entry) => {
-        const filter = entry.params[0] as { fromBlock: string; toBlock: string; address: string[]; topics: string[][] };
-        return [hexToNumber(filter.fromBlock), hexToNumber(filter.toBlock)];
-      });
-    expect(ranges).toEqual([
-      [998_001, 1_000_000],
-      [996_001, 998_000],
-      [994_001, 996_000],
-      [992_801, 994_000],
+    // The head chunk is partial; the rest start on multiples of 2000, so the
+    // same bounds come back next run.
+    expect(rangesOf(calls)).toEqual([
+      [1_000_000, 1_001_500],
+      [998_000, 999_999],
+      [996_000, 997_999],
+      [994_301, 995_999],
     ]);
     const filter = calls[1]?.params[0] as { address: string[]; topics: string[][] };
     expect(filter.address).toEqual(ETH.factories.map((factory) => factory.address));
@@ -300,15 +309,50 @@ describe('walkFactoryLogs', () => {
     expect(walk.errors).toEqual([]);
   });
 
-  test('a refused range stops the walk, keeps the newer chunks and is recorded', async () => {
-    const { call } = scripted(1_000_000, 995_000);
+  test('a refusal halving cannot get past stops the walk, keeps the newer chunks and is recorded', async () => {
+    const { call, calls } = scripted(1_001_500, 996_400);
     const walk = await walkFactoryLogs(call, ETH, { lookbackHours: 24, chunkBlocks: 2000, headLagSeconds: 0 });
-    expect(walk.chunks).toBe(2);
-    expect(walk.logs).toHaveLength(2);
-    expect(walk.scannedFrom).toBe(996_001);
+    // Every range starting at or below 996400 is refused; halving reads what
+    // lies above it until the 250-block floor.
+    expect(rangesOf(calls)).toEqual([
+      [1_000_000, 1_001_500],
+      [998_000, 999_999],
+      [996_000, 997_999],
+      [997_000, 997_999],
+      [996_000, 996_999],
+      [996_500, 996_999],
+      [996_000, 996_499],
+      [996_250, 996_499],
+    ]);
+    expect(walk.chunks).toBe(4);
+    expect(walk.scannedFrom).toBe(996_500);
     expect(walk.errors).toHaveLength(1);
-    expect(walk.errors[0]).toContain('refused blocks 994001-996000');
+    expect(walk.errors[0]).toContain('refused blocks 996250-996499');
     expect(walk.errors[0]).toContain('block range too large');
+  });
+
+  test('a node that caps the range is walked in halved chunks to the window start', async () => {
+    const { call } = scripted(1_001_500, undefined, 500);
+    const walk = await walkFactoryLogs(call, ETH, { lookbackHours: 24, chunkBlocks: 2000, headLagSeconds: 0 });
+    expect(walk.errors).toEqual([]);
+    expect(walk.scannedFrom).toBe(walk.windowFrom);
+  });
+
+  test('final chunks come from the cache on the next walk; the head chunk never does', async () => {
+    const cache = new MemoryCache();
+    const first = scripted(1_001_500);
+    await walkFactoryLogs(first.call, ETH, { lookbackHours: 24, chunkBlocks: 2000, headLagSeconds: 0, cache });
+    // 994301-995999 is clipped by the window, so it is not a full grid cell.
+    expect(cache.entries.size).toBe(2);
+
+    const second = scripted(1_001_600);
+    const walk = await walkFactoryLogs(second.call, ETH, { lookbackHours: 24, chunkBlocks: 2000, headLagSeconds: 0, cache });
+    expect(walk.cachedChunks).toBe(2);
+    expect(rangesOf(second.calls)).toEqual([
+      [1_000_000, 1_001_600],
+      [994_401, 995_999],
+    ]);
+    expect(walk.logs).toHaveLength(4);
   });
 
   test('chunk and wall-clock budgets stop the walk without throwing', async () => {
@@ -454,7 +498,7 @@ describe('LaunchSource over the network path', () => {
   test('fails over across endpoints, walks, hydrates and never throws', async () => {
     hydrationRequests = [];
     const base = `http://127.0.0.1:${server.port}`;
-    const app = loadConfig({ PROVENANCE_CHAINS: 'ethereum', RPC_ETHEREUM: `${base}/refuses,${base}/ok`, RPC_PUBLIC_FALLBACK: 'false', LAUNCHES_RATE_MS: '0', LAUNCHES_LOOKBACK_HOURS: '24' });
+    const app = loadConfig({ PROVENANCE_CHAINS: 'ethereum', RPC_ETHEREUM: `${base}/refuses,${base}/ok`, RPC_PUBLIC_FALLBACK: 'false', RPC_CACHE: 'false', LAUNCHES_RATE_MS: '0', LAUNCHES_LOOKBACK_HOURS: '24' });
     app.pipeline.sources = app.pipeline.sources.map((source) =>
       source.id === 'dexscreener' ? { ...source, rateLimitMs: 0 } : source,
     );
@@ -473,7 +517,7 @@ describe('LaunchSource over the network path', () => {
 
   test('no working endpoint is a recorded error and an empty list', async () => {
     const base = `http://127.0.0.1:${server.port}`;
-    const app = loadConfig({ PROVENANCE_CHAINS: 'ethereum', RPC_ETHEREUM: `${base}/refuses`, RPC_PUBLIC_FALLBACK: 'false', LAUNCHES_RATE_MS: '0', LAUNCHES_LOOKBACK_HOURS: '24' });
+    const app = loadConfig({ PROVENANCE_CHAINS: 'ethereum', RPC_ETHEREUM: `${base}/refuses`, RPC_PUBLIC_FALLBACK: 'false', RPC_CACHE: 'false', LAUNCHES_RATE_MS: '0', LAUNCHES_LOOKBACK_HOURS: '24' });
     const source = new LaunchSource(launchConfig(app), { dexscreenerBaseUrl: base });
     const entries = await source.fetchTrending({ config: launchConfig(app), app, logger: silentLogger });
 
