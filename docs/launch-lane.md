@@ -189,7 +189,8 @@ shown safe", and that rejects.
 |---|---|---|
 | `LAUNCHES_ENABLED` | `true` | Run the launch source and lane |
 | `LAUNCHES_LOOKBACK_HOURS` | `6` | Factory-event window per run; a launch that fails the gate is retried while inside it |
-| `LAUNCHES_MAX_CANDIDATES` | `40` | New pools hydrated per run |
+| `LAUNCHES_MAX_CANDIDATES` | `300` | New pools hydrated per run, newest first. Sized to cover the whole window (about 160 per 6 h on Ethereum + Base, Oct 2026) so a pool too thin on one run is re-read on the next |
+| `LAUNCHES_MAX_AGE_HOURS` | `48` | Market gate: a deepest pool older than this is an established token opening a new pool, not a launch |
 | `LAUNCHES_MAX_CATALOG_PER_RUN` | `8` | Launches given chain analysis and an anchor check per run |
 | `LAUNCHES_MIN_LIQUIDITY_USD` | `40000` | Roughly dexscanner's 15 ETH |
 | `LAUNCHES_MIN_HOLDERS` | `50` | Lower than dexscanner's 100 so the verdict doesn't wait on distribution |

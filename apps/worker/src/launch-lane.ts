@@ -57,6 +57,16 @@ export function emptyLaunchStats(): LaunchStats {
   return { discovered: 0, rejected: 0, dismissed: 0, catalogued: 0, researched: 0, expressed: 0, dormant: 0 };
 }
 
+/** Counts each reason under its rule name, the text before the first colon. */
+export function countRejection(stats: LaunchStats, reasons: readonly string[]): void {
+  stats.rejected += 1;
+  const by = (stats.rejectedBy ??= {});
+  for (const reason of reasons) {
+    const rule = reason.split(':')[0]?.trim() || 'other';
+    by[rule] = (by[rule] ?? 0) + 1;
+  }
+}
+
 /** Marker recorded in `stats.sourceErrors` when the LLM budget cut a run short. */
 export const BUDGET_SOURCE = 'llm-budget';
 
@@ -203,10 +213,12 @@ export async function runLaunchLane(launches: TokenSnapshot[], ctx: LaunchLaneCo
     const gate = deps.gateLaunchMarket(snapshot, app.launches);
     if (gate.passed) candidates.push(snapshot);
     else {
-      stats.rejected += 1;
+      countRejection(stats, gate.reasons);
+      // Over a hundred a run: the per-token line stays at debug, the tally below is info.
       log.debug('[REJECT] launch', { tokenId: snapshot.tokenId, reasons: gate.reasons });
     }
   }
+  if (stats.rejectedBy) log.info('launch market gate', { rejectedBy: stats.rejectedBy, passed: candidates.length });
 
   // Deepest pools first: with a per-run cap, the most tradeable launches are
   // the ones worth the RPC and the anchor check.
@@ -229,7 +241,7 @@ export async function runLaunchLane(launches: TokenSnapshot[], ctx: LaunchLaneCo
 
       const gate = deps.gateLaunchChain(chain, app.launches);
       if (!gate.passed) {
-        stats.rejected += 1;
+        countRejection(stats, gate.reasons);
         tokenLog.info('[REJECT] launch', { tokenId: snapshot.tokenId, reasons: gate.reasons });
         return null;
       }

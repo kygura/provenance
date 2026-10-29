@@ -22,6 +22,8 @@ describe('launch lane against fixtures', () => {
       USE_FIXTURES: '1',
       DRY_RUN: '1',
       LAUNCHES_LOOKBACK_HOURS: '48',
+      // Fixture pairs carry fixed creation dates that age with the wall clock.
+      LAUNCHES_MAX_AGE_HOURS: '1000000',
     });
     const app: AppConfig = {
       ...base,

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { silentLogger, type WatchEntry } from '@provenance/core';
 import { runPipeline } from './pipeline';
+import { countRejection, emptyLaunchStats } from './launch-lane';
 import {
   FakeStore,
   makeAnchor,
@@ -261,5 +262,15 @@ describe('verdict reconciliation', () => {
     expect(entry?.status).toBe('active');
     expect(entry?.anchor.type).toBe('inciting-event');
     expect(entry?.anchor.earliestSource?.title).toBe('News report');
+  });
+});
+
+describe('countRejection', () => {
+  test('tallies each reason under its rule, once per token in `rejected`', () => {
+    const stats = emptyLaunchStats();
+    countRejection(stats, ['liquidity: $1k < $40k', 'age: deepest pool is 900 h old > 48 h']);
+    countRejection(stats, ['liquidity: unknown (not yet indexed by a market source)']);
+    expect(stats.rejected).toBe(2);
+    expect(stats.rejectedBy).toEqual({ liquidity: 2, age: 1 });
   });
 });

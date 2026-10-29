@@ -27,9 +27,15 @@ September 2024. Same anchor, same name: one manufactured, one organic. The
 brief exists to say which is which, and whether the outside traction is
 enough to keep the narrative alive.
 
-A real anchor on a manufactured token is the trap. Report it as one. It runs once a day at 09:00 Atlantic/Canary, after
-the 06:00 UTC full run in both summer and winter time, with margin for
-GitHub's late crons.
+A real anchor on a manufactured token is the trap. Report it as one.
+
+**The scheduled brief is not this routine.** `brief.yml` runs `cli.ts brief`
+at 06:40 and 18:40 UTC: the same queries in code, one model call, one
+delivered message (`docs/brief-routine.md`). Don't also schedule this file;
+two briefs a morning say the same thing twice. Use it on demand: when the
+owner asks for a read, or for a deep look at the few tokens that cleared the
+launch lane's gates or drew a `manufactured-carrier` alert, where a model
+that can search and reason across the evidence earns its cost.
 
 If you were opened for ordinary development work in this repo, this file is
 not your task. Use `SPEC.md`, `docs/architecture.md` and `docs/launch-lane.md`.
@@ -43,12 +49,19 @@ Turso DB:
 |---|---|---|
 | `provenance.yml` | `0 * * * *`, gated (`docs/cadence.md`): 06:00 and 18:00 at quiet volume, every 4 h or hourly when the meme market heats up | Full run: trending discovery → chain analysis → research → score → alerts. Rows in `runs`, `snapshots`, `chain_analysis`, `provenance`, `scores`, `alerts`. |
 | `launches.yml` | `*/30 * * * *` | Launch lane (`--lane launches`): new pools → market gate → chain gate → anchor check. Rows in `runs`, `watchlist`, `alerts`, sometimes `provenance`. No trending snapshots. |
+| `brief.yml` | `40 6,18 * * *` | The scheduled brief (`cli.ts brief`). Writes only `setups`. |
+
+GitHub's crons are best-effort and run late or not at all under load.
+`ops/cron-trigger` (a Cloudflare Worker) sends `repository_dispatch` on time
+to both lanes; the crons stay as the fallback. Discovery covers every chain
+the trending feeds return unless `PROVENANCE_CHAINS` is set, and the
+cross-network feeds are mostly Solana: set it (e.g.
+`solana,ethereum,base`) for Ethereum tokens to reach the trending lane.
 
 **Never run `cli.ts run`, `migrate` or `seed` here.** It would duplicate
 collection and could re-send Telegram/Discord/webhook alerts that Actions
 already delivered. This routine only reads.
 
-The 18:00 UTC run's results land in the next morning's brief.
 
 ---
 
@@ -546,10 +559,9 @@ Confidence words: `low-confidence`, `we lean`, `base case`, `tail case`,
   withdrawals, a bridge or a mixer don't cluster, and the trace needs
   `ETHERSCAN_API_KEY`.
 
-- **Briefing layer vs scheduler.** This routine is additive. If the user
-  would rather have it *be* the scheduler (running `cli.ts run` itself and
-  retiring the Actions crons), that's a larger change. Flag it, don't do it
-  unasked.
+- **Briefing layer vs scheduler.** Settled: collection stays in Actions,
+  triggered on time by `ops/cron-trigger`; the scheduled brief is
+  `brief.yml`. This routine is on-demand only, and never runs `cli.ts run`.
 - **`evm-sniper` port** (from the user's `SALVAGE.md` notes, not in this
   repo): a read-only ERC20 analyser could go into `packages/chain`. It's an app change, not a routine concern, and must
   never include the part that needs a `PRIVATE_KEY`.

@@ -119,6 +119,11 @@ export interface LaunchStats {
   discovered: number;
   /** Rejected by a hard filter, before or after chain analysis. */
   rejected: number;
+  /**
+   * Rejections by rule (the reason's prefix: `liquidity`, `holders`, …). One
+   * token can count under several rules, so the sum can exceed `rejected`.
+   */
+  rejectedBy?: Record<string, number>;
   /** Passed the gate, judged forced or unclear. */
   dismissed: number;
   /** Passed the gate, judged anchored, added to the watchlist. */

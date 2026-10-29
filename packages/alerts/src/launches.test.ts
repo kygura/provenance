@@ -47,6 +47,15 @@ describe('gateLaunchMarket', () => {
     expect(gateLaunchMarket(evmSnapshot(undefined), config).reasons[0]).toContain('unknown');
   });
 
+  test('an established token opening a new pool is not a launch', () => {
+    const at = (ageHours: number) =>
+      gateLaunchMarket(makeSnapshot({ ...evmSnapshot(1_000_000), metrics: { liquidityUsd: 1_000_000, ageHours } }), config);
+    expect(at(config.maxAgeHours).passed).toBe(true);
+    const old = at(config.maxAgeHours + 1);
+    expect(old.passed).toBe(false);
+    expect(old.reasons[0]).toStartWith('age:');
+  });
+
   test('non-EVM chains have no launch-lane checks', () => {
     const solana = makeSnapshot({ metrics: { liquidityUsd: 1_000_000 } });
     expect(gateLaunchMarket(solana, config).passed).toBe(false);

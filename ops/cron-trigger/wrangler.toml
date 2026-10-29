@@ -1,0 +1,10 @@
+name = "provenance-cron-trigger"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+REPO = "kygura/provenance"
+
+# Keep in sync with EVENTS in worker.js.
+[triggers]
+crons = ["*/15 * * * *", "0 * * * *"]

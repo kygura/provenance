@@ -43,6 +43,10 @@ export function gateLaunchMarket(snapshot: TokenSnapshot, config: LaunchConfig):
   } else if (liquidity < config.minLiquidityUsd) {
     reasons.push(`liquidity: ${formatUsd(liquidity)} < ${formatUsd(config.minLiquidityUsd)}`);
   }
+  const age = snapshot.metrics.ageHours;
+  if (age !== undefined && age > config.maxAgeHours) {
+    reasons.push(`age: deepest pool is ${Math.round(age)} h old > ${config.maxAgeHours} h, an established token's new pool`);
+  }
   return gate(reasons);
 }
 
