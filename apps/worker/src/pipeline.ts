@@ -13,6 +13,8 @@
 import {
   type Alert,
   type AlertChannelSink,
+  CHAIN_PRIORITY,
+  deferAboveSoftCap,
   type AlertRuleInput,
   type AnalyzerContext,
   type AppConfig,
@@ -31,6 +33,7 @@ import {
   hoursBetween,
   mapLimit,
   runId as newRunId,
+  selectByChain,
   nowIso,
 } from '@provenance/core';
 import { type PipelineDeps, loadRuntimeDeps } from './deps';
@@ -220,8 +223,11 @@ export async function runPipeline(
       log.debug('dropped by filter', { tokenId: drop.tokenId, reason: drop.reason });
     }
 
-    const triaged = resolved.triageOrder(filtered.kept);
-    selected = triaged.slice(0, Math.max(0, app.pipeline.maxTokensPerRun));
+    const triaged = deferAboveSoftCap(resolved.triageOrder(filtered.kept), app.pipeline.maxMarketCapUsd);
+    // With chains configured, they take turns at the cap, CHAIN_PRIORITY
+    // first; otherwise the cross-source sort decides alone.
+    const cap = Math.max(0, app.pipeline.maxTokensPerRun);
+    selected = app.pipeline.chains.length > 1 ? selectByChain(triaged, cap, CHAIN_PRIORITY) : triaged.slice(0, cap);
     log.info('discovery complete', {
       entries: discovery.entries.length,
       merged: snapshots.length,

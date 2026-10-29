@@ -64,6 +64,15 @@ export const CHAIN_ALIASES: Record<string, Chain> = {
   hyperliquid: 'hyperliquid',
 };
 
+/**
+ * Which chain fills the per-run token cap first. Launching on Ethereum costs
+ * real gas and has no bonding-curve launchpad, so its launches skew more
+ * deliberate; Base next for the same reason at lower cost. Chains not listed
+ * follow in triage order. Fixed here on purpose: the order of
+ * `PROVENANCE_CHAINS` only says which chains run, never which come first.
+ */
+export const CHAIN_PRIORITY: readonly Chain[] = ['ethereum', 'base'];
+
 export function normalizeChain(raw: string | null | undefined): Chain {
   if (!raw) return 'unknown';
   const key = raw.trim().toLowerCase();

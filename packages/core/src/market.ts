@@ -101,3 +101,57 @@ export interface TokenSnapshot {
   sourceCount: number;
   capturedAt: string;
 }
+
+/** Past this multiple of the soft ceiling a token is dropped outright. */
+export const MARKET_CAP_HARD_FACTOR = 2;
+
+/** The larger of market cap and FDV, when either is known. */
+export function sizeUsd(metrics: MarketMetrics | undefined): number | undefined {
+  const known = [metrics?.marketCapUsd, metrics?.fdvUsd].filter(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value),
+  );
+  return known.length > 0 ? Math.max(...known) : undefined;
+}
+
+/**
+ * Moves tokens above the soft market-cap ceiling behind the rest, keeping
+ * triage order within each group: they still run when a chain has slots to
+ * spare, never ahead of a smaller token. A `softCapUsd` of 0 changes nothing.
+ */
+export function deferAboveSoftCap(triaged: readonly TokenSnapshot[], softCapUsd: number): TokenSnapshot[] {
+  if (softCapUsd <= 0) return [...triaged];
+  const over = (snapshot: TokenSnapshot) => (sizeUsd(snapshot.metrics) ?? 0) > softCapUsd;
+  return [...triaged.filter((s) => !over(s)), ...triaged.filter(over)];
+}
+
+/**
+ * Takes `limit` snapshots from a triaged list, one chain at a time: each
+ * round adds every chain's next-best token, chains in `priority` order first
+ * (`CHAIN_PRIORITY`), then any others in the order their best token sits in
+ * `triaged`. When the cap falls mid-round, earlier chains win. A plain cut hands every slot to the chain with the
+ * most cross-listed tokens: Solana tokens appear on DexScreener's boosts and
+ * GeckoTerminal both, Ethereum ones on GeckoTerminal alone, so `sourceCount`
+ * sorted every Ethereum token below the 15-token cap (Oct 2026). Order within
+ * a chain is unchanged, and a chain with fewer tokens leaves its slots to the
+ * rest.
+ */
+export function selectByChain(
+  triaged: readonly TokenSnapshot[],
+  limit: number,
+  priority: readonly string[] = [],
+): TokenSnapshot[] {
+  const queues = new Map<string, TokenSnapshot[]>();
+  for (const chain of priority) queues.set(chain, []);
+  for (const snapshot of triaged) {
+    const queue = queues.get(snapshot.chain);
+    if (queue) queue.push(snapshot);
+    else queues.set(snapshot.chain, [snapshot]);
+  }
+  const out: TokenSnapshot[] = [];
+  for (let i = 0; out.length < limit; i += 1) {
+    const round = [...queues.values()].flatMap((queue) => (i < queue.length ? [queue[i]!] : []));
+    if (round.length === 0) break;
+    out.push(...round.slice(0, limit - out.length));
+  }
+  return out;
+}

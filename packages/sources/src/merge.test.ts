@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { type SourceId, type TrendingEntry, loadConfig, silentLogger } from '@provenance/core';
 
 import { createSources, discoverTrending } from './discover';
-import { SOURCE_PRECEDENCE, mergeToSnapshots, splitLanes } from './merge';
+import { SOURCE_PRECEDENCE, filterSnapshots, mergeToSnapshots, splitLanes } from './merge';
 
 function entry(source: SourceId, tokenAddress: string, overrides: Partial<TrendingEntry> = {}): TrendingEntry {
   return {
@@ -119,5 +119,50 @@ describe('fixture discovery', () => {
     expect(lanes.trending).toEqual(trendingOnly);
     expect(lanes.trending.map((s) => [s.tokenId, s.sourceCount, s.bestRank])).toEqual(TRENDING_BEFORE);
     expect(lanes.launches.map((s) => s.symbol)).toEqual(['UNKNOWN', 'KERMIT', 'SHREK']);
+  });
+});
+
+describe('filterSnapshots: maxMarketCapUsd', () => {
+  const pipeline = { ...loadConfig({}).pipeline, minLiquidityUsd: 0, minVolume24hUsd: 0, minPoolAgeHours: 0 };
+  const at = (address: string, metrics: TrendingEntry['metrics']) =>
+    mergeToSnapshots([entry('geckoterminal', address, { metrics })])[0]!;
+
+  test('drops an established token by size, never by age', () => {
+    const result = filterSnapshots(
+      [
+        at(A, { marketCapUsd: 2_000_000_000, ageHours: 30_000 }),
+        at(B, { marketCapUsd: 3_000_000, ageHours: 18_000 }),
+        at(C, { ageHours: 20 }),
+        at(D, { marketCapUsd: 15_000_000, fdvUsd: 200_000_000 }),
+      ],
+      pipeline,
+    );
+    expect(result.kept.map((s) => s.tokenAddress)).toEqual([B, C]);
+    expect(result.dropped.map((d) => d.reason.split(':')[0])).toEqual(['maxMarketCapUsd', 'maxMarketCapUsd']);
+  });
+
+  test('the ceiling is soft: only past twice it is a token dropped', () => {
+    const ceiling = pipeline.maxMarketCapUsd;
+    const kept = filterSnapshots([at(A, { marketCapUsd: ceiling * 1.5 }), at(B, { marketCapUsd: ceiling * 2 + 1 })], pipeline);
+    expect(kept.kept.map((s) => s.tokenAddress)).toEqual([A]);
+  });
+
+  test('0 turns the cap off', () => {
+    expect(filterSnapshots([at(A, { marketCapUsd: 2e9 })], { ...pipeline, maxMarketCapUsd: 0 }).kept).toHaveLength(1);
+  });
+});
+
+describe('filterSnapshots: unknown liquidity', () => {
+  const pipeline = { ...loadConfig({}).pipeline, minVolume24hUsd: 0, minPoolAgeHours: 0, maxMarketCapUsd: 0 };
+  const at = (address: string, liquidityUsd?: number) =>
+    mergeToSnapshots([entry('dexscreener', address, { metrics: liquidityUsd === undefined ? {} : { liquidityUsd } })])[0]!;
+
+  test('an unhydrated row is dropped, a deep enough one kept', () => {
+    const result = filterSnapshots([at(A), at(B, 50_000), at(C, 1_000)], pipeline);
+    expect(result.kept.map((s) => s.tokenAddress)).toEqual([B]);
+    expect(result.dropped.map((d) => d.reason)).toEqual([
+      'minLiquidityUsd: liquidity unknown (no market data for the token)',
+      'minLiquidityUsd: known liquidity $1,000 < $25,000',
+    ]);
   });
 });
