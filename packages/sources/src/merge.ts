@@ -6,10 +6,12 @@ import {
   type SourceId,
   type TokenSnapshot,
   type TrendingEntry,
+  MARKET_CAP_HARD_FACTOR,
   TRENDING_SOURCES,
   isEvm,
   isTokenAddress,
   ratio,
+  sizeUsd,
   tokenId,
 } from '@provenance/core';
 
@@ -283,13 +285,13 @@ function rejectionReason(
     return `minPoolAgeHours: known pool age ${age.toFixed(2)}h < ${pipeline.minPoolAgeHours}h (unknown pool age is kept)`;
   }
 
-  // Size, not age: an old token nobody found yet is still a candidate.
-  const caps = [metrics.marketCapUsd, metrics.fdvUsd].filter(
-    (value): value is number => typeof value === 'number' && Number.isFinite(value),
-  );
-  const cap = caps.length > 0 ? Math.max(...caps) : undefined;
-  if (pipeline.maxMarketCapUsd > 0 && cap !== undefined && cap > pipeline.maxMarketCapUsd) {
-    return `maxMarketCapUsd: market cap/FDV ${fmt(cap)} > ${fmt(pipeline.maxMarketCapUsd)}, already had its run (unknown cap is kept)`;
+  // Size, not age: an old token nobody found yet is still a candidate. The
+  // ceiling is soft (the pipeline defers tokens above it); only well past it
+  // is a token dropped here.
+  const size = sizeUsd(metrics);
+  const hardCap = pipeline.maxMarketCapUsd * MARKET_CAP_HARD_FACTOR;
+  if (pipeline.maxMarketCapUsd > 0 && size !== undefined && size > hardCap) {
+    return `maxMarketCapUsd: market cap/FDV ${fmt(size)} > ${fmt(hardCap)} (${MARKET_CAP_HARD_FACTOR}x the soft ceiling), already had its run (unknown cap is kept)`;
   }
 
   return undefined;

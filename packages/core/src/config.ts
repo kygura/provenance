@@ -24,9 +24,11 @@ export interface PipelineConfig {
   /** Skip tokens whose pool is younger than this; nothing to research yet. */
   minPoolAgeHours: number;
   /**
-   * Ceiling on the larger of market cap and FDV. Keeps out tokens that have
-   * already had their run (PEPE, SPX) without a hard age cut, which would also
-   * drop old tokens nobody found yet; 0 turns it off.
+   * Soft ceiling on the larger of market cap and FDV. Tokens above it are kept
+   * but go to the back of their chain's queue for the per-run cap; tokens past
+   * `MARKET_CAP_HARD_FACTOR` times it have had their run (PEPE, SPX) and are
+   * dropped. Size, not age, so an old token nobody found yet still counts.
+   * 0 turns it off.
    */
   maxMarketCapUsd: number;
   /** Skip re-running the LLM on a token analysed within this window. */
@@ -533,7 +535,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       minLiquidityUsd: num(env.MIN_LIQUIDITY_USD, 25_000),
       minVolume24hUsd: num(env.MIN_VOLUME_24H_USD, 100_000),
       minPoolAgeHours: num(env.MIN_POOL_AGE_HOURS, 2),
-      maxMarketCapUsd: num(env.MAX_MARKET_CAP_USD, 100_000_000),
+      maxMarketCapUsd: num(env.MAX_MARKET_CAP_USD, 80_000_000),
       reanalyseAfterHours: num(env.REANALYSE_AFTER_HOURS, 72),
       alertScoreThreshold: num(env.ALERT_SCORE_THRESHOLD, 70),
       dryRun: bool(env.DRY_RUN, false),

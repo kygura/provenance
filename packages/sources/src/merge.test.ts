@@ -133,12 +133,18 @@ describe('filterSnapshots: maxMarketCapUsd', () => {
         at(A, { marketCapUsd: 2_000_000_000, ageHours: 30_000 }),
         at(B, { marketCapUsd: 3_000_000, ageHours: 18_000 }),
         at(C, { ageHours: 20 }),
-        at(D, { marketCapUsd: 15_000_000, fdvUsd: 150_000_000 }),
+        at(D, { marketCapUsd: 15_000_000, fdvUsd: 200_000_000 }),
       ],
       pipeline,
     );
     expect(result.kept.map((s) => s.tokenAddress)).toEqual([B, C]);
     expect(result.dropped.map((d) => d.reason.split(':')[0])).toEqual(['maxMarketCapUsd', 'maxMarketCapUsd']);
+  });
+
+  test('the ceiling is soft: only past twice it is a token dropped', () => {
+    const ceiling = pipeline.maxMarketCapUsd;
+    const kept = filterSnapshots([at(A, { marketCapUsd: ceiling * 1.5 }), at(B, { marketCapUsd: ceiling * 2 + 1 })], pipeline);
+    expect(kept.kept.map((s) => s.tokenAddress)).toEqual([A]);
   });
 
   test('0 turns the cap off', () => {

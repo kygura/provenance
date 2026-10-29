@@ -102,6 +102,28 @@ export interface TokenSnapshot {
   capturedAt: string;
 }
 
+/** Past this multiple of the soft ceiling a token is dropped outright. */
+export const MARKET_CAP_HARD_FACTOR = 2;
+
+/** The larger of market cap and FDV, when either is known. */
+export function sizeUsd(metrics: MarketMetrics | undefined): number | undefined {
+  const known = [metrics?.marketCapUsd, metrics?.fdvUsd].filter(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value),
+  );
+  return known.length > 0 ? Math.max(...known) : undefined;
+}
+
+/**
+ * Moves tokens above the soft market-cap ceiling behind the rest, keeping
+ * triage order within each group: they still run when a chain has slots to
+ * spare, never ahead of a smaller token. A `softCapUsd` of 0 changes nothing.
+ */
+export function deferAboveSoftCap(triaged: readonly TokenSnapshot[], softCapUsd: number): TokenSnapshot[] {
+  if (softCapUsd <= 0) return [...triaged];
+  const over = (snapshot: TokenSnapshot) => (sizeUsd(snapshot.metrics) ?? 0) > softCapUsd;
+  return [...triaged.filter((s) => !over(s)), ...triaged.filter(over)];
+}
+
 /**
  * Takes `limit` snapshots from a triaged list, one chain at a time: each
  * round adds every chain's next-best token, chains in `priority` order first

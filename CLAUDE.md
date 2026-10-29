@@ -59,9 +59,10 @@ cross-network feeds are mostly Solana: set it (e.g.
 `solana,ethereum,base`) for Ethereum tokens to reach the trending lane.
 Ethereum, then Base, fill the per-run token cap first (`CHAIN_PRIORITY`);
 the variable's order doesn't matter. Rows with unknown liquidity are
-dropped. Tokens whose market cap or
-FDV is above `MAX_MARKET_CAP_USD` ($100M) are dropped at discovery: they
-already had their run. Age is not a filter; an old token nobody found yet
+dropped. `MAX_MARKET_CAP_USD` ($80M) is a
+soft ceiling on the larger of market cap and FDV: tokens above it only get a
+slot after every smaller token on their chain, and past twice it ($160M)
+they are dropped at discovery as having already had their run. Age is not a filter; an old token nobody found yet
 can still carry a real meme.
 
 **Never run `cli.ts run`, `migrate` or `seed` here.** It would duplicate

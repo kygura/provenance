@@ -14,6 +14,7 @@ import {
   type Alert,
   type AlertChannelSink,
   CHAIN_PRIORITY,
+  deferAboveSoftCap,
   type AlertRuleInput,
   type AnalyzerContext,
   type AppConfig,
@@ -222,7 +223,7 @@ export async function runPipeline(
       log.debug('dropped by filter', { tokenId: drop.tokenId, reason: drop.reason });
     }
 
-    const triaged = resolved.triageOrder(filtered.kept);
+    const triaged = deferAboveSoftCap(resolved.triageOrder(filtered.kept), app.pipeline.maxMarketCapUsd);
     // With chains configured, they take turns at the cap, CHAIN_PRIORITY
     // first; otherwise the cross-source sort decides alone.
     const cap = Math.max(0, app.pipeline.maxTokensPerRun);

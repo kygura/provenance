@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { type TokenSnapshot, selectByChain } from './market';
+import { type TokenSnapshot, deferAboveSoftCap, selectByChain } from './market';
 
 function snap(chain: string, symbol: string): TokenSnapshot {
   return { tokenId: `${chain}:${symbol}`, chain, symbol } as unknown as TokenSnapshot;
@@ -33,5 +33,19 @@ describe('selectByChain', () => {
   test('order within a chain is kept; zero cap selects nothing', () => {
     expect(symbols(selectByChain(triaged, 1))).toEqual(['S1']);
     expect(selectByChain(triaged, 0)).toEqual([]);
+  });
+});
+
+describe('deferAboveSoftCap', () => {
+  const sized = (symbol: string, marketCapUsd?: number) =>
+    ({ tokenId: symbol, chain: 'ethereum', symbol, metrics: marketCapUsd === undefined ? {} : { marketCapUsd } }) as unknown as TokenSnapshot;
+  const order = [sized('BIG', 120e6), sized('SMALL', 5e6), sized('UNKNOWN'), sized('BIGGER', 150e6), sized('MID', 60e6)];
+
+  test('tokens over the ceiling go behind the rest, triage order kept in each group', () => {
+    expect(deferAboveSoftCap(order, 80e6).map((s) => s.symbol)).toEqual(['SMALL', 'UNKNOWN', 'MID', 'BIG', 'BIGGER']);
+  });
+
+  test('0 leaves the order alone', () => {
+    expect(deferAboveSoftCap(order, 0).map((s) => s.symbol)).toEqual(order.map((s) => s.symbol));
   });
 });
