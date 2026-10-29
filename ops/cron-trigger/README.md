@@ -24,17 +24,17 @@ launch already judged is never re-judged.
 2. From this directory:
 
    ```bash
-   npx wrangler@3 deploy
+   npx wrangler@4 deploy
    ```
 
    ```bash
-   npx wrangler@3 secret put GITHUB_TOKEN
+   npx wrangler@4 secret put GITHUB_TOKEN
    ```
 
 3. Check the first ticks in the Actions tab (event `repository_dispatch`) or
-   with `npx wrangler@3 tail`.
+   with `npx wrangler@4 tail`.
 
 Cloudflare's free plan covers this: two cron triggers, about 120 requests a
 day.
 
-To stop it, `npx wrangler@3 delete`; the GitHub crons carry on alone.
+To stop it, `npx wrangler@4 delete`; the GitHub crons carry on alone.

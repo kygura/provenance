@@ -31,6 +31,7 @@ import {
   hoursBetween,
   mapLimit,
   runId as newRunId,
+  selectByChain,
   nowIso,
 } from '@provenance/core';
 import { type PipelineDeps, loadRuntimeDeps } from './deps';
@@ -221,7 +222,10 @@ export async function runPipeline(
     }
 
     const triaged = resolved.triageOrder(filtered.kept);
-    selected = triaged.slice(0, Math.max(0, app.pipeline.maxTokensPerRun));
+    // With chains configured, each gets a fair share of the cap; otherwise
+    // the cross-source sort decides alone.
+    const cap = Math.max(0, app.pipeline.maxTokensPerRun);
+    selected = app.pipeline.chains.length > 1 ? selectByChain(triaged, cap) : triaged.slice(0, cap);
     log.info('discovery complete', {
       entries: discovery.entries.length,
       merged: snapshots.length,
