@@ -122,30 +122,32 @@ describe('fixture discovery', () => {
   });
 });
 
-describe('filterSnapshots: maxPoolAgeHours', () => {
+describe('filterSnapshots: maxMarketCapUsd', () => {
   const pipeline = { ...loadConfig({}).pipeline, minLiquidityUsd: 0, minVolume24hUsd: 0, minPoolAgeHours: 0 };
-  const at = (address: string, ageHours?: number) =>
-    mergeToSnapshots([entry('geckoterminal', address, { metrics: ageHours === undefined ? {} : { ageHours } })])[0]!;
+  const at = (address: string, metrics: TrendingEntry['metrics']) =>
+    mergeToSnapshots([entry('geckoterminal', address, { metrics })])[0]!;
 
-  test('drops a token past the cap, keeps one under it and one with unknown age', () => {
-    const result = filterSnapshots([at(A, 200), at(B, 10), at(C)], pipeline);
+  test('drops an established token by size, never by age', () => {
+    const result = filterSnapshots(
+      [
+        at(A, { marketCapUsd: 2_000_000_000, ageHours: 30_000 }),
+        at(B, { marketCapUsd: 3_000_000, ageHours: 18_000 }),
+        at(C, { ageHours: 20 }),
+        at(D, { marketCapUsd: 15_000_000, fdvUsd: 100_000_000 }),
+      ],
+      pipeline,
+    );
     expect(result.kept.map((s) => s.tokenAddress)).toEqual([B, C]);
-    expect(result.dropped[0]?.reason).toStartWith('maxPoolAgeHours');
-  });
-
-  test('a fresh pool does not hide an old pair', () => {
-    const fresh = at(D, 5);
-    fresh.pairs = [{ pairAddress: D, dexId: 'uniswap', createdAt: '2023-04-14T00:00:00.000Z' }];
-    expect(filterSnapshots([fresh], pipeline).kept).toEqual([]);
+    expect(result.dropped.map((d) => d.reason.split(':')[0])).toEqual(['maxMarketCapUsd', 'maxMarketCapUsd']);
   });
 
   test('0 turns the cap off', () => {
-    expect(filterSnapshots([at(A, 5_000)], { ...pipeline, maxPoolAgeHours: 0 }).kept).toHaveLength(1);
+    expect(filterSnapshots([at(A, { marketCapUsd: 2e9 })], { ...pipeline, maxMarketCapUsd: 0 }).kept).toHaveLength(1);
   });
 });
 
 describe('filterSnapshots: unknown liquidity', () => {
-  const pipeline = { ...loadConfig({}).pipeline, minVolume24hUsd: 0, minPoolAgeHours: 0, maxPoolAgeHours: 0 };
+  const pipeline = { ...loadConfig({}).pipeline, minVolume24hUsd: 0, minPoolAgeHours: 0, maxMarketCapUsd: 0 };
   const at = (address: string, liquidityUsd?: number) =>
     mergeToSnapshots([entry('dexscreener', address, { metrics: liquidityUsd === undefined ? {} : { liquidityUsd } })])[0]!;
 

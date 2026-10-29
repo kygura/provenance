@@ -24,11 +24,11 @@ export interface PipelineConfig {
   /** Skip tokens whose pool is younger than this; nothing to research yet. */
   minPoolAgeHours: number;
   /**
-   * Upper bound on token age, from the oldest pool seen for it. The trending
-   * lane is for tokens early in their first run, not established ones having
-   * another day; 0 turns it off.
+   * Ceiling on the larger of market cap and FDV. Keeps out tokens that have
+   * already had their run (PEPE, SPX) without a hard age cut, which would also
+   * drop old tokens nobody found yet; 0 turns it off.
    */
-  maxPoolAgeHours: number;
+  maxMarketCapUsd: number;
   /** Skip re-running the LLM on a token analysed within this window. */
   reanalyseAfterHours: number;
   /** Alert when the composite score is at or above this. */
@@ -533,7 +533,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       minLiquidityUsd: num(env.MIN_LIQUIDITY_USD, 25_000),
       minVolume24hUsd: num(env.MIN_VOLUME_24H_USD, 100_000),
       minPoolAgeHours: num(env.MIN_POOL_AGE_HOURS, 2),
-      maxPoolAgeHours: num(env.MAX_POOL_AGE_HOURS, 72),
+      maxMarketCapUsd: num(env.MAX_MARKET_CAP_USD, 30_000_000),
       reanalyseAfterHours: num(env.REANALYSE_AFTER_HOURS, 72),
       alertScoreThreshold: num(env.ALERT_SCORE_THRESHOLD, 70),
       dryRun: bool(env.DRY_RUN, false),

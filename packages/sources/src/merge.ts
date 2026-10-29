@@ -283,9 +283,13 @@ function rejectionReason(
     return `minPoolAgeHours: known pool age ${age.toFixed(2)}h < ${pipeline.minPoolAgeHours}h (unknown pool age is kept)`;
   }
 
-  const tokenAge = oldestPoolAgeHours(snapshot);
-  if (pipeline.maxPoolAgeHours > 0 && tokenAge !== undefined && tokenAge > pipeline.maxPoolAgeHours) {
-    return `maxPoolAgeHours: oldest known pool ${Math.round(tokenAge)}h > ${pipeline.maxPoolAgeHours}h, an established token (unknown pool age is kept)`;
+  // Size, not age: an old token nobody found yet is still a candidate.
+  const caps = [metrics.marketCapUsd, metrics.fdvUsd].filter(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value),
+  );
+  const cap = caps.length > 0 ? Math.max(...caps) : undefined;
+  if (pipeline.maxMarketCapUsd > 0 && cap !== undefined && cap > pipeline.maxMarketCapUsd) {
+    return `maxMarketCapUsd: market cap/FDV ${fmt(cap)} > ${fmt(pipeline.maxMarketCapUsd)}, already had its run (unknown cap is kept)`;
   }
 
   return undefined;
@@ -297,19 +301,6 @@ function knownAgeHours(snapshot: TokenSnapshot): number | undefined {
   return ageHoursFrom(metrics.poolCreatedAt, new Date(snapshot.capturedAt));
 }
 
-/**
- * The token's age as far as the rows show it: the oldest of the headline
- * pool and every pair carried. An established token trending through a fresh
- * pool still carries its old pairs when a source listed them.
- */
-function oldestPoolAgeHours(snapshot: TokenSnapshot): number | undefined {
-  const now = new Date(snapshot.capturedAt);
-  const ages = [
-    knownAgeHours(snapshot),
-    ...(snapshot.pairs ?? []).map((pair) => ageHoursFrom(pair.createdAt, now)),
-  ].filter((age): age is number => age !== undefined && Number.isFinite(age));
-  return ages.length > 0 ? Math.max(...ages) : undefined;
-}
 
 function fmt(value: number): string {
   return `$${Math.round(value).toLocaleString('en-US')}`;
