@@ -56,8 +56,10 @@ GitHub's crons are best-effort and run late or not at all under load.
 to both lanes; the crons stay as the fallback. Discovery covers every chain
 the trending feeds return unless `PROVENANCE_CHAINS` is set, and the
 cross-network feeds are mostly Solana: set it (e.g.
-`ethereum,base,solana`) for Ethereum tokens to reach the trending lane; its
-order is the priority for the per-run token cap. Tokens whose oldest pool is
+`solana,ethereum,base`) for Ethereum tokens to reach the trending lane.
+Ethereum, then Base, fill the per-run token cap first (`CHAIN_PRIORITY`);
+the variable's order doesn't matter. Rows with unknown liquidity are
+dropped. Tokens whose oldest pool is
 past `MAX_POOL_AGE_HOURS` (72) are dropped at discovery: the trending lane
 looks for tokens early in their first run, not established ones.
 

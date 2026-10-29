@@ -222,20 +222,20 @@ export interface FilterResult {
  * MISSING-DATA POLICY: **unknown is not a rejection.**
  *
  * A threshold only rejects a token when the relevant value is actually known
- * and actually fails. A token with no reported liquidity, no 24h volume or no
- * pool-creation timestamp is KEPT and handed to the chain/research stages,
- * which are far better placed to find the real number than the trending list
- * was. The alternative — dropping on absence — would systematically discard
- * brand-new Solana pools, which is exactly the population this project exists
- * to look at.
+ * and actually fails. A token with no 24h volume or no pool-creation
+ * timestamp is KEPT and handed to the chain/research stages, which are far
+ * better placed to find the real number than the trending list was.
+ * Liquidity is the exception: every market source reports it for a pool it
+ * has indexed, so a row without it is a DexScreener boost or profile that
+ * never hydrated (paid promotion, nothing tradeable behind it yet), and those
+ * filled a third of the run's slots (Oct 2026).
  *
  * The chain filter is the one hard gate: if `pipeline.chains` is non-empty, a
  * token must be on one of those chains. `unknown` chains are dropped in that
  * case (we could not even name the chain, so we cannot analyse it) but pass
  * when no chain filter is configured.
  *
- * Every drop reason names the rule, the observed value and the threshold, and
- * says explicitly that missing values are kept.
+ * Every drop reason names the rule, the observed value and the threshold.
  */
 export function filterSnapshots(snapshots: TokenSnapshot[], pipeline: PipelineConfig): FilterResult {
   const kept: TokenSnapshot[] = [];
@@ -262,9 +262,15 @@ function rejectionReason(
 
   const metrics = snapshot.metrics ?? {};
 
+  // Unknown liquidity is dropped, unlike the other metrics: a row with no
+  // market data is almost always a DexScreener boost or profile that never
+  // hydrated, i.e. paid promotion with nothing behind it yet.
   const liquidity = metrics.liquidityUsd;
+  if (pipeline.minLiquidityUsd > 0 && liquidity === undefined) {
+    return 'minLiquidityUsd: liquidity unknown (no market data for the token)';
+  }
   if (pipeline.minLiquidityUsd > 0 && liquidity !== undefined && liquidity < pipeline.minLiquidityUsd) {
-    return `minLiquidityUsd: known liquidity ${fmt(liquidity)} < ${fmt(pipeline.minLiquidityUsd)} (missing liquidity is kept)`;
+    return `minLiquidityUsd: known liquidity ${fmt(liquidity)} < ${fmt(pipeline.minLiquidityUsd)}`;
   }
 
   const volume = metrics.volume24hUsd;

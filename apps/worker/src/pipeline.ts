@@ -13,6 +13,7 @@
 import {
   type Alert,
   type AlertChannelSink,
+  CHAIN_PRIORITY,
   type AlertRuleInput,
   type AnalyzerContext,
   type AppConfig,
@@ -222,10 +223,10 @@ export async function runPipeline(
     }
 
     const triaged = resolved.triageOrder(filtered.kept);
-    // With chains configured, they take turns at the cap in their configured
-    // order; otherwise the cross-source sort decides alone.
+    // With chains configured, they take turns at the cap, CHAIN_PRIORITY
+    // first; otherwise the cross-source sort decides alone.
     const cap = Math.max(0, app.pipeline.maxTokensPerRun);
-    selected = app.pipeline.chains.length > 1 ? selectByChain(triaged, cap, app.pipeline.chains) : triaged.slice(0, cap);
+    selected = app.pipeline.chains.length > 1 ? selectByChain(triaged, cap, CHAIN_PRIORITY) : triaged.slice(0, cap);
     log.info('discovery complete', {
       entries: discovery.entries.length,
       merged: snapshots.length,

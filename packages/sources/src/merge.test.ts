@@ -143,3 +143,18 @@ describe('filterSnapshots: maxPoolAgeHours', () => {
     expect(filterSnapshots([at(A, 5_000)], { ...pipeline, maxPoolAgeHours: 0 }).kept).toHaveLength(1);
   });
 });
+
+describe('filterSnapshots: unknown liquidity', () => {
+  const pipeline = { ...loadConfig({}).pipeline, minVolume24hUsd: 0, minPoolAgeHours: 0, maxPoolAgeHours: 0 };
+  const at = (address: string, liquidityUsd?: number) =>
+    mergeToSnapshots([entry('dexscreener', address, { metrics: liquidityUsd === undefined ? {} : { liquidityUsd } })])[0]!;
+
+  test('an unhydrated row is dropped, a deep enough one kept', () => {
+    const result = filterSnapshots([at(A), at(B, 50_000), at(C, 1_000)], pipeline);
+    expect(result.kept.map((s) => s.tokenAddress)).toEqual([B]);
+    expect(result.dropped.map((d) => d.reason)).toEqual([
+      'minLiquidityUsd: liquidity unknown (no market data for the token)',
+      'minLiquidityUsd: known liquidity $1,000 < $25,000',
+    ]);
+  });
+});

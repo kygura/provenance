@@ -105,8 +105,8 @@ export interface TokenSnapshot {
 /**
  * Takes `limit` snapshots from a triaged list, one chain at a time: each
  * round adds every chain's next-best token, chains in `priority` order first
- * (the order of `PROVENANCE_CHAINS`), then any others in the order their best
- * token sits in `triaged`. When the cap falls mid-round, earlier chains win. A plain cut hands every slot to the chain with the
+ * (`CHAIN_PRIORITY`), then any others in the order their best token sits in
+ * `triaged`. When the cap falls mid-round, earlier chains win. A plain cut hands every slot to the chain with the
  * most cross-listed tokens: Solana tokens appear on DexScreener's boosts and
  * GeckoTerminal both, Ethereum ones on GeckoTerminal alone, so `sourceCount`
  * sorted every Ethereum token below the 15-token cap (Oct 2026). Order within
