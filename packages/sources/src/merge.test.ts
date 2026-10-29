@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { type SourceId, type TrendingEntry, loadConfig, silentLogger } from '@provenance/core';
 
 import { createSources, discoverTrending } from './discover';
-import { SOURCE_PRECEDENCE, mergeToSnapshots, splitLanes } from './merge';
+import { SOURCE_PRECEDENCE, filterSnapshots, mergeToSnapshots, splitLanes } from './merge';
 
 function entry(source: SourceId, tokenAddress: string, overrides: Partial<TrendingEntry> = {}): TrendingEntry {
   return {
@@ -119,5 +119,27 @@ describe('fixture discovery', () => {
     expect(lanes.trending).toEqual(trendingOnly);
     expect(lanes.trending.map((s) => [s.tokenId, s.sourceCount, s.bestRank])).toEqual(TRENDING_BEFORE);
     expect(lanes.launches.map((s) => s.symbol)).toEqual(['UNKNOWN', 'KERMIT', 'SHREK']);
+  });
+});
+
+describe('filterSnapshots: maxPoolAgeHours', () => {
+  const pipeline = { ...loadConfig({}).pipeline, minLiquidityUsd: 0, minVolume24hUsd: 0, minPoolAgeHours: 0 };
+  const at = (address: string, ageHours?: number) =>
+    mergeToSnapshots([entry('geckoterminal', address, { metrics: ageHours === undefined ? {} : { ageHours } })])[0]!;
+
+  test('drops a token past the cap, keeps one under it and one with unknown age', () => {
+    const result = filterSnapshots([at(A, 200), at(B, 10), at(C)], pipeline);
+    expect(result.kept.map((s) => s.tokenAddress)).toEqual([B, C]);
+    expect(result.dropped[0]?.reason).toStartWith('maxPoolAgeHours');
+  });
+
+  test('a fresh pool does not hide an old pair', () => {
+    const fresh = at(D, 5);
+    fresh.pairs = [{ pairAddress: D, dexId: 'uniswap', createdAt: '2023-04-14T00:00:00.000Z' }];
+    expect(filterSnapshots([fresh], pipeline).kept).toEqual([]);
+  });
+
+  test('0 turns the cap off', () => {
+    expect(filterSnapshots([at(A, 5_000)], { ...pipeline, maxPoolAgeHours: 0 }).kept).toHaveLength(1);
   });
 });

@@ -25,6 +25,11 @@ describe('selectByChain', () => {
     expect(selectByChain(triaged, 99)).toHaveLength(6);
   });
 
+  test('configured priority goes first and wins a cut mid-round', () => {
+    expect(symbols(selectByChain(triaged, 3, ['ethereum', 'solana']))).toEqual(['E1', 'S1', 'E2']);
+    expect(symbols(selectByChain(triaged, 1, ['ethereum']))).toEqual(['E1']);
+  });
+
   test('order within a chain is kept; zero cap selects nothing', () => {
     expect(symbols(selectByChain(triaged, 1))).toEqual(['S1']);
     expect(selectByChain(triaged, 0)).toEqual([]);

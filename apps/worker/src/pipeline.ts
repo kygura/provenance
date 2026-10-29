@@ -222,10 +222,10 @@ export async function runPipeline(
     }
 
     const triaged = resolved.triageOrder(filtered.kept);
-    // With chains configured, each gets a fair share of the cap; otherwise
-    // the cross-source sort decides alone.
+    // With chains configured, they take turns at the cap in their configured
+    // order; otherwise the cross-source sort decides alone.
     const cap = Math.max(0, app.pipeline.maxTokensPerRun);
-    selected = app.pipeline.chains.length > 1 ? selectByChain(triaged, cap) : triaged.slice(0, cap);
+    selected = app.pipeline.chains.length > 1 ? selectByChain(triaged, cap, app.pipeline.chains) : triaged.slice(0, cap);
     log.info('discovery complete', {
       entries: discovery.entries.length,
       merged: snapshots.length,

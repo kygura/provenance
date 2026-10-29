@@ -104,16 +104,22 @@ export interface TokenSnapshot {
 
 /**
  * Takes `limit` snapshots from a triaged list, one chain at a time: each
- * round adds every chain's next-best token, chains in the order their best
- * token sits in `triaged`. A plain cut hands every slot to the chain with the
+ * round adds every chain's next-best token, chains in `priority` order first
+ * (the order of `PROVENANCE_CHAINS`), then any others in the order their best
+ * token sits in `triaged`. When the cap falls mid-round, earlier chains win. A plain cut hands every slot to the chain with the
  * most cross-listed tokens: Solana tokens appear on DexScreener's boosts and
  * GeckoTerminal both, Ethereum ones on GeckoTerminal alone, so `sourceCount`
  * sorted every Ethereum token below the 15-token cap (Oct 2026). Order within
  * a chain is unchanged, and a chain with fewer tokens leaves its slots to the
  * rest.
  */
-export function selectByChain(triaged: readonly TokenSnapshot[], limit: number): TokenSnapshot[] {
+export function selectByChain(
+  triaged: readonly TokenSnapshot[],
+  limit: number,
+  priority: readonly string[] = [],
+): TokenSnapshot[] {
   const queues = new Map<string, TokenSnapshot[]>();
+  for (const chain of priority) queues.set(chain, []);
   for (const snapshot of triaged) {
     const queue = queues.get(snapshot.chain);
     if (queue) queue.push(snapshot);
