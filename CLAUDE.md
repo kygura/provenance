@@ -60,7 +60,7 @@ cross-network feeds are mostly Solana: set it (e.g.
 Ethereum, then Base, fill the per-run token cap first (`CHAIN_PRIORITY`);
 the variable's order doesn't matter. Rows with unknown liquidity are
 dropped. Tokens whose market cap or
-FDV is above `MAX_MARKET_CAP_USD` ($30M) are dropped at discovery: they
+FDV is above `MAX_MARKET_CAP_USD` ($100M) are dropped at discovery: they
 already had their run. Age is not a filter; an old token nobody found yet
 can still carry a real meme.
 

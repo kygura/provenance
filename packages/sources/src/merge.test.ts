@@ -133,7 +133,7 @@ describe('filterSnapshots: maxMarketCapUsd', () => {
         at(A, { marketCapUsd: 2_000_000_000, ageHours: 30_000 }),
         at(B, { marketCapUsd: 3_000_000, ageHours: 18_000 }),
         at(C, { ageHours: 20 }),
-        at(D, { marketCapUsd: 15_000_000, fdvUsd: 100_000_000 }),
+        at(D, { marketCapUsd: 15_000_000, fdvUsd: 150_000_000 }),
       ],
       pipeline,
     );

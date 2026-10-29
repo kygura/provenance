@@ -533,7 +533,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
       minLiquidityUsd: num(env.MIN_LIQUIDITY_USD, 25_000),
       minVolume24hUsd: num(env.MIN_VOLUME_24H_USD, 100_000),
       minPoolAgeHours: num(env.MIN_POOL_AGE_HOURS, 2),
-      maxMarketCapUsd: num(env.MAX_MARKET_CAP_USD, 30_000_000),
+      maxMarketCapUsd: num(env.MAX_MARKET_CAP_USD, 100_000_000),
       reanalyseAfterHours: num(env.REANALYSE_AFTER_HOURS, 72),
       alertScoreThreshold: num(env.ALERT_SCORE_THRESHOLD, 70),
       dryRun: bool(env.DRY_RUN, false),
