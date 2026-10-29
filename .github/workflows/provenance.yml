@@ -11,6 +11,10 @@ on:
     # runs an overdue slot. It also stops running on repositories with no
     # activity for 60 days.
     - cron: '0 * * * *'
+  # The same hourly tick from `ops/cron-trigger`, which fires on time. It asks
+  # the cadence gate exactly like the schedule does.
+  repository_dispatch:
+    types: [full-run]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -37,8 +41,8 @@ jobs:
     uses: ./.github/workflows/run-lane.yml
     secrets: inherit
     with:
-      # A manual dispatch always runs; only the hourly schedule asks the gate.
-      cadence_gate: ${{ github.event_name == 'schedule' }}
+      # A manual dispatch always runs; the hourly ticks ask the gate.
+      cadence_gate: ${{ github.event_name == 'schedule' || github.event_name == 'repository_dispatch' }}
       dry_run: ${{ inputs.dry_run == true }}
       limit: ${{ inputs.limit || '' }}
       chains: ${{ inputs.chains || '' }}

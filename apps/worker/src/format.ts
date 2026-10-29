@@ -149,7 +149,11 @@ export function socialSummary(stats: RunStats): string | undefined {
 export function launchSummary(stats: RunStats): string | undefined {
   const l = stats.launches;
   if (!l) return undefined;
-  return `launches: discovered=${l.discovered} rejected=${l.rejected} anchored=${l.catalogued} researched=${l.researched} dismissed=${l.dismissed} trended=${l.expressed} dormant=${l.dormant}`;
+  const by = Object.entries(l.rejectedBy ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([rule, n]) => `${rule}=${n}`)
+    .join(',');
+  return `launches: discovered=${l.discovered} rejected=${l.rejected}${by ? ` (${by})` : ''} anchored=${l.catalogued} researched=${l.researched} dismissed=${l.dismissed} trended=${l.expressed} dormant=${l.dormant}`;
 }
 
 export function dossierTable(dossiers: TokenDossier[], style: Style): string {

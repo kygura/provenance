@@ -34,6 +34,16 @@ All three come from `runs.stats_json` over the trailing seven days
 - Counts are divided by the whole week, so a new database reads low and stays
   at base until it has a week of history.
 
+## Triggers
+
+GitHub's `schedule` trigger is best-effort. In the week to 29 Oct 2026 the
+30-minute launch lane ran about 41 times instead of 336, and full runs landed
+hours off their slots, kept going only by the overdue rule below.
+`ops/cron-trigger` is a Cloudflare Worker that sends a `repository_dispatch`
+on time: `launches` every 15 minutes, `full-run` hourly. A `full-run` tick
+asks the gate exactly like the schedule does. The GitHub crons stay as the
+fallback.
+
 ## Timing rules
 
 - **Due:** the hour is one of the level's slots and no full run started in

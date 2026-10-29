@@ -218,8 +218,18 @@ export interface LaunchConfig {
   enabled: boolean;
   /** How far back to read factory events on each run. */
   lookbackHours: number;
-  /** New pools hydrated per run, newest first. */
+  /**
+   * New pools hydrated per run, newest first. Sized to cover the whole lookback
+   * window (about 160 pools per 6 h on Ethereum + Base, Oct 2026), so a pool
+   * that was too thin on one run is still re-read on the next instead of being
+   * pushed out by fresher ones.
+   */
   maxCandidates: number;
+  /**
+   * The deepest indexed pool older than this means an established token
+   * opening a new pool, not a launch.
+   */
+  maxAgeHours: number;
   /** Tokens given chain analysis and an anchor check per run. */
   maxCatalogPerRun: number;
   /** Unlike the trending filter, unknown liquidity is a rejection here. */
@@ -509,7 +519,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
         {
           id: 'launches',
           enabled: bool(env.LAUNCHES_ENABLED, true),
-          limit: num(env.LAUNCHES_MAX_CANDIDATES, 40),
+          limit: num(env.LAUNCHES_MAX_CANDIDATES, 300),
           rateLimitMs: num(env.LAUNCHES_RATE_MS, 250),
         },
       ],
@@ -554,7 +564,8 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
     launches: {
       enabled: bool(env.LAUNCHES_ENABLED, true),
       lookbackHours: num(env.LAUNCHES_LOOKBACK_HOURS, 6),
-      maxCandidates: num(env.LAUNCHES_MAX_CANDIDATES, 40),
+      maxCandidates: num(env.LAUNCHES_MAX_CANDIDATES, 300),
+      maxAgeHours: num(env.LAUNCHES_MAX_AGE_HOURS, 48),
       maxCatalogPerRun: num(env.LAUNCHES_MAX_CATALOG_PER_RUN, 8),
       minLiquidityUsd: num(env.LAUNCHES_MIN_LIQUIDITY_USD, 40_000),
       minHolderCount: num(env.LAUNCHES_MIN_HOLDERS, 50),

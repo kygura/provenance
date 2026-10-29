@@ -7,10 +7,14 @@ name: Launch lane
 #
 # GitHub's scheduler is best-effort; under load a */30 schedule can slip or
 # skip. LAUNCHES_LOOKBACK_HOURS (default 6) is sized so a skipped run or two
-# loses nothing.
+# loses nothing. In practice GitHub delivered about one run in eight (Oct
+# 2026), so `ops/cron-trigger` fires `repository_dispatch` on time from
+# outside; the cron stays as the fallback.
 on:
   schedule:
     - cron: '*/30 * * * *'
+  repository_dispatch:
+    types: [launches]
   workflow_dispatch:
     inputs:
       dry_run:
