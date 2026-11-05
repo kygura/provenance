@@ -47,7 +47,7 @@ jobs:
       - if: steps.creds.outputs.ok == 'true'
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.4
 
       - if: steps.creds.outputs.ok == 'true'
         name: Cache Bun install
