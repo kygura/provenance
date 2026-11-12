@@ -47,8 +47,8 @@ Turso DB:
 
 | Workflow | Cron (UTC) | What it writes |
 |---|---|---|
-| `provenance.yml` | `0 * * * *`, gated (`docs/cadence.md`): 06:00 and 18:00 at quiet volume, every 4 h or hourly when the meme market heats up | Full run: trending discovery → chain analysis → research → score → alerts. Rows in `runs`, `snapshots`, `chain_analysis`, `provenance`, `scores`, `alerts`. |
-| `launches.yml` | `*/30 * * * *` | Launch lane (`--lane launches`): new pools → market gate → chain gate → anchor check. Rows in `runs`, `watchlist`, `alerts`, sometimes `provenance`. No trending snapshots. |
+| `provenance.yml` | `0 2,6,10,14,18,22 * * *`, gated (`docs/cadence.md`): 06:00 and 18:00 at quiet volume, every 4 h or hourly when the meme market heats up | Full run: trending discovery → chain analysis → research → score → alerts. Rows in `runs`, `snapshots`, `chain_analysis`, `provenance`, `scores`, `alerts`. |
+| `launches.yml` | `30 * * * *` | Launch lane (`--lane launches`): new pools → market gate → chain gate → anchor check. Rows in `runs`, `watchlist`, `alerts`, sometimes `provenance`. No trending snapshots. |
 | `brief.yml` | `40 6,18 * * *` | The scheduled brief (`cli.ts brief`). Writes only `setups`. |
 
 GitHub's crons are best-effort and run late or not at all under load.
@@ -91,7 +91,7 @@ score goes in the "why" line.
 Things the old prompt got wrong. Don't repeat them:
 
 - **"Latest run" picked the launch lane.** The launch lane writes a `runs`
-  row every 30 minutes, so `ORDER BY started_at DESC LIMIT 1` almost always
+  row every hour, so `ORDER BY started_at DESC LIMIT 1` almost always
   returns a launch-lane run with no snapshots. Use query A below.
 - **Scores are 0–100, not 0–1.** Tiers: S ≥ 85, A ≥ 72, B ≥ 58, C ≥ 42,
   else D (`packages/alerts/src/scoring.ts`). The alert threshold defaults to

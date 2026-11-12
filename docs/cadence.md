@@ -1,7 +1,8 @@
 # Full-run cadence
 
-The full run's cron in `provenance.yml` is hourly, and the first step of each
-scheduled job asks `cli.ts cadence` whether this hour is due. The answer comes
+The full run's cron in `provenance.yml` ticks every 4 hours on the slots below
+(02, 06, 10, 14, 18, 22 UTC), and the first step of each scheduled job asks
+`cli.ts cadence` whether this slot is due. The answer comes
 from the stored runs, so the cadence follows the meme market without anyone
 having to call when the next cycle starts. A skipped hour writes no run row
 and costs only the job's install step.
@@ -40,7 +41,8 @@ GitHub's `schedule` trigger is best-effort. In the week to 29 Oct 2026 the
 30-minute launch lane ran about 41 times instead of 336, and full runs landed
 hours off their slots, kept going only by the overdue rule below.
 `ops/cron-trigger` is a Cloudflare Worker that sends a `repository_dispatch`
-on time: `launches` every 15 minutes, `full-run` hourly. A `full-run` tick
+on time: `launches` hourly at :30, `full-run` every 4 hours on the
+elevated slots. A `full-run` tick
 asks the gate exactly like the schedule does. The GitHub crons stay as the
 fallback.
 
@@ -77,6 +79,13 @@ deltas therefore still compare across about half a day, not one hour.
 
 ## Actions minutes
 
-Each skipped hour still checks out, installs (cached) and runs the gate,
-about a minute. On a private repository that is about 700 extra minutes a
-month against the free 2,000. Public repositories aren't billed.
+Each skipped tick still checks out, installs (cached) and runs the gate, and
+GitHub bills every job at least a minute. On a private repository hourly
+ticks cost about 700 minutes a month against the free 2,000, and a 15-minute
+launch lane about 2,900 more; together they used the whole allowance by the
+12th in November 2026. So both triggers now tick less often: `launches` hourly
+at :30 and `full-run` only on the 4-hour slots, which covers `base` and
+`elevated`. `peak` needs hourly ticks again (`provenance.yml` and
+`ops/cron-trigger`), and only becomes reachable once
+`LLM_MAX_COST_USD_PER_DAY` is set or `CADENCE_MODE=peak` is pinned. Public
+repositories aren't billed.
