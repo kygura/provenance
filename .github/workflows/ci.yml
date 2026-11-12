@@ -1,8 +1,10 @@
 name: CI
 
 on:
+  # Branch pushes are covered by pull_request; running both billed every PR
+  # commit twice.
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 concurrency:

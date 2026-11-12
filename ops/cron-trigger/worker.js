@@ -7,8 +7,14 @@
 
 const EVENTS = {
   // Keep in sync with `triggers.crons` in wrangler.toml.
-  '*/15 * * * *': 'launches',
-  '0 * * * *': 'full-run',
+  // Every 30 minutes, the launch lane's own design cadence. Every 15 cost
+  // about 96 Actions minutes a day on a private repo (a run bills a minute).
+  '*/30 * * * *': 'launches',
+  // The cadence gate's base and elevated slots (06:00 anchor, every 4 h).
+  // An hourly tick only matters at peak, which auto mode can't reach until
+  // LLM_MAX_COST_USD_PER_DAY is set; the other 18 ticks were gate-only runs
+  // billed a minute each. Go back to '0 * * * *' if you enable peak.
+  '0 2,6,10,14,18,22 * * *': 'full-run',
 };
 
 async function dispatch(env, eventType) {

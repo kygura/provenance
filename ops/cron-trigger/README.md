@@ -8,8 +8,13 @@ within seconds.
 
 | Cron (UTC) | Event | Workflow |
 |---|---|---|
-| `*/15 * * * *` | `launches` | `launches.yml` |
-| `0 * * * *` | `full-run` | `provenance.yml`, through the cadence gate (`docs/cadence.md`) |
+| `*/30 * * * *` | `launches` | `launches.yml` |
+| `0 2,6,10,14,18,22 * * *` | `full-run` | `provenance.yml`, through the cadence gate (`docs/cadence.md`) |
+
+Each dispatch is at least one billed Actions minute on a private repo, so the
+ticks are as sparse as the lanes allow: the launch lane's 30-minute design
+cadence, and the gate's 4-hour slots (hourly only matters at `peak`; see
+`docs/cadence.md`). After changing them, redeploy with `npx wrangler@4 deploy`.
 
 The GitHub crons stay in place as a fallback. A duplicate tick costs one
 queued job: both workflows share the `provenance-run` concurrency group, the
@@ -34,7 +39,7 @@ launch already judged is never re-judged.
 3. Check the first ticks in the Actions tab (event `repository_dispatch`) or
    with `npx wrangler@4 tail`.
 
-Cloudflare's free plan covers this: two cron triggers, about 120 requests a
+Cloudflare's free plan covers this: two cron triggers, about 54 requests a
 day.
 
 To stop it, `npx wrangler@4 delete`; the GitHub crons carry on alone.

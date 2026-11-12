@@ -47,7 +47,7 @@ Turso DB:
 
 | Workflow | Cron (UTC) | What it writes |
 |---|---|---|
-| `provenance.yml` | `0 * * * *`, gated (`docs/cadence.md`): 06:00 and 18:00 at quiet volume, every 4 h or hourly when the meme market heats up | Full run: trending discovery → chain analysis → research → score → alerts. Rows in `runs`, `snapshots`, `chain_analysis`, `provenance`, `scores`, `alerts`. |
+| `provenance.yml` | `0 2,6,10,14,18,22 * * *`, gated (`docs/cadence.md`): 06:00 and 18:00 at quiet volume, every 4 h or hourly when the meme market heats up | Full run: trending discovery → chain analysis → research → score → alerts. Rows in `runs`, `snapshots`, `chain_analysis`, `provenance`, `scores`, `alerts`. |
 | `launches.yml` | `*/30 * * * *` | Launch lane (`--lane launches`): new pools → market gate → chain gate → anchor check. Rows in `runs`, `watchlist`, `alerts`, sometimes `provenance`. No trending snapshots. |
 | `brief.yml` | `40 6,18 * * *` | The scheduled brief (`cli.ts brief`). Writes only `setups`. |
 

@@ -2,16 +2,19 @@ name: Provenance run
 
 on:
   schedule:
-    # Hourly, gated. `cli.ts cadence` decides whether this hour is due from
+    # Every 4 h on the cadence slots, gated. `cli.ts cadence` decides whether
+    # this slot is due from
     # the trailing week of stored runs (apps/worker/src/cadence.ts): at quiet
     # volume only 06:00 and 18:00 UTC are, as before; a hotter meme market
     # tightens it to every 4 h, then every hour. CADENCE_MODE pins a level;
     # auto mode stays at base until LLM_MAX_COST_USD_PER_DAY is set. GitHub's
     # scheduler is best-effort and fires late under load, so the gate also
     # runs an overdue slot. It also stops running on repositories with no
-    # activity for 60 days.
-    - cron: '0 * * * *'
-  # The same hourly tick from `ops/cron-trigger`, which fires on time. It asks
+    # activity for 60 days. Hourly ticks only matter at peak, which auto mode
+    # can't reach until LLM_MAX_COST_USD_PER_DAY is set; on a private repo each
+    # skipped tick still bills a minute. Go back to '0 * * * *' for peak.
+    - cron: '0 2,6,10,14,18,22 * * *'
+  # The same 4-hourly tick from `ops/cron-trigger`, which fires on time. It asks
   # the cadence gate exactly like the schedule does.
   repository_dispatch:
     types: [full-run]
