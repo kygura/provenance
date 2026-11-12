@@ -2,17 +2,19 @@ name: Launch lane
 
 # The fast cadence. A meme is judged when its token's first pool appears, not
 # twice a day once it may already be trending, so the launch lane runs on its
-# own every 30 minutes: new pools, hard gate, anchor verdict, full research on
+# own every hour (at :30): new pools, hard gate, anchor verdict, full research on
 # anchored ones. No browser, no trending scrape, so a run takes a minute or two.
 #
-# GitHub's scheduler is best-effort; under load a */30 schedule can slip or
+# GitHub's scheduler is best-effort; under load an hourly schedule can slip or
 # skip. LAUNCHES_LOOKBACK_HOURS (default 6) is sized so a skipped run or two
 # loses nothing. In practice GitHub delivered about one run in eight (Oct
 # 2026), so `ops/cron-trigger` fires `repository_dispatch` on time from
 # outside; the cron stays as the fallback.
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    # Hourly, not every 30 min: on a private repo each run bills at least a
+    # minute (docs/cadence.md, "Actions minutes").
+    - cron: '30 * * * *'
   repository_dispatch:
     types: [launches]
   workflow_dispatch:
