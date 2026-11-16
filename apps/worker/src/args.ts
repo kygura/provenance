@@ -40,6 +40,7 @@ export const BOOLEAN_FLAGS = [
   'verbose',
   'no-color',
   'json',
+  'exit-code',
   'help',
   'version',
 ] as const;
