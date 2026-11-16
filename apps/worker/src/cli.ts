@@ -63,6 +63,8 @@ import {
 export const EXIT_OK = 0;
 export const EXIT_FAILED = 1;
 export const EXIT_CONFIG = 2;
+/** `cadence --exit-code`: this slot is not due. */
+export const EXIT_NOT_DUE = 3;
 
 const HELP = `provenance — recycled-narrative scanner
 
@@ -81,7 +83,8 @@ commands:
   brief                    daily brief + setups ledger from stored runs (docs/brief-routine.md);
                            writes only the setups table, delivers through the alert channels
   cadence                  is this hour due a full run? reads stored runs, writes nothing;
-                           sets due=true|false in $GITHUB_OUTPUT for the hourly workflow
+                           sets due=true|false in $GITHUB_OUTPUT for the hourly workflow;
+                           --exit-code: exit 0 when due, 3 when not (the box scheduler)
   outcomes                 label scores older than OUTCOME_HORIZON_HOURS from DexScreener
                            (the full run's last step, on its own); --dry-run: count only
   calibrate                fit the score's components to the outcomes; reads only, writes nothing,
@@ -101,6 +104,7 @@ options:
   --lane launches          run: the launch lane only (the 30-minute cadence)
   --format table|json|markdown
   --json                   calibrate: print the report as JSON
+  --exit-code              cadence: answer with the exit code (0 due, 3 not due)
   --verbose, -v            debug logging
   --no-color               disable ANSI colour (also honoured: NO_COLOR)
 `;
@@ -520,8 +524,10 @@ async function cmdCalibrate(app: AppConfig, parsed: ParsedArgs, deps: PipelineDe
 }
 
 /**
- * The hourly workflow's gate. Always exits 0 with an answer: a database that
- * cannot be read falls back to the base slots, which is the old schedule.
+ * The full run's gate. Exits 0 with the answer in $GITHUB_OUTPUT (Actions), or
+ * with `--exit-code` answers by exit code: 0 due, 3 not due (the box scheduler,
+ * ops/box). A database that cannot be read falls back to the base slots, which
+ * is the old schedule.
  */
 async function cmdCadence(
   app: AppConfig,
@@ -529,6 +535,7 @@ async function cmdCadence(
   deps: PipelineDeps,
   style: Style,
   env: Record<string, string | undefined>,
+  exitCode: boolean,
   nowMs = Date.now(),
 ): Promise<number> {
   let due: boolean;
@@ -553,7 +560,7 @@ async function cmdCadence(
   }
   print(`${style.bold('cadence')} ${level} ${due ? style.green('due') : style.dim('not due')}`);
   if (env.GITHUB_OUTPUT) await appendFile(env.GITHUB_OUTPUT, `due=${due}\nlevel=${level}\n`);
-  return EXIT_OK;
+  return exitCode && !due ? EXIT_NOT_DUE : EXIT_OK;
 }
 
 export async function main(
@@ -635,7 +642,7 @@ export async function main(
       case 'brief':
         return await cmdBrief(app, parsed, logger, deps, style, env, overrides.fetch);
       case 'cadence':
-        return await cmdCadence(app, logger, deps, style, env, overrides.nowMs);
+        return await cmdCadence(app, logger, deps, style, env, flagBool(parsed.flags, 'exit-code'), overrides.nowMs);
       case 'outcomes':
         return await cmdOutcomes(app, parsed, logger, deps, style);
       case 'calibrate':

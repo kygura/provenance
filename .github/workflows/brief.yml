@@ -2,14 +2,12 @@ name: Daily brief
 
 # The briefing layer (docs/brief-routine.md): reads what the full run stored,
 # labels the regimes, updates the setups ledger, asks the brief model once and
-# delivers one `daily-brief` message. 40 minutes after each full run
-# (provenance.yml, 06:00 and 18:00 UTC), so the run has normally finished.
+# delivers one `daily-brief` message. The schedule (06:40 and 18:40 UTC, 40
+# minutes after the 06:00 and 18:00 full runs) now runs on the box (ops/box);
+# this workflow is for a run by hand.
 # It writes only the `setups` table and never runs discovery, research or
 # alert rules. No LLM key → a deterministic brief with no setups.
 on:
-  schedule:
-    - cron: '40 6 * * *'
-    - cron: '40 18 * * *'
   workflow_dispatch:
     inputs:
       dry_run:

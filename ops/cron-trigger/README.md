@@ -1,4 +1,9 @@
-# cron-trigger
+# cron-trigger (retired)
+
+**Retired.** The pipeline now runs on the box (`ops/box`), and the workflows no
+longer listen for `repository_dispatch`, so this Worker's ticks start nothing.
+Delete it with `npx wrangler@4 delete` from this directory. The rest of this
+file is kept for reference.
 
 A Cloudflare Worker that starts the pipeline lanes on time. GitHub's
 `schedule` trigger is best-effort: over the week to 29 Oct 2026 the

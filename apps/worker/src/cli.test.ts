@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { EXIT_CONFIG, EXIT_FAILED, EXIT_OK, main } from './cli';
-import { makeAlert, makeHarness, makeScore, makeSnapshot } from './test-fakes';
+import { EXIT_CONFIG, EXIT_FAILED, EXIT_NOT_DUE, EXIT_OK, main } from './cli';
+import { FakeStore, makeAlert, makeHarness, makeScore, makeSnapshot } from './test-fakes';
 
 const QUIET = { NO_COLOR: '1', LOG_LEVEL: 'error' } as Record<string, string | undefined>;
 
@@ -197,5 +197,34 @@ describe('outcomes and calibrate', () => {
     const { code, out } = await run(['outcomes', '--dry-run'], { deps: harness.deps });
     expect(code).toBe(EXIT_OK);
     expect(out).toContain('1 score(s) past 72 h await a label');
+  });
+});
+
+describe('cadence', () => {
+  // An unreadable history falls back to the base slots (06:00 and 18:00 UTC).
+  const unreadable = () => {
+    const store = new FakeStore();
+    store.failOn = { method: 'listRuns' };
+    return makeHarness({ store });
+  };
+  const at = (iso: string) => Date.parse(iso);
+
+  test('--exit-code answers 0 on a due slot and 3 off it', async () => {
+    const due = await run(['cadence', '--exit-code'], { deps: unreadable().deps, nowMs: at('2026-11-16T06:00:00Z') });
+    expect(due.code).toBe(EXIT_OK);
+    expect(due.out).toContain('due');
+    const notDue = await run(['cadence', '--exit-code'], { deps: unreadable().deps, nowMs: at('2026-11-16T03:00:00Z') });
+    expect(notDue.code).toBe(EXIT_NOT_DUE);
+    expect(notDue.out).toContain('not due');
+  });
+
+  test('without --exit-code it always exits 0, as the workflow expects', async () => {
+    const { code } = await run(['cadence'], { deps: unreadable().deps, nowMs: at('2026-11-16T03:00:00Z') });
+    expect(code).toBe(EXIT_OK);
+  });
+
+  test('an empty history is due', async () => {
+    const { code } = await run(['cadence', '--exit-code'], { deps: makeHarness().deps, nowMs: at('2026-11-16T03:00:00Z') });
+    expect(code).toBe(EXIT_OK);
   });
 });

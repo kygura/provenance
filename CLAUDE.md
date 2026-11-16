@@ -42,18 +42,18 @@ not your task. Use `SPEC.md`, `docs/architecture.md` and `docs/launch-lane.md`.
 
 ## What already runs, and why this routine doesn't
 
-GitHub Actions runs the pipeline (`apps/worker/src/cli.ts`) against a shared
-Turso DB:
+The box scheduler (`ops/box`, `apps/worker/src/box/scheduler.ts`) runs the
+pipeline (`apps/worker/src/cli.ts`) against a shared Turso DB, at the slots
+below. The workflows named here are still there for a run by hand.
 
-| Workflow | Cron (UTC) | What it writes |
+| Job (workflow) | Slots (UTC) | What it writes |
 |---|---|---|
 | `provenance.yml` | `0 2,6,10,14,18,22 * * *`, gated (`docs/cadence.md`): 06:00 and 18:00 at quiet volume, every 4 h or hourly when the meme market heats up | Full run: trending discovery → chain analysis → research → score → alerts. Rows in `runs`, `snapshots`, `chain_analysis`, `provenance`, `scores`, `alerts`. |
 | `launches.yml` | `30 * * * *` | Launch lane (`--lane launches`): new pools → market gate → chain gate → anchor check. Rows in `runs`, `watchlist`, `alerts`, sometimes `provenance`. No trending snapshots. |
 | `brief.yml` | `40 6,18 * * *` | The scheduled brief (`cli.ts brief`). Writes only `setups`. |
 
-GitHub's crons are best-effort and run late or not at all under load.
-`ops/cron-trigger` (a Cloudflare Worker) sends `repository_dispatch` on time
-to both lanes; the crons stay as the fallback. Discovery covers every chain
+Actions schedules and `ops/cron-trigger` are retired: the box fires on time
+and bills no Actions minutes. Discovery covers every chain
 the trending feeds return unless `PROVENANCE_CHAINS` is set, and the
 cross-network feeds are mostly Solana: set it (e.g.
 `solana,ethereum,base`) for Ethereum tokens to reach the trending lane.
@@ -566,9 +566,8 @@ Confidence words: `low-confidence`, `we lean`, `base case`, `tail case`,
   withdrawals, a bridge or a mixer don't cluster, and the trace needs
   `ETHERSCAN_API_KEY`.
 
-- **Briefing layer vs scheduler.** Settled: collection stays in Actions,
-  triggered on time by `ops/cron-trigger`; the scheduled brief is
-  `brief.yml`. This routine is on-demand only, and never runs `cli.ts run`.
+- **Briefing layer vs scheduler.** Settled: collection runs on the box
+  (`ops/box`); the scheduled brief is the box's `brief` job (`cli.ts brief`). This routine is on-demand only, and never runs `cli.ts run`.
 - **`evm-sniper` port** (from the user's `SALVAGE.md` notes, not in this
   repo): a read-only ERC20 analyser could go into `packages/chain`. It's an app change, not a routine concern, and must
   never include the part that needs a `PRIVATE_KEY`.

@@ -40,11 +40,12 @@ All three come from `runs.stats_json` over the trailing seven days
 GitHub's `schedule` trigger is best-effort. In the week to 29 Oct 2026 the
 30-minute launch lane ran about 41 times instead of 336, and full runs landed
 hours off their slots, kept going only by the overdue rule below.
-`ops/cron-trigger` is a Cloudflare Worker that sends a `repository_dispatch`
-on time: `launches` hourly at :30, `full-run` every 4 hours on the
-elevated slots. A `full-run` tick
-asks the gate exactly like the schedule does. The GitHub crons stay as the
-fallback.
+Both lanes now run on the box (`ops/box`), which fires on time:
+`launches` hourly at :30, the full run every 4 hours on the elevated slots,
+asking the gate first (`cli.ts cadence --exit-code`: 0 due, 3 not due). The
+GitHub schedules and `ops/cron-trigger` are retired; on the box a tick costs
+no Actions minutes, so `peak` only needs `BOX_FULL_RUN_SLOTS` set hourly
+(e.g. `*:00`).
 
 ## Timing rules
 
@@ -85,7 +86,9 @@ ticks cost about 700 minutes a month against the free 2,000, and a 15-minute
 launch lane about 2,900 more; together they used the whole allowance by the
 12th in November 2026. So both triggers now tick less often: `launches` hourly
 at :30 and `full-run` only on the 4-hour slots, which covers `base` and
-`elevated`. `peak` needs hourly ticks again (`provenance.yml` and
-`ops/cron-trigger`), and only becomes reachable once
-`LLM_MAX_COST_USD_PER_DAY` is set or `CADENCE_MODE=peak` is pinned. Public
-repositories aren't billed.
+`elevated`. Public repositories aren't billed.
+
+That is why the schedules moved to the box (`ops/box`) in November 2026: its
+ticks cost nothing. `peak` there needs `BOX_FULL_RUN_SLOTS=*:00`, and only
+becomes reachable once `LLM_MAX_COST_USD_PER_DAY` is set or
+`CADENCE_MODE=peak` is pinned.
