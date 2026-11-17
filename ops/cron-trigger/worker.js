@@ -7,11 +7,11 @@
 
 const EVENTS = {
   // Keep in sync with `triggers.crons` in wrangler.toml.
-  // Hourly at :30, off the full run's :00 slots so the two don't queue on the
-  // shared concurrency group. Every 15 minutes cost about 96 Actions minutes
-  // a day on a private repo (a run bills a minute); LAUNCHES_LOOKBACK_HOURS
+  // Every 30 minutes at :15 and :45, off the full run's :00 slots so the two
+  // don't queue on the shared concurrency group. About 48 Actions minutes a
+  // day on a private repo (a run bills a minute); LAUNCHES_LOOKBACK_HOURS
   // (default 6) still covers every block between ticks.
-  '30 * * * *': 'launches',
+  '15,45 * * * *': 'launches',
   // The cadence gate's base and elevated slots (06:00 anchor, every 4 h).
   // An hourly tick only matters at peak, which auto mode can't reach until
   // LLM_MAX_COST_USD_PER_DAY is set; the other 18 ticks were gate-only runs

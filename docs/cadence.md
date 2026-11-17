@@ -41,7 +41,7 @@ GitHub's `schedule` trigger is best-effort. In the week to 29 Oct 2026 the
 30-minute launch lane ran about 41 times instead of 336, and full runs landed
 hours off their slots, kept going only by the overdue rule below.
 `ops/cron-trigger` is a Cloudflare Worker that sends a `repository_dispatch`
-on time: `launches` hourly at :30, `full-run` every 4 hours on the
+on time: `launches` every 30 minutes at :15 and :45, `full-run` every 4 hours on the
 elevated slots. A `full-run` tick
 asks the gate exactly like the schedule does. The GitHub crons stay as the
 fallback.
@@ -83,9 +83,10 @@ Each skipped tick still checks out, installs (cached) and runs the gate, and
 GitHub bills every job at least a minute. On a private repository hourly
 ticks cost about 700 minutes a month against the free 2,000, and a 15-minute
 launch lane about 2,900 more; together they used the whole allowance by the
-12th in November 2026. So both triggers now tick less often: `launches` hourly
-at :30 and `full-run` only on the 4-hour slots, which covers `base` and
+12th in November 2026. So `full-run` now ticks only on the 4-hour slots, which covers `base` and
 `elevated`. `peak` needs hourly ticks again (`provenance.yml` and
 `ops/cron-trigger`), and only becomes reachable once
-`LLM_MAX_COST_USD_PER_DAY` is set or `CADENCE_MODE=peak` is pinned. Public
-repositories aren't billed.
+`LLM_MAX_COST_USD_PER_DAY` is set or `CADENCE_MODE=peak` is pinned. The launch
+lane runs every 30 minutes at :15 and :45, about 1,440 minutes a month, which
+leaves little room under 2,000 on a private repository. Public repositories
+aren't billed.
