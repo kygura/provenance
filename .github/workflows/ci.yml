@@ -1,11 +1,14 @@
 name: CI
 
 on:
-  # Branch pushes are covered by pull_request; running both billed every PR
-  # commit twice.
-  push:
-    branches: [main]
+  # PRs only. A merge to main re-ran the exact checks its PR had just passed,
+  # and Actions minutes are kept for the pipeline lanes (docs/cadence.md).
+  # Doc-only changes skip CI. Run it by hand with workflow_dispatch.
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
