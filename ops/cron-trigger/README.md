@@ -8,11 +8,11 @@ within seconds.
 
 | Cron (UTC) | Event | Workflow |
 |---|---|---|
-| `30 * * * *` | `launches` | `launches.yml` |
+| `15,45 * * * *` | `launches` | `launches.yml` |
 | `0 2,6,10,14,18,22 * * *` | `full-run` | `provenance.yml`, through the cadence gate (`docs/cadence.md`) |
 
 Each dispatch is at least one billed Actions minute on a private repo, so the
-ticks are sparse: the launch lane hourly at :30 (off the full run's slots),
+ticks are sparse: the launch lane every 30 minutes at :15 and :45 (off the full run's slots),
 and the gate's 4-hour slots (hourly only matters at `peak`; see
 `docs/cadence.md`). After changing them, redeploy with `npx wrangler@4 deploy`.
 

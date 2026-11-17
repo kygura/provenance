@@ -7,4 +7,4 @@ REPO = "kygura/provenance"
 
 # Keep in sync with EVENTS in worker.js.
 [triggers]
-crons = ["30 * * * *", "0 2,6,10,14,18,22 * * *"]
+crons = ["15,45 * * * *", "0 2,6,10,14,18,22 * * *"]
