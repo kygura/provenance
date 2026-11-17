@@ -39,7 +39,7 @@ launch already judged is never re-judged.
 3. Check the first ticks in the Actions tab (event `repository_dispatch`) or
    with `npx wrangler@4 tail`.
 
-Cloudflare's free plan covers this: two cron triggers, about 30 requests a
-day.
+Cloudflare's free plan covers this: two cron triggers, about 54 requests a
+day (48 launch ticks, 6 full-run ticks).
 
 To stop it, `npx wrangler@4 delete`; the GitHub crons carry on alone.
